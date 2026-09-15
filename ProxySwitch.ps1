@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [switch]$Status,
+    [switch]$NetworkDiagnostic,
     [switch]$LoginDiagnostic,
     [switch]$Discover,
     [switch]$ConfigureGateway,
@@ -41,7 +42,7 @@ try {
             $notice+="`r`n本地报告："+$failurePath
         }
     }catch{}
-    if(-not $NoUI -and -not ($Status -or $Check -or $Switch -or $AppStatus -or $ExportReport -or $SmokeTest -or $Independent -or $RecoverNetwork -or $ConfigureGateway -or $Discover -or $AppRoute -or $LoginDiagnostic -or $Restore)){
+    if(-not $NoUI -and -not ($Status -or $NetworkDiagnostic -or $Check -or $Switch -or $AppStatus -or $ExportReport -or $SmokeTest -or $Independent -or $RecoverNetwork -or $ConfigureGateway -or $Discover -or $AppRoute -or $LoginDiagnostic -or $Restore)){
         try{Add-Type -AssemblyName System.Windows.Forms;[void][Windows.Forms.MessageBox]::Show($notice,'流向启动失败','OK','Error')}catch{}
     }
     Write-Error $notice -ErrorAction Continue
@@ -68,6 +69,7 @@ if($LaunchProgram){
     return
 }
 if($NoUI){return}
+if($NetworkDiagnostic){Get-NetworkDiagnosis -Probe | ConvertTo-Json -Depth 8;return}
 if($Independent){Enable-IndependentGateway $OwnerPID | ConvertTo-Json -Depth 6;return}
 if($RecoverNetwork){Restore-IndependentSession;return}
 if($ConfigureGateway){Enable-LocalGateway | ConvertTo-Json -Depth 5;return}

@@ -38,7 +38,7 @@ function New-ExitRecoveryPlan($Session,$CurrentSystem,$CurrentEnv) {
     }
     [pscustomobject]@{System=$system;Environment=[pscustomobject]$values}
 }
-function Restore-IndependentSession([string]$ExpectedSession='') {
+function Restore-IndependentSession([string]$ExpectedSession='',[switch]$AbandonedOnly) {
     Write-LifecycleEvent 'restore-request' 'stop-or-failure'
     $outcome=[pscustomobject]@{Restored=$false}
     try { Use-ChangeLock {
@@ -46,6 +46,7 @@ function Restore-IndependentSession([string]$ExpectedSession='') {
         if(-not (Test-Path -LiteralPath $path)){return}
         $session=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
         if($ExpectedSession -and [string]$session.Started -cne $ExpectedSession){return}
+        if($AbandonedOnly -and (Get-RecoveryOwnerState $session) -ne 'stopped'){throw '原会话仍在运行或身份未知，未恢复或停止它。'}
         $before=Get-SystemSnapshot;$envBefore=Get-UserProxyEnv;$plan=New-ExitRecoveryPlan $session $before $envBefore
         if(-not (Test-SameSnapshot $before (Get-SystemSnapshot)) -or -not (Test-SameEnv $envBefore (Get-UserProxyEnv))){throw '恢复期间网络设置发生变化，稍后重试。'}
         # Restore Windows first. Never stop a core while Windows still points at it.

@@ -45,6 +45,10 @@ Check ($smoke.Code -eq 0 -and $smoke.Out -match 'PASS: UI background status work
 $status=Invoke-Fixture ('--status --data-directory '+$quotedData)
 if($status.Code -ne 0){throw $status.Error};$value=$status.Out|ConvertFrom-Json
 Check ($value.Listeners.Count -eq 1 -and $value.Listeners[0].Key -eq 'qa') 'EXE did not pass its explicit settings directory.'
+$diagnosed=Invoke-Fixture ('--network-diagnostic --data-directory '+$quotedData)
+Check ($diagnosed.Code -eq 0) ('Packaged network diagnosis failed: '+$diagnosed.Error)
+$diagnosis=$diagnosed.Out|ConvertFrom-Json
+Check ($diagnosis.Version -ceq $productVersion -and $diagnosis.Endpoints.Count -eq 1 -and $diagnosis.Endpoints[0].Key -eq 'qa') 'Packaged diagnosis uses the explicit isolated settings directory and current version.'
 Check (-not (Test-Path -LiteralPath (Join-Path $qaRoot 'wrong environment\config.json'))) 'Package wrote to the inherited environment directory.'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -Path (Join-Path $relocated 'app\DesktopBranding.cs')

@@ -3,7 +3,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FlowWebsiteVisual{[DllImport("user32.dll")]public static extern int GetWindowLong(IntPtr window,int index);}'
 $qa=Join-Path $env:TEMP ('FlowSwitch-routing-workbench-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
@@ -11,6 +11,14 @@ $checks=@'
         $script:Checks=0
         function Check-UI($Value,[string]$Message){if(-not $Value){throw $Message};$script:Checks++}
         function Start-Work([string]$Kind,[string]$Key){$script:Requested=[pscustomobject]@{Kind=$Kind;Key=$Key}}
+        $tabs.SelectedTab=$toolsPage;[Windows.Forms.Application]::DoEvents()
+        $networkDiagnoseButton.PerformClick()
+        Check-UI ($script:Requested.Kind -eq 'NetworkDiagnose') 'Network diagnosis button dispatches the read-only diagnostic worker'
+        $script:Requested=$null;$script:NetworkDiagnosis=$null;$networkRepairButton.PerformClick()
+        Check-UI ($null -eq $script:Requested) 'Repair without a diagnosis cannot change settings'
+        $priorSize=$form.Size;$form.Size=$form.MinimumSize;[Windows.Forms.Application]::DoEvents()
+        Check-UI (@($toolsBar.Controls|Where-Object {$_.Right -gt $toolsBar.ClientSize.Width}).Count -eq 0) 'All diagnostic action buttons fit at minimum window width'
+        $form.Size=$priorSize;$tabs.SelectedTab=$programPage
         $script:AppTarget=[pscustomobject]@{Name='Fixture Editor';Path='C:\Fixtures\editor.exe';SavedPath='C:\Fixtures\editor.exe';Mode='managed';Policy='backup';RequiresRepair=$false;HasSavedRule=$true;CanLaunch=$true}
         foreach($mode in @('launch','engine','observe','managed')){
             $script:AppTarget.Mode=$mode;Request-ApplicationRoute 'Direct';$payload=$script:Requested.Key|ConvertFrom-Json
