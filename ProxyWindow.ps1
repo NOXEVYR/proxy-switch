@@ -165,10 +165,16 @@ foreach($h in @(48,56)){[void]$toolsGrid.RowStyles.Add((New-Object Windows.Forms
 $toolsPage.Controls.Add($toolsGrid)
 $toolsBar=New-Object Windows.Forms.FlowLayoutPanel;$toolsBar.Dock='Fill';$toolsBar.WrapContents=$false;$toolsBar.Margin=New-Object Windows.Forms.Padding(0)
 $toolsGrid.Controls.Add($toolsBar,0,0)
-$null=New-Button $toolsBar '检测所选代理' 0 0 153 36 {if($networkChoice.SelectedItem -and $networkChoice.SelectedItem.Id -ne 'Direct'){Start-Work 'Diagnose' $networkChoice.SelectedItem.Id}else{Write-Activity '请先在上方选择一个代理。'}}
-$null=New-Button $toolsBar 'Google 登录诊断' 0 0 158 36 {Start-Work 'LoginDiagnostic' ''}
-$null=New-Button $toolsBar '重载程序规则' 0 0 153 36 {Start-Work 'AppSync' ''}
-$null=New-Button $toolsBar '导出诊断报告' 0 0 170 36 {Export-Diagnostics}
+$networkDiagnoseButton=New-Button $toolsBar '排查网络' 0 0 104 36 {Start-Work 'NetworkDiagnose' ''}
+$networkRepairButton=New-Button $toolsBar '修复可处理问题' 0 0 142 36 {
+    if(-not $script:NetworkDiagnosis -or -not $script:NetworkDiagnosis.RepairAction){Write-Activity '请先点击「排查网络」，查看结果和可处理项目。';return}
+    $script:DialogOpen=$true
+    try{if([Windows.Forms.MessageBox]::Show($form,($script:NetworkDiagnosis.RepairText+"`r`n`r`n修复前将重新核验配置。已有应用若仍使用旧入口，需要保存工作后完整重开。"),'修复网络配置','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='NetworkRepair';Key=$script:NetworkDiagnosis.Revision};$script:NetworkDiagnosis=$null}}finally{$script:DialogOpen=$false}
+}
+$null=New-Button $toolsBar '检测所选代理' 0 0 128 36 {if($networkChoice.SelectedItem -and $networkChoice.SelectedItem.Id -ne 'Direct'){Start-Work 'Diagnose' $networkChoice.SelectedItem.Id}else{Write-Activity '请先在上方选择一个代理。'}}
+$null=New-Button $toolsBar 'Google 登录诊断' 0 0 144 36 {Start-Work 'LoginDiagnostic' ''}
+$null=New-Button $toolsBar '重载程序规则' 0 0 128 36 {Start-Work 'AppSync' ''}
+$null=New-Button $toolsBar '导出诊断报告' 0 0 138 36 {Export-Diagnostics}
 $clientBar=New-Object Windows.Forms.FlowLayoutPanel;$clientBar.Dock='Fill';$clientBar.WrapContents=$false;$clientBar.Margin=New-Object Windows.Forms.Padding(0)
 $toolsGrid.Controls.Add($clientBar,0,1)
 $null=New-Button $clientBar '打开所选代理程序' 0 0 212 36 {if($networkChoice.SelectedItem -and $networkChoice.SelectedItem.Id -ne 'Direct'){Open-Client $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择已关联程序的代理。'}}
@@ -503,6 +509,7 @@ function Export-Diagnostics {
     try{if($picker.ShowDialog($form) -eq 'OK'){
         $report=New-SupportReport $script:LastState $script:LastApps
         $report|Add-Member NoteProperty SnapshotStale ([bool]$script:ObservationStale)
+        if($script:NetworkDiagnosis){$report|Add-Member NoteProperty NetworkDiagnosis ([pscustomobject]@{CheckedAt=$script:NetworkDiagnosis.CheckedAt;IssueCodes=@($script:NetworkDiagnosis.Issues|ForEach-Object Code);Targets=@($script:NetworkDiagnosis.Targets);RepairAvailable=[bool]$script:NetworkDiagnosis.RepairAction})}
         Write-LocalJson $picker.FileName $report
         Write-Activity '诊断报告已导出：仅含线路、端口和规则数量，不含账号、节点、程序名称和本机路径。'
     }}catch{Write-Activity $_.Exception.Message}finally{$picker.Dispose();$script:DialogOpen=$false}
@@ -670,6 +677,8 @@ function Start-Work([string]$Kind,[string]$Key) {
                 'AppReconnectPlan'{$result=Get-ApplicationReconnectPlan $Key}
                 'AppReconnect'{$result=Invoke-ApplicationReconnect ($Key | ConvertFrom-Json)}
                 'LoginDiagnostic'{$result=Test-LoginChain $Key}
+                'NetworkDiagnose'{$result=Get-NetworkDiagnosis -Probe}
+                'NetworkRepair'{$result=Repair-NetworkDiagnosis $Key}
                 'Diagnose'{
                     $result=@()
                     foreach($route in @($Key)){
@@ -756,7 +765,10 @@ function Invoke-FlowWindowClose($Event) {
     try{
         if(Test-Path -LiteralPath (Get-IndependentSessionPath)){
             $session=Get-Content -LiteralPath (Get-IndependentSessionPath) -Raw -Encoding UTF8|ConvertFrom-Json
-            if($session.OwnerPID -eq $PID){Restore-IndependentSession}
+            $ownerState=Get-RecoveryOwnerState $session
+            if($session.OwnerPID -eq $PID -and $ownerState -eq 'alive'){Restore-IndependentSession -ExpectedSession $session.Started}
+            elseif($ownerState -eq 'stopped'){Restore-IndependentSession -ExpectedSession $session.Started -AbandonedOnly}
+            elseif($ownerState -eq 'unknown'){throw '会话身份无法核实，请先排查网络；旧记录保留。'}
         }
         Write-LifecycleEvent 'window-stop' 'explicit-or-system-close'
     }catch{
@@ -818,6 +830,8 @@ $timer.Add_Tick({
                         try{if([Windows.Forms.MessageBox]::Show($form,('将关闭「'+[IO.Path]::GetFileName($plan.path)+'」的 '+$number+' 条旧线路连接，让应用有机会重新连接。进行中的对话、下载或登录可能中断；不会退出应用，也不会关闭其他程序的连接。是否继续？'),'确认重连旧连接','OKCancel','Warning') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='AppReconnect';Key=($plan | ConvertTo-Json -Depth 6 -Compress)}}}finally{$script:DialogOpen=$false}
                     }
                 }
+                elseif($reply.Kind -eq 'NetworkDiagnose'){$script:NetworkDiagnosis=$reply.Result;Write-Activity $reply.Result.Message;$tabs.SelectedTab=$toolsPage}
+                elseif($reply.Kind -eq 'NetworkRepair'){$script:NetworkDiagnosis=$reply.Result.Diagnosis;Write-Activity $reply.Result.Message;$tabs.SelectedTab=$toolsPage}
                 elseif($reply.Kind -eq 'LoginDiagnostic'){Write-Activity ('本次检测：当前系统代理入口。'+$reply.Result.Message+' 浏览器回调是否到达 IDE、IDE 账号是否登录成功尚未验证。');$tabs.SelectedTab=$toolsPage}
                 elseif($reply.Kind -eq 'Diagnose'){Write-Activity (Format-Diagnostics $reply.Result);$tabs.SelectedTab=$toolsPage}
                 elseif($reply.Kind -notin @('Status','Discover')){

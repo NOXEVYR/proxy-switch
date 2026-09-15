@@ -36,7 +36,7 @@ internal static class Launcher
             "ProxySwitch.ps1", "ProxyWindow.ps1", "ProxyBackend.ps1", "Preferences.ps1",
             "Storage.ps1", "RuntimeSupport.ps1", "DesktopBranding.cs", "FlowTheme.cs", "ProgramLaunch.ps1", "ProcessInventory.ps1", "ProxyDiscovery.ps1",
             "ProgramIdentity.ps1", "ProgramFamilyTracking.ps1", "ManagedRouting.ps1", "ApplicationObservation.ps1", "RuleMaintenance.ps1", "RoutePolicy.cjs", "GatewayPortOwnership.ps1",
-            "AppRouting.ps1", "AppRouter.cjs", "IndependentRouter.cjs", "IndependentGateway.ps1", "GatewayWatchdog.ps1", "GatewayLock.ps1", "config.defaults.json", "Install-Shortcut.ps1",
+            "AppRouting.ps1", "AppRouter.cjs", "IndependentRouter.cjs", "IndependentGateway.ps1", "NetworkDiagnostics.ps1", "GatewayWatchdog.ps1", "GatewayLock.ps1", "config.defaults.json", "Install-Shortcut.ps1",
             "assets/FlowSwitch.ico", "vendor/js-yaml/dist/js-yaml.cjs.js",
             "runtime/node.exe", "runtime/FlowSwitch.Core.exe", "runtime/FlowSwitch.Core.Compat.exe", "runtime/runtime-manifest.json"
         };
@@ -49,7 +49,7 @@ internal static class Launcher
     private static int Main(string[] args)
     {
         string mode = "", dataDirectory = null;
-        bool quiet = Array.Exists(args, a => a == "--quiet" || a == "--verify" || a == "--smoke-test" || a == "--status");
+        bool quiet = Array.Exists(args, a => a == "--quiet" || a == "--verify" || a == "--smoke-test" || a == "--status" || a == "--network-diagnostic");
         try
         {
             for (int i = 0; i < args.Length; i++)
@@ -60,7 +60,7 @@ internal static class Launcher
                     if (dataDirectory != null) throw new ArgumentException("配置目录只能指定一次。");
                     dataDirectory = Path.GetFullPath(args[++i]);
                 }
-                else if (args[i] == "--verify" || args[i] == "--smoke-test" || args[i] == "--status" || args[i] == "--install-shortcut")
+                else if (args[i] == "--verify" || args[i] == "--smoke-test" || args[i] == "--status" || args[i] == "--network-diagnostic" || args[i] == "--install-shortcut")
                 {
                     if (mode.Length != 0) throw new ArgumentException("一次只能选择一种启动操作。");
                     mode = args[i];
@@ -85,6 +85,7 @@ internal static class Launcher
                 command.Add(Path.Combine(app, "ProxySwitch.ps1"));
                 if (mode == "--smoke-test") command.Add("-SmokeTest");
                 if (mode == "--status") command.Add("-Status");
+                if (mode == "--network-diagnostic") command.Add("-NetworkDiagnostic");
                 if (dataDirectory != null) { command.Add("-DataDirectory"); command.Add(dataDirectory); }
             }
             var info = new ProcessStartInfo(shell, String.Join(" ", command.ConvertAll(Quote).ToArray()));

@@ -6,8 +6,15 @@ if(-not (Test-Path -LiteralPath $path)){return}
 $session=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
 if($RecoverOnly){
     # A delayed next-logon recovery must not terminate a fresh, live UI session.
-    if(Test-SessionProcess $session.OwnerPID $session.OwnerStart){Write-LifecycleEvent 'recovery-skipped' 'owner-still-running';return}
-    Restore-IndependentSession -ExpectedSession $session.Started;return
+    for($attempt=1;$attempt -le 3;$attempt++){
+        if((Get-RecoveryOwnerState $session) -ne 'stopped'){Write-LifecycleEvent 'recovery-skipped' 'owner-alive-or-unknown';return}
+        try{Restore-IndependentSession -ExpectedSession $session.Started -AbandonedOnly;return}catch{
+            Write-LifecycleEvent 'logon-restore-failed' 'restore-retry' $attempt
+            if($attempt -eq 3){Write-LifecycleEvent 'logon-recovery-exhausted' 'manual-action-required';throw}
+            Start-Sleep -Seconds ([Math]::Pow(2,$attempt-1))
+        }
+    }
+    return
 }
 Write-LocalJson (Join-Path $script:DataRoot 'gateway\watchdog-ready.json') ([pscustomobject]@{PID=$PID;StartTicks=(Get-ProcessStartTicks $PID);Session=$session.Started})
 $misses=0;$restoreAttempts=0;$missingSince=$null
