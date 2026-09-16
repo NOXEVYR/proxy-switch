@@ -8,6 +8,8 @@
 
 Windows x64 程序包与源码包在本仓库 Releases 发布；旧版下载档案继续保留在 portfolio。程序包自带锁定运行组件。请完整解压，并保留本机配置备份。自动化验证覆盖隔离核心和实际请求，不能代替真实 IDE 登录与长期使用验收。
 
+**[下载 Windows x64 · 3.8.2](https://github.com/turnsolesama/proxy-switch/releases/download/v3.8.2/FlowSwitch-v3.8.2-Windows-x64.zip)** · [源码包](https://github.com/turnsolesama/proxy-switch/releases/download/v3.8.2/FlowSwitch-v3.8.2-Windows-Source.zip) · [SHA-256 校验](https://github.com/turnsolesama/proxy-switch/releases/download/v3.8.2/SHA256SUMS.txt)
+
 ## 快速开始
 
 1. 完整解压，双击 `FlowSwitch/FlowSwitch.exe`，保留旁边的 `app` 文件夹。
