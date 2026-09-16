@@ -1,18 +1,12 @@
 ![流向 FlowSwitch](https://raw.githubusercontent.com/turnsolesama/portfolio/35ecc7e17cb9053279ecc422c3a577f5dafa5104/proxy-switch/assets/FlowSwitch.png)
 
-# 流向 FlowSwitch 3.8.0 核心重构候选
+# 流向 FlowSwitch 3.8.2
 
-管理已有 HTTP / SOCKS5 代理，让程序通过固定入口选择出口。独立模式自带运行组件，代理失效后按备用顺序接替。关闭窗口默认驻留系统托盘，内核异常退出后有限重启；停止服务时先恢复仍归属本会话的网络设置。
+管理已有 HTTP / SOCKS5 代理，通过固定入口选择出口。代理退出或卸载导致系统入口失效时，可在「诊断与工具 → 排查网络 → 修复可处理问题」检测备用并恢复入口；没有可用备用时撤销确认失效的设置。它不提供 VPN 服务、订阅或节点。
 
-[工具总入口](https://github.com/turnsolesama/portfolio) · [功能与设计](DESIGN.md) · [更新记录](CHANGELOG.md) · [功能验收约定](ACCEPTANCE.md) · [仓库迁移与同步说明](MIGRATION.md)
+[版本与下载](https://github.com/turnsolesama/proxy-switch/releases) · [网络排查与修复](NETWORK_DIAGNOSTICS.md) · [功能与设计](DESIGN.md) · [更新记录](CHANGELOG.md) · [验收范围](ACCEPTANCE.md) · [迁移说明](MIGRATION.md) · [工具总入口](https://github.com/turnsolesama/portfolio)
 
-本仓库独立维护 FlowSwitch 的公开源码与文档。本次在原有 3.7.1 迁移历史之上追加同步 3.8.0 候选源码；现有下载档案继续保留在 `portfolio`，下方链接固定到本次来源提交。
-
-本目录为 3.8.0 核心重构候选，隔离整链及程序包验证已通过；另一台电脑的真实 IDE 登录与长期使用仍待验收。新版使用方法与范围见 [核心重构说明](CORE_REBUILD.md)，请保留旧版和本机数据备份。
-
-**上一版 3.7.1 修复：**意外中断留下空锁或截断锁时，可安全恢复自动接替与入口启动；不会接管仍在写入的活跃锁，并核对并发恢复的进程身份。
-
-**[下载 Windows x64 候选包 · 3.8.0 · 68.2 MiB](https://raw.githubusercontent.com/turnsolesama/portfolio/35ecc7e17cb9053279ecc422c3a577f5dafa5104/proxy-switch/releases/FlowSwitch-v3.8.0-Windows-x64.zip)** · [源码包](https://raw.githubusercontent.com/turnsolesama/portfolio/35ecc7e17cb9053279ecc422c3a577f5dafa5104/proxy-switch/releases/FlowSwitch-v3.8.0-Windows-Source.zip) · [下载与校验及历史版本](https://github.com/turnsolesama/portfolio/blob/35ecc7e17cb9053279ecc422c3a577f5dafa5104/proxy-switch/releases/README.md)
+Windows x64 程序包与源码包在本仓库 Releases 发布；旧版下载档案继续保留在 portfolio。程序包自带锁定运行组件。请完整解压，并保留本机配置备份。自动化验证覆盖隔离核心和实际请求，不能代替真实 IDE 登录与长期使用验收。
 
 ## 快速开始
 

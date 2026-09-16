@@ -140,9 +140,10 @@ function Start-IndependentProtection([int]$OwnerPID,$BeforeSystem,$BeforeEnv,$Ta
     for($i=0;$i -lt 50;$i++){if(Test-Path -LiteralPath $ready){$r=Get-Content -LiteralPath $ready -Raw -Encoding UTF8 | ConvertFrom-Json;if($r.Session -eq $session.Started -and (Test-SessionProcess $r.PID $r.StartTicks)){return}};Start-Sleep -Milliseconds 100}
     throw '退出恢复保护未启动，尚未更改 Windows 代理。'
 }
-function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[switch]$UnifiedSwitch,[switch]$AllowMigration) {
+function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[switch]$UnifiedSwitch,[switch]$AllowMigration,[switch]$RepairEntry,[string]$RepairRevision='') {
     Use-ChangeLock {
         $script:Profiles=Read-ProfileSettings
+        if($RepairEntry){Assert-NetworkRepairCurrent $RepairRevision;if(Test-Path (Get-IndependentSessionPath)){throw '会话已改变，请重新排查。'};if((Get-NetworkDiagnosis).RepairAction -ne 'repair-dead-entry'){throw '入口已恢复或无法确认失效，请重新排查。'}}
         if($UnifiedSwitch -and -not $AllowMigration -and $script:Profiles.Routing.Adapter -ne 'standalone'){throw '入口配置已经变化，请刷新后重试；未自动迁移其他引擎。'}
         if($script:Profiles.Routing.Adapter -eq 'standalone'){
             $sessionPath=Get-IndependentSessionPath
@@ -171,7 +172,7 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
         if($client.Tun -or $client.Guard){throw '启用独立入口前，请关闭其他客户端的 TUN 和代理守卫；保留上游代理服务运行。'}
         $upstreams=@($old.Profiles | Where-Object {$_.Id -ne $old.Routing.ProfileId -or $old.Routing.Adapter -ne 'standalone'})
         if(-not $upstreams.Count){throw '请先添加至少一个上游代理入口。'}
-        if($UnifiedSwitch){
+        if($UnifiedSwitch -or $RepairEntry){
             if($InitialRoute -notin (@('Direct')+@($upstreams|ForEach-Object Id))){throw '请选择一个有效上游或直连，未启动独立入口。'}
             if($InitialRoute -ne 'Direct' -and -not (Test-ProxyRoute $InitialRoute -Fast).Usable){throw '所选代理检测未通过，保留原配置，未启动独立入口。'}
         }
@@ -192,6 +193,7 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
         $nextIngresses=@($rules.programIngresses|Where-Object {$_});$nextSites=@($rules.siteRules|Where-Object {$_});$nextEntries=@($rules.entries);$nextLaunch=@($rules.launchEntries)
         if($InitialRoute){$route=$InitialRoute}
         if($UnifiedSwitch){$nextIngresses=@($nextIngresses|ForEach-Object {$copy=$_|ConvertTo-Json -Depth 16|ConvertFrom-Json;$copy.route='Follow';$copy});$route=$InitialRoute;$nextEntries=@();$nextLaunch=@($rules.launchEntries|Where-Object {$_}|ForEach-Object {[pscustomobject]@{path=$_.path;route='Follow';adapter=$_.adapter;identity=$_.identity}})}
+        if($RepairEntry){Assert-NetworkRepairCurrent $RepairRevision;$observed=Get-LocalEndpointObservation $before.Server (Get-TcpObservationSnapshot);if(-not $observed -or $observed.Ready -ne $false){throw '原入口已恢复或状态未知，未接管。'}}
         foreach($original in @($originalConfig,$originalState,$originalLaunch)){
             if((Read-RuleMaintenanceFile $original.Path).Hash -cne $original.Hash){throw '代理配置或程序记录在预检期间已改变，保留最新内容；请刷新后重试。'}
         }
@@ -221,21 +223,23 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
             # The file CAS uses a literal missing sentinel; the controller protocol hashes that sentinel.
             $controllerStateHash=$ownedStateHash
             if($controllerStateHash -ceq '<missing>'){$controllerStateHash=Get-RuleMaintenanceHash ([Text.Encoding]::UTF8.GetBytes('<missing>'))}
-            $applied=Invoke-AppRouter @{action='replace';entries=$nextEntries;defaultRoute=$route;programIngresses=$nextIngresses;siteRules=$nextSites;resetDefaultSelection=([bool]$UnifiedSwitch);expectedStateHash=$controllerStateHash;expectedSettingsHash=$ownedConfigHash}
+            $applied=Invoke-AppRouter @{action='replace';entries=$nextEntries;defaultRoute=$route;programIngresses=$nextIngresses;siteRules=$nextSites;resetDefaultSelection=([bool]($UnifiedSwitch -or $RepairEntry));expectedStateHash=$controllerStateHash;expectedSettingsHash=$ownedConfigHash}
             if(-not $applied.stateHash){throw '新入口未返回规则写入归属，尚未更改 Windows 入口。'}
             $ownedStateHash=[string]$applied.stateHash
-            if($UnifiedSwitch){
+            if($UnifiedSwitch -or $RepairEntry){
                 $live=Invoke-AppRouter @{action='status'}
                 if(-not $live.available -or -not $live.defaultLoaded -or $live.effectiveDefaultRoute -ne $route){throw '启动后的实际出口未通过核验，尚未切换系统入口。'}
                 if($route -ne 'Direct' -and -not (Test-ProxyRoute $gateway.Id -Fast).Usable){throw '启动后的实际代理请求未通过，尚未切换系统入口。'}
                 # Unified switching retains every saved path; no shortcut removal is needed here.
-                $nextLaunchState=$migration.Launch|ConvertTo-Json -Depth 16|ConvertFrom-Json;$nextLaunchState.entries=@($nextLaunch)
-                $ownedLaunchHash=Set-MigrationJson $originalLaunch.Path $nextLaunchState $originalLaunch.TextHash
+                if($UnifiedSwitch){$nextLaunchState=$migration.Launch|ConvertTo-Json -Depth 16|ConvertFrom-Json;$nextLaunchState.entries=@($nextLaunch)
+                $ownedLaunchHash=Set-MigrationJson $originalLaunch.Path $nextLaunchState $originalLaunch.TextHash}
             }
             $target=[pscustomobject]@{Flags=3;Server=(Get-EndpointAddress $gateway);Bypass=$before.Bypass};$targetEnv=New-EnvTarget $beforeEnv $gateway.Id
+            if($RepairEntry){$checkClient=Get-ClientInterference;if($checkClient.Guard -or $checkClient.Tun){throw '预检期间外部守护已开启，未接管系统入口。'}}
             Start-IndependentProtection $OwnerPID $before $beforeEnv $target $targetEnv
             $switched=$true
-            $transactionBackup=Invoke-ProxyTransaction $target $targetEnv ([pscustomobject]@{Key=$gateway.Id;NetworkKey=$route;Unified=$true;ChangedAt=(Get-Date).ToString('o')}) $before $beforeEnv -BackupRouting $(if($UnifiedSwitch){$rules}else{$null})
+            $transactionBackup=Invoke-ProxyTransaction $target $targetEnv ([pscustomobject]@{Key=$gateway.Id;NetworkKey=$route;Unified=$true;ChangedAt=(Get-Date).ToString('o')}) $before $beforeEnv -BackupRouting $(if($UnifiedSwitch -or $RepairEntry){$rules}else{$null})
+            if($RepairEntry){return [pscustomobject]@{Key=$route;Backup=$transactionBackup;Message=('失效系统入口已修复，默认新请求经流向固定入口转发到「'+(Get-RouteName $route)+'」，实际出口和请求均已核验。保留程序专用线路与网站例外；这些专用线路若仍指向失效上游，需要分别改线或启用其备用。已有程序缓存旧地址时请保存后完整重开。'+$(if($live.partialIngressFailure){' 另有程序固定入口未就绪，请分别修复；未将它们报告为已恢复。'}))}}
             if($UnifiedSwitch){return [pscustomobject]@{Key=$route;Backup=$transactionBackup;Message=('独立入口已启动，新连接的统一线路已核验为「'+(Get-RouteName $route)+'」。已有程序可能保留旧代理地址；首次接入的程序需从代理入口重新打开。'+$(if($live.partialIngressFailure){' 另有程序固定入口未就绪，请修复对应入口；这些程序尚未恢复。'})+$(if($client.SystemProxy){' 上游客户端仍开启系统代理，随后启动或退出它可能改写入口；建议关闭其系统代理开关并保留服务。'}))}}
             [pscustomobject]@{Message='独立分流已启用。代理失效会自动接替；关闭窗口将驻留托盘；通过托盘「停止代理服务并退出」恢复网络并关闭内核。';Backup=$stash}
         }catch{

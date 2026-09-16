@@ -416,7 +416,7 @@ function Set-RoutingSnapshot($Snapshot,$ExpectedBefore=$null) {
         throw
     }
 }
-function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSystem,$BeforeEnv,$TargetRouting=$null,$BeforeRouting=$null,[scriptblock]$VerifyAction=$null,$BackupRouting=$null,[switch]$EnvironmentOnly) {
+function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSystem,$BeforeEnv,$TargetRouting=$null,$BeforeRouting=$null,[scriptblock]$VerifyAction=$null,$BackupRouting=$null,[switch]$EnvironmentOnly,[switch]$PreserveSelection) {
     if($EnvironmentOnly -and ($null -ne $TargetRouting -or -not (Test-SameSnapshot $TargetSystem $BeforeSystem))){throw '变量修复不能同时改变系统入口或分流规则。'}
     if($null -ne $TargetRouting -and $null -ne $BeforeRouting){foreach($field in @('programIngresses','siteRules')){if($null -eq $TargetRouting.PSObject.Properties[$field]){$TargetRouting|Add-Member NoteProperty $field @($BeforeRouting.$field|Where-Object {$_})}}}
     if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $BeforeEnv (Get-UserProxyEnv))){throw '检测期间其他程序改动了代理，请稍后重试。未写入设置。'}
@@ -435,7 +435,7 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
         Write-OperationProgress '正在写入系统入口并实读校验…'
         if(-not $EnvironmentOnly){$systemStarted=$true;Set-SystemSnapshot $TargetSystem}
         if(-not (Test-SameSnapshot $TargetSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $TargetEnv (Get-UserProxyEnv))){throw '写入后校验失败，或其他客户端改写了入口。'}
-        if(-not $EnvironmentOnly){Save-Selection $Selection}
+        if(-not $EnvironmentOnly -and -not $PreserveSelection){Save-Selection $Selection}
         Write-OperationProgress '系统入口与变量已核对，正在刷新实际连接…'
     }catch{
         $errorText=$_.Exception.Message;$rollbackErrors=@();$preserved=@()
@@ -458,7 +458,7 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
                 elseif(-not (Test-SameSnapshot $currentSystem $BeforeSystem)){$preserved+='系统代理'}
             }catch{$rollbackErrors+='系统代理'}}
             elseif(-not (Test-SameSnapshot (Get-SystemSnapshot) $BeforeSystem)){$preserved+='系统代理'}
-            if(-not $EnvironmentOnly){try{Save-Selection $beforeSelection}catch{$rollbackErrors+='选择记录'}}
+            if(-not $EnvironmentOnly -and -not $PreserveSelection){try{Save-Selection $beforeSelection}catch{$rollbackErrors+='选择记录'}}
         }
         if($rollbackErrors.Count){throw ($errorText+'；回滚未完成：'+($rollbackErrors -join '、')+'。备份：'+$backup)}
         if($preserved.Count){throw ($errorText+'；已撤销本次可回滚的更改，保留其他程序的最新设置：'+(($preserved | Select-Object -Unique) -join '、')+'。')}

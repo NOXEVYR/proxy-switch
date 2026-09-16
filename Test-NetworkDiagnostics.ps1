@@ -4,6 +4,7 @@ $qa=Join-Path $env:TEMP ('FlowSwitch-NetworkDiagnosis-'+[Guid]::NewGuid().ToStri
 $script:checks=0
 function Check($Value,$Message){if(-not $Value){throw $Message};$script:checks++}
 function Use-ChangeLock([scriptblock]$Action){& $Action}
+function Get-ClientInterference {[pscustomobject]@{Running=$false;Tun=$false;Guard=$false;SystemProxy=$false}}
 $config=[pscustomobject]@{Version=3;Profiles=@(@{Id='up';Name='Up';Host='127.0.0.1';Port=19001;Protocol='http';AutoPort=$false},@{Id='owned';Name='Owned';Host='127.0.0.1';Port=18790;Protocol='http';AutoPort=$false;CorePath='C:\Fixture\core.exe'});Routing=@{Adapter='standalone';ProfileId='owned';UnifiedMode='gateway';Failover=@{Enabled=$true;Order=@('up');AllowDirect=$false}}}
 Write-LocalJson $script:ConfigPath $config
 $script:sys=[pscustomobject]@{Flags=3;Server='127.0.0.1:19001';Bypass='localhost'}
@@ -29,7 +30,7 @@ Check ((Get-NetworkDiagnosis -Probe).Message -match '错误响应') 'HTTP 403 is
 $script:available=$false;$unknown=Get-NetworkDiagnosis
 Check ($unknown.Issues.Code -contains 'observation-unknown' -and -not $unknown.RepairAction) 'failed observation cannot authorize alignment'
 $script:available=$true;$script:ready=@();$down=Get-NetworkDiagnosis
-Check ($down.Issues.Code -contains 'system-entry-down' -and -not $down.RepairAction) 'dead system upstream cannot authorize alignment'
+Check ($down.Issues.Code -contains 'system-entry-down' -and $down.RepairAction -eq 'repair-dead-entry') 'dead system upstream cannot authorize alignment'
 $script:ready=@(19001);$d=Get-NetworkDiagnosis
 $script:envs.NO_PROXY='changed';$rejected=$false
 try{Repair-NetworkDiagnosis $d.Revision|Out-Null}catch{$rejected=$true}
