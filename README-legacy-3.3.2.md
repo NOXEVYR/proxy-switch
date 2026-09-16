@@ -1,8 +1,8 @@
 # 流向 · 网络代理管家 | FlowSwitch
 
-[返回工具集](../) · [映序](../yingxu/) · [AI Hub](../ai-hub/) · [Codex Switcher](../codex-switcher/)
+[返回工具集](https://github.com/turnsolesama/portfolio)
 
-![流向 FlowSwitch 网络线路管理](../docs/assets/flowswitch.svg)
+![流向 FlowSwitch 网络线路管理](assets/FlowSwitch.png)
 
 [下载](#下载-flowswitch) · [功能一览](#功能一览) · [快速开始](#快速开始) · [固定入口与程序分流](#gateway-routing) · [运行要求](#运行要求) · [诊断与恢复](#诊断与恢复)
 
@@ -18,7 +18,7 @@
 
 完整解压后打开 `FlowSwitch` 文件夹，双击 **`FlowSwitch.exe`**。无需编译或安装开发工具；请保留同目录的 `app` 文件夹。需要 Windows 10 / 11 x64、Windows PowerShell 5.1、.NET Framework 4.8 和 `curl.exe`。
 
-[单独下载源码包](https://raw.githubusercontent.com/turnsolesama/portfolio/main/proxy-switch/releases/FlowSwitch-v3.3.2-Windows-Source.zip) · [下载与 SHA-256 校验](releases/README.md) · [完整运行要求](#运行要求)
+[单独下载源码包](https://raw.githubusercontent.com/turnsolesama/portfolio/main/proxy-switch/releases/FlowSwitch-v3.3.2-Windows-Source.zip) · [下载与 SHA-256 校验](https://github.com/turnsolesama/portfolio/blob/main/proxy-switch/releases/README.md) · [完整运行要求](#运行要求)
 
 一个通用的 Windows 代理管理面板：添加自己的代理入口，统一切换系统网络，或为程序指定单独线路。**不预设任何 VPN 品牌，也不捆绑代理服务。**
 
