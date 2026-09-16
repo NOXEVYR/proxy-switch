@@ -12,7 +12,7 @@ function Get-RecoveryOwnerState($Session) {
 }
 function Get-NetworkRepairRevision($System,$Environment) {
     $parts=@(($System|ConvertTo-Json -Compress),($Environment|ConvertTo-Json -Compress))
-    foreach($path in @((Get-IndependentSessionPath),$script:ConfigPath)){
+    foreach($path in @((Get-IndependentSessionPath),$script:ConfigPath,(Join-Path $script:DataRoot 'app-rules.json'),(Join-Path $script:DataRoot 'program-proxies.json'),(Join-Path $script:DataRoot 'selection.json'))){
         $parts+= $(if(Test-Path -LiteralPath $path){[IO.File]::ReadAllText($path)}else{'<missing>'})
     }
     $hash=[Security.Cryptography.SHA256]::Create()
@@ -39,6 +39,50 @@ function Test-NetworkTargets($Profile) {
     }finally{foreach($item in $probes){Close-HttpEndpointProbe $item.Probe}}
     @($results)
 }
+# Only simple loopback endpoints are eligible; PAC, remote and per-protocol lists stay unknown.
+function Get-LocalEndpointObservation([string]$Value,$Tcp) {
+    if($Value -notmatch '^(?:(?:http|https|socks5|socks5h)://)?(127\.0\.0\.1|localhost|\[::1\]):([0-9]{1,5})/?$'){return $null}
+    $port=[int]$Matches[2];if($port -lt 1 -or $port -gt 65535){return $null}
+    $profile=[pscustomobject]@{Host=$Matches[1].Trim('[',']');Port=$port;CorePath=''}
+    $ready=$null;if($Tcp.Available){$ready=$null -ne (Get-Listener $profile -TcpRows $Tcp.Rows)}
+    [pscustomobject]@{Port=$port;Ready=$ready}
+}
+function Assert-NetworkRepairCurrent([string]$Revision) {
+    if($Revision -cne (Get-NetworkRepairRevision (Get-SystemSnapshot) (Get-UserProxyEnv))){throw '检测期间配置已变化，请重新排查；未采用旧修复方案。'}
+    $client=Get-ClientInterference
+    if($client.Tun -or $client.Guard){throw '其他客户端的 TUN 或代理守护仍在接管网络。请先关闭该开关并保留代理服务，再修复。'}
+}
+function Repair-DeadSystemEntry([string]$Revision) {
+    Assert-NetworkRepairCurrent $Revision
+    $before=Get-SystemSnapshot;$beforeEnv=Get-UserProxyEnv;$tcp=Get-TcpObservationSnapshot
+    $entry=Get-LocalEndpointObservation $before.Server $tcp
+    if(-not ($before.Flags -band 2) -or -not $entry -or $entry.Ready -ne $false -or (Test-Path (Get-IndependentSessionPath))){throw '失效入口或会话状态已经改变，请重新排查。'}
+    # Respect the configured backup order, then remaining configured upstreams. No port scanning.
+    $keys=@(@($script:Profiles.Routing.Failover.Order)+@($script:Profiles.Profiles|ForEach-Object Id)|Select-Object -Unique)
+    foreach($key in $keys){
+        if($key -notin (Get-ProfileKeys) -or ($script:Profiles.Routing.Adapter -eq 'standalone' -and $key -eq (Get-GatewayKey))){continue}
+        $profile=Get-Profile $key
+        $local=Get-LocalEndpointObservation (Get-EndpointAddress $profile) $tcp
+        if($local -and $local.Ready -ne $true){continue}
+        Write-OperationProgress ('正在检测备用线路「'+$profile.Name+'」…')
+        $usable=(Test-ProxyRoute $key -Fast).Usable
+        Assert-NetworkRepairCurrent $Revision
+        if($usable){return Enable-IndependentGateway -OwnerPID $PID -InitialRoute $key -RepairEntry -RepairRevision $Revision}
+    }
+    Assert-NetworkRepairCurrent $Revision
+    $fresh=Get-TcpObservationSnapshot;$current=Get-LocalEndpointObservation $before.Server $fresh
+    if(-not $fresh.Available -or -not $current -or $current.Ready -ne $false){throw '入口已恢复或监听状态未知，未清除设置。请重新排查。'}
+    $targetEnv=[ordered]@{}
+    foreach($name in $script:ProxyNames){
+        $targetEnv[$name]=$beforeEnv.$name
+        if($name -ne 'NO_PROXY'){$observed=Get-LocalEndpointObservation ([string]$beforeEnv.$name) $fresh;if($observed -and $observed.Ready -eq $false){$targetEnv[$name]=$null}}
+    }
+    # Preserve PAC/autodetect flags and bypass; disable only the proven dead manual proxy.
+    $target=[pscustomobject]@{Flags=(($before.Flags -band (-bnot 2)) -bor 1);Server='';Bypass=$before.Bypass}
+    $verify={Assert-NetworkRepairCurrent $Revision;$seen=Get-LocalEndpointObservation $before.Server (Get-TcpObservationSnapshot);if(-not $seen -or $seen.Ready -ne $false){throw '入口状态已变化，未执行清理。'}}.GetNewClosure()
+    $backup=Invoke-ProxyTransaction $target ([pscustomobject]$targetEnv) (Get-Selection) $before $beforeEnv -VerifyAction $verify -PreserveSelection
+    [pscustomobject]@{Message='未检测到可用备用代理。已备份并撤销失效的手动系统代理，清除确认失效的本地代理变量；保留其他变量、自动配置及程序规则。直连或现有自动配置是否能访问目标网站仍需验证，需要代理的网站仍需可用上游。';Backup=$backup}
+}
 function Get-NetworkDiagnosis([switch]$Probe) {
     $script:Profiles=Read-ProfileSettings
     $system=Get-SystemSnapshot;$environment=Get-UserProxyEnv
@@ -53,6 +97,9 @@ function Get-NetworkDiagnosis([switch]$Probe) {
     $systemKey=Get-SystemKey $system
     $systemReady=$null;$entry=$endpoints|Where-Object Key -eq $systemKey|Select-Object -First 1
     if($entry){$systemReady=$entry.Ready}
+    $manual=$null;if($system.Flags -band 2){$manual=Get-LocalEndpointObservation $system.Server $tcp;if($manual){$systemReady=$manual.Ready}}
+    $client=Get-ClientInterference
+    if($client.Guard -or $client.Tun){$issues+=[pscustomobject]@{Code='external-proxy-control';Message='其他客户端的代理守护或 TUN 正在接管网络，会阻止流向独立接管。请先关闭冲突开关，保留上游代理服务；流向不会循环抢回入口。'}}
     if(-not $tcp.Available){$issues+=[pscustomobject]@{Code='observation-unknown';Message='无法读取连接列表，监听状态未知。稍后重新排查；不会据此清空代理。'}}
     if($systemReady -eq $false){$issues+=[pscustomobject]@{Code='system-entry-down';Message='系统代理指向未监听的入口。请在代理管理启动对应代理，或检测并选择其他可用线路。'}}
     if($systemKey -eq 'Direct'){$issues+=[pscustomobject]@{Code='system-direct';Message='系统当前直连。若目标网站需要代理，请选择并检测可用线路。'}}
@@ -71,6 +118,7 @@ function Get-NetworkDiagnosis([switch]$Probe) {
         try{
             $session=Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8|ConvertFrom-Json
             $owner=Get-RecoveryOwnerState $session;$sessionId=[string]$session.Started
+            if($owner -eq 'alive' -and $session.TargetSystem -and -not (Test-SameSnapshot $system $session.TargetSystem)){$issues+=[pscustomobject]@{Code='system-entry-overridden';Message='系统入口已偏离流向托管入口；使用系统代理的新请求可能绕过流向。无法仅凭端口确认修改者。请处理外部守护，再明确重新应用线路。'}}
             if($owner -eq 'stopped' -and $sessionId){
                 $issues+=[pscustomobject]@{Code='abandoned-session';Message='发现上次运行遗留的会话，原宿主已退出。旧保护记录不代表当前网关可用。'}
                 $action='recover-session';$repairText='恢复仍属于旧会话的系统代理与用户变量，核验后停止旧会话内核并归档。保留其他工具或你后来改过的设置。'
@@ -92,8 +140,11 @@ function Get-NetworkDiagnosis([switch]$Probe) {
     if(-not $action -and $owner -eq 'none' -and $mismatched.Count -and $systemReady -eq $true -and $systemKey -notin @('Direct','Other','Unset',(Get-GatewayKey)) -and (Get-Profile $systemKey).Protocol -eq 'http'){
         $action='align-environment';$repairText='先检测当前系统代理的实际请求；通过后备份并将用户代理变量对齐到这个入口。保留系统代理和程序分流规则。'
     }
+    if(-not $action -and $owner -eq 'none' -and $manual -and $manual.Ready -eq $false -and -not ($client.Guard -or $client.Tun)){
+        $action='repair-dead-entry';$repairText='检测已配置的备用代理，按备用顺序选择通过实际请求检测的线路，接入流向固定入口并保留程序与网站规则；若没有可用备用，则备份后撤销失效的手动系统代理，只清理确认失效的本地代理变量，保留有效变量、自动配置和规则。已有专用程序规则不会被改成统一线路；需要代理的网站不保证能直连。'
+    }
     $targets=@()
-    if($Probe -and $systemReady -eq $true){$targets=@(Test-NetworkTargets (Get-Profile $systemKey))}
+    if($Probe -and $systemReady -eq $true -and $systemKey -in (Get-ProfileKeys)){$targets=@(Test-NetworkTargets (Get-Profile $systemKey))}
     if($revision -cne (Get-NetworkRepairRevision (Get-SystemSnapshot) (Get-UserProxyEnv))){throw '诊断期间配置发生变化，请重新排查。'}
     $report=[pscustomobject]@{Version=$script:ProductVersion;CheckedAt=[DateTimeOffset]::UtcNow.ToString('o');Issues=@($issues);Endpoints=@($endpoints);Targets=$targets;RepairAction=$action;RepairText=$repairText;Revision=$revision;ExpectedSession=$sessionId;SystemKey=$systemKey;OwnerState=$owner;Message=''}
     $lines=@('网络排查结果：')+@($issues|ForEach-Object {'• '+$_.Message})
@@ -113,6 +164,7 @@ function Repair-NetworkDiagnosis([string]$Revision) {
         $plan=Get-NetworkDiagnosis
         if($plan.Revision -cne $Revision){throw '网络配置已变化，未执行旧修复方案。请重新排查。'}
         switch($plan.RepairAction){
+            'repair-dead-entry'{Repair-DeadSystemEntry $Revision}
             'recover-session'{
                 Restore-IndependentSession -ExpectedSession $plan.ExpectedSession -AbandonedOnly
                 if(Test-Path -LiteralPath (Get-IndependentSessionPath)){throw '旧会话恢复尚未完成，请重新排查。'}
