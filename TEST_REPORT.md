@@ -151,4 +151,4 @@ Antigravity IDE 的真实启动、浏览器授权回调返回 IDE、账号登录
 
 请按 [功能验收约定](ACCEPTANCE.md) 在目标电脑验证启动顺序、X 到托盘后继续使用、应用升级后的旧记录修复，以及真实 Google 登录和日常运行。Google OAuth 诊断只发出无凭据请求；CONNECT 200、HTTP 404/401、TCP 连接成功均不代表账号登录成功。程序可能使用已继承的旧代理地址，需由使用者保存工作后完整重开应用或启动器。
 
-未自动结束应用、开启 TUN、复制订阅或收集令牌。核验程序包和公开 SHA-256 见 [下载与校验](releases/README.md)；私有实机日志与备份不随包发布。
+未自动结束应用、开启 TUN、复制订阅或收集令牌。核验程序包和公开 SHA-256 见 [下载与校验](https://github.com/turnsolesama/portfolio/blob/main/proxy-switch/releases/README.md)；私有实机日志与备份不随包发布。
