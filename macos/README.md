@@ -35,6 +35,7 @@
 ```sh
 cd macos
 swift test
+sudo -v # 仅用于隔离的临时 preferences API 测试；不修改真实网络配置
 python3 scripts/build.py --arch arm64 --output ../dist/mac-arm64
 # Intel 机器使用 --arch x86_64
 ```

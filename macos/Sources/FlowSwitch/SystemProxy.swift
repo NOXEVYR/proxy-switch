@@ -43,7 +43,8 @@ final class SystemProxy {
         guard !fm.fileExists(atPath: ledger.path) else { throw FlowError("存在待恢复会话，请先恢复残留设置。") }
         try authorize()
         let prefs = try prefs()
-        guard SCPreferencesLock(prefs,false) else { throw FlowError("网络设置正在被修改，请稍后再试。") }; defer { SCPreferencesUnlock(prefs) }
+        guard SCPreferencesLock(prefs,false) else { throw FlowError("网络设置正在被修改，请稍后再试。") }
+        var locked = true; defer { if locked { SCPreferencesUnlock(prefs) } }
         let targets = protocols(prefs)
         guard !targets.isEmpty else { throw FlowError("未发现可管理的网络服务。") }
         var record: [String:Any] = [:]
@@ -55,6 +56,7 @@ final class SystemProxy {
             guard SCNetworkProtocolSetConfiguration(proto,owned as CFDictionary) else { throw FlowError("系统拒绝写入代理；请恢复残留设置。") }
         }
         try commit(prefs)
+        SCPreferencesUnlock(prefs); locked = false
         let fresh = try self.prefs()
         for (id,proto) in protocols(fresh) {
             if let row = record[id] as? [String:Any], let owned = row["owned"] as? [String:Any], !ProxyPolicy.owns(config(proto),expected:owned) { throw FlowError("系统入口核验失败，可能被其他代理改写。") }
@@ -65,7 +67,8 @@ final class SystemProxy {
         let bytes = try Data(contentsOf: ledger)
         guard let records = try PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String:[String:Any]] else { throw FlowError("恢复记录损坏，请在系统设置检查代理。") }
         try authorize(); let prefs = try prefs()
-        guard SCPreferencesLock(prefs,false) else { throw FlowError("网络设置被占用；保留代理运行并等待恢复。") }; defer { SCPreferencesUnlock(prefs) }
+        guard SCPreferencesLock(prefs,false) else { throw FlowError("网络设置被占用；保留代理运行并等待恢复。") }
+        var locked = true; defer { if locked { SCPreferencesUnlock(prefs) } }
         var expected: [String:[String:Any]] = [:]
         for (id,row) in records {
             guard let service = SCNetworkServiceCopy(prefs,id as CFString), let proto = SCNetworkServiceCopyProtocol(service,kSCNetworkProtocolTypeProxies),
@@ -85,6 +88,7 @@ final class SystemProxy {
             guard SCNetworkProtocolSetConfiguration(proto,safe as CFDictionary) else { throw FlowError("恢复写入失败。") }; expected[id] = safe
         }
         try commit(prefs)
+        SCPreferencesUnlock(prefs); locked = false
         let fresh = try self.prefs()
         for (id,wanted) in expected {
             if let service = SCNetworkServiceCopy(fresh,id as CFString), let proto = SCNetworkServiceCopyProtocol(service,kSCNetworkProtocolTypeProxies), !ProxyPolicy.owns(config(proto),expected:wanted) { throw FlowError("恢复核验失败，已保留记录。") }
