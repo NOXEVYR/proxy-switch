@@ -48,7 +48,9 @@ def main():
     assert args.arch in run("lipo", "-archs", str(executable))
     assert args.arch in run("lipo", "-archs", str(resources / "mihomo"))
     print(run(str(executable), "--version")); print(run(str(resources / "mihomo"), "-v"))
-    print(run(str(executable), "--system-selftest"))
+    # SystemConfiguration requires privileged commit even for an isolated temporary plist.
+    # This mode uses no default preferences and never calls SCPreferencesApplyChanges.
+    print(run("sudo", "-n", str(executable), "--system-selftest"))
     print(run("python3", str(ROOT / "scripts/integration.py"), "--app", str(bundle)))
     run(str(executable), "--ui-smoke", "--screenshot", str(output / "ui-smoke.png"))
     manifest = {"version":VERSION, "arch":args.arch, "sourceCommit":run("git", "rev-parse", "HEAD"), "signature":"ad-hoc; not notarized", "files":{str(f.relative_to(bundle)):hashlib.sha256(f.read_bytes()).hexdigest() for f in bundle.rglob("*") if f.is_file()}}
