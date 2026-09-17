@@ -20,18 +20,24 @@ func systemSelfTest() throws {
         let p = try proxy.prefs(); guard let proto = proxy.protocols(p).first?.1 else { throw FlowError("Fixture protocol missing") }; return proxy.config(proto)
     }
     func check(_ result: Bool, _ description: String) throws { if !result { throw FlowError("SystemPreferences test failed: " + description) } }
-    try write(old); try proxy.activate(port:18790)
+    fputs("preferences test: seed\n",stderr)
+    try write(old)
+    fputs("preferences test: activate\n",stderr)
+    try proxy.activate(port:18790)
     try check(try proxy.isOwned(),"activation readback")
     try check((try read())["HTTPPort"] as? Int == 18790,"managed port")
+    fputs("preferences test: restore\n",stderr)
     try proxy.restore()
     try check((try read())["HTTPEnable"] as? Int == 0,"dead backup disabled")
     try check((try read())["ProxyAutoConfigEnable"] as? Int == 1,"PAC restored")
     try check((try read())["ExceptionsList"] as? [String] == ["localhost","*.internal"],"bypass preserved")
     try check(!fm.fileExists(atPath:proxy.ledger.path),"ledger completed")
+    fputs("preferences test: foreign ownership\n",stderr)
     try write(old); try proxy.activate(port:18790)
     let foreign: [String:Any] = ["HTTPEnable":1,"HTTPProxy":"external.example","HTTPPort":8888]
     try write(foreign); try proxy.restore()
     try check(ProxyPolicy.owns(try read(),expected:foreign),"foreign state untouched")
+    fputs("preferences test: partial conflict\n",stderr)
     try write(old); try proxy.activate(port:18790)
     var mixed = try read(); mixed["ExceptionsList"] = ["new.external"]
     try write(mixed)
@@ -39,6 +45,7 @@ func systemSelfTest() throws {
     do { try proxy.restore() } catch { blocked = true }
     try check(blocked && fm.fileExists(atPath:proxy.ledger.path),"partial ownership retains recovery")
     try write(foreign); try proxy.restore()
+    fputs("preferences test: dead repair\n",stderr)
     try write(old); let count = try proxy.repairDead()
     let repaired = try read()
     try check(count == 1 && (repaired["HTTPEnable"] as? Int) == 0,"explicit dead entry repair")

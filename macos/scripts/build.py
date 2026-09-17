@@ -5,7 +5,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 VERSION = "0.1.0-preview.1"
 
 def run(*args):
-    return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+    print("RUN", pathlib.Path(args[0]).name, args[1] if len(args) > 1 else "", flush=True)
+    timeout = 45 if "--system-selftest" in args or "--ui-smoke" in args else 180
+    return subprocess.check_output(args, cwd=ROOT, text=True, timeout=timeout).strip()
 
 def fetch(spec):
     data = urllib.request.urlopen(spec["url"], timeout=120).read()
@@ -53,7 +55,9 @@ def main():
     print(run("sudo", "-n", str(executable), "--system-selftest"))
     print(run("python3", str(ROOT / "scripts/integration.py"), "--app", str(bundle)))
     run(str(executable), "--ui-smoke", "--screenshot", str(output / "ui-smoke.png"))
-    manifest = {"version":VERSION, "arch":args.arch, "sourceCommit":run("git", "rev-parse", "HEAD"), "signature":"ad-hoc; not notarized", "files":{str(f.relative_to(bundle)):hashlib.sha256(f.read_bytes()).hexdigest() for f in bundle.rglob("*") if f.is_file()}}
+    provenance = ROOT.parent / "SOURCE_COMMIT.txt"
+    source_commit = provenance.read_text().strip() if provenance.exists() else run("git", "rev-parse", "HEAD")
+    manifest = {"version":VERSION, "arch":args.arch, "sourceCommit":source_commit, "signature":"ad-hoc; not notarized", "files":{str(f.relative_to(bundle)):hashlib.sha256(f.read_bytes()).hexdigest() for f in bundle.rglob("*") if f.is_file()}}
     (output / "verification.json").write_text(json.dumps(manifest, indent=2))
     archive = output / f"FlowSwitch-macOS-{VERSION}-{args.arch}.zip"
     run("ditto", "-c", "-k", "--keepParent", str(bundle), str(archive))
