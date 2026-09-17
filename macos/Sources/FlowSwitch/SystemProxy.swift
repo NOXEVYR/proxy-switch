@@ -14,7 +14,9 @@ final class SystemProxy {
         if testPreferences != nil { return }
         if authorization != nil { return }
         guard AuthorizationCreate(nil, nil, [], &authorization) == errAuthorizationSuccess, let authorization else { throw FlowError("无法创建系统授权。") }
-        let status = "system.preferences.network".withCString { name -> OSStatus in
+        // The same right requested by Apple's SCPreferences helper, so preauthorization
+        // does not ask for a different preferences-panel right and trigger a second prompt.
+        let status = "system.services.systemconfiguration.network".withCString { name -> OSStatus in
             var item = AuthorizationItem(name: name, valueLength: 0, value: nil, flags: 0)
             return withUnsafeMutablePointer(to: &item) { pointer in
                 var rights = AuthorizationRights(count: 1, items: pointer)
