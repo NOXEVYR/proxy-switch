@@ -10,6 +10,14 @@ Windows x64 程序包与源码包在本仓库 Releases 发布；旧版下载档�
 
 **[下载 Windows x64 · 3.8.2](https://github.com/turnsolesama/proxy-switch/releases/download/v3.8.2/FlowSwitch-v3.8.2-Windows-x64.zip)** · [源码包](https://github.com/turnsolesama/proxy-switch/releases/download/v3.8.2/FlowSwitch-v3.8.2-Windows-Source.zip) · [SHA-256 校验](https://github.com/turnsolesama/proxy-switch/releases/download/v3.8.2/SHA256SUMS.txt)
 
+## macOS 原生测试版
+
+macOS 13+，自带代理内核，无需 Node、Python 或 Homebrew。支持 HTTP / SOCKS5 入口、默认线路与备用切换、网站和程序路径规则、网络诊断及退出恢复。仅接管进入流向的代理流量；忽略系统代理的应用不保证覆盖。本版未使用 Developer ID 公证，实际授权弹窗和长期使用仍需在用户 Mac 上复测。
+
+**[下载 Apple 芯片版](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/FlowSwitch-macOS-0.1.0-preview.1-arm64.zip)** · **[下载 Intel 版](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/FlowSwitch-macOS-0.1.0-preview.1-x86_64.zip)** · [Mac 源码包](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/FlowSwitch-macOS-0.1.0-preview.1-Source.zip) · [SHA-256](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/SHA256SUMS.txt)
+
+解压后将 `FlowSwitch.app` 拖到“应用程序”。详细安装步骤、功能边界见 [Mac 使用说明](macos/README.md)，实际执行证据见 [Mac 验收记录](macos/TEST_REPORT.md)。两个架构均已完成原生构建、隔离请求测试及公开下载包回检；这不代表 Windows 的全部程序适配功能已经移植。
+
 ## 快速开始
 
 1. 完整解压，双击 `FlowSwitch/FlowSwitch.exe`，保留旁边的 `app` 文件夹。
