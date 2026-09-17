@@ -82,10 +82,10 @@ final class Worker {
             try prepare(root.appendingPathComponent("core"))
             controller = Controller(port:try freePort(),secret:UUID().uuidString + UUID().uuidString)
             try saveJSON(controller,root.appendingPathComponent("controller.json"))
-            try? fm.removeItem(at:root.appendingPathComponent("command.json"))
             report("starting","正在验证内核、候选线路和实际 HTTPS 请求…")
             try launchCore(); try selectInitial()
-            guard getppid() == parent, !interrupted else { throw FlowError("窗口已退出，取消接入。") }
+            let pending = try? loadJSON(Command.self,root.appendingPathComponent("command.json"))
+            guard getppid() == parent, !interrupted, pending?.action != "stop" else { throw FlowError("已取消接入；未修改系统代理。") }
             report("authorizing","线路检测通过。请允许 macOS 修改网络设置；取消则不接管。")
             try proxy.activate(port:settings.port)
             var lastCommand = "", lastHealth = Date.distantPast, restarts: [Date] = []

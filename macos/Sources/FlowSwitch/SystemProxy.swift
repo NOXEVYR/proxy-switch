@@ -5,11 +5,13 @@ import FlowModel
 
 final class SystemProxy {
     let directory: URL
+    private let testPreferences: URL?
     var authorization: AuthorizationRef?
-    init(_ directory: URL) { self.directory = directory }
+    init(_ directory: URL, testPreferences: URL? = nil) { self.directory = directory; self.testPreferences = testPreferences }
     deinit { if let authorization { AuthorizationFree(authorization, []) } }
     var ledger: URL { directory.appendingPathComponent("recovery.plist") }
     func authorize() throws {
+        if testPreferences != nil { return }
         if authorization != nil { return }
         guard AuthorizationCreate(nil, nil, [], &authorization) == errAuthorizationSuccess, let authorization else { throw FlowError("无法创建系统授权。") }
         let status = "system.preferences.network".withCString { name -> OSStatus in
@@ -22,13 +24,13 @@ final class SystemProxy {
         guard status == errAuthorizationSuccess else { throw FlowError("未获得修改网络设置的授权；系统代理未接管。") }
     }
     func prefs() throws -> SCPreferences {
-        guard let value = SCPreferencesCreateWithAuthorization(nil, "FlowSwitch" as CFString, nil, authorization) else { throw FlowError("无法读取系统网络设置。") }; return value
+        guard let value = SCPreferencesCreateWithAuthorization(nil, "FlowSwitch" as CFString, testPreferences.map { $0.path as CFString }, authorization) else { throw FlowError("无法读取系统网络设置。") }; return value
     }
     func protocols(_ prefs: SCPreferences) -> [(String, SCNetworkProtocol)] {
         let services = SCNetworkServiceCopyAll(prefs) as? [SCNetworkService] ?? []
         return services.compactMap { service in
-            guard SCNetworkServiceGetEnabled(service), let proto = SCNetworkServiceCopyProtocol(service,kSCNetworkProtocolTypeProxies), SCNetworkProtocolGetEnabled(proto) else { return nil }
-            return (SCNetworkServiceGetServiceID(service) as String,proto)
+            guard SCNetworkServiceGetEnabled(service), let id = SCNetworkServiceGetServiceID(service), let proto = SCNetworkServiceCopyProtocol(service,kSCNetworkProtocolTypeProxies), SCNetworkProtocolGetEnabled(proto) else { return nil }
+            return (id as String,proto)
         }
     }
     func config(_ proto: SCNetworkProtocol) -> [String:Any] { SCNetworkProtocolGetConfiguration(proto) as? [String:Any] ?? [:] }
@@ -69,9 +71,10 @@ final class SystemProxy {
             let current = config(proto)
             guard ProxyPolicy.owns(current,expected:owned) else {
                 let stillUsesUs = ["HTTP","HTTPS","SOCKS"].contains { prefix in
-                    (current[prefix + "Enable"] as? NSNumber)?.boolValue == true &&
-                    current[prefix + "Proxy"] as? String == "127.0.0.1" &&
-                    current[prefix + "Port"] as? Int == owned[prefix + "Port"] as? Int
+                    let enabled = (current[prefix + "Enable"] as? NSNumber)?.boolValue == true
+                    let hostMatches = (current[prefix + "Proxy"] as? String) == "127.0.0.1"
+                    let portMatches = (current[prefix + "Port"] as? Int) == (owned[prefix + "Port"] as? Int)
+                    return enabled && hostMatches && portMatches
                 }
                 if stillUsesUs { throw FlowError("外部修改与流向入口混合，保留内核运行。请在系统代理设置移除流向入口后重试。") }
                 continue

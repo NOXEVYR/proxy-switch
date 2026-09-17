@@ -3,7 +3,7 @@ import FlowModel
 import Network
 import Darwin
 
-let version = "0.1.0-preview.1"
+let appVersion = "0.1.0-preview.1"
 let healthURL = "https://www.gstatic.com/generate_204"
 let fm = FileManager.default
 func dataDirectory() -> URL {

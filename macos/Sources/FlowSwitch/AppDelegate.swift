@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func build() {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:980,height:810),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.title = "流向 FlowSwitch · macOS \(version)"; window.delegate = self; window.minSize = NSSize(width:900,height:750); window.center()
+        window.title = "流向 FlowSwitch · macOS \(appVersion)"; window.delegate = self; window.minSize = NSSize(width:900,height:810); window.center()
         let menu = NSMenu(); let top = NSMenuItem(); menu.addItem(top)
         top.submenu = NSMenu(title:"FlowSwitch"); top.submenu?.addItem(withTitle:"停止服务并退出",action:#selector(quit),keyEquivalent:"q").target = self
         let editTop = NSMenuItem(); menu.addItem(editTop); editTop.submenu = NSMenu(title:"编辑")
@@ -161,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func launch(_ mode: String) throws {
         guard worker?.isRunning != true else { throw FlowError("已有操作正在执行。") }
         try? fm.removeItem(at:root.appendingPathComponent("status.json"))
+        try? fm.removeItem(at:root.appendingPathComponent("command.json"))
         let process = Process(); process.executableURL = Bundle.main.executableURL; process.arguments = [mode,root.path]
         process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
         try process.run(); worker = process; poll()
