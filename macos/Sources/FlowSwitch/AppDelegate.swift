@@ -196,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let status = try? loadJSON(WorkerStatus.self,root.appendingPathComponent("status.json")) {
             let fresh = Date().timeIntervalSince1970-status.updated < 30
             title.stringValue = active ? "\(status.phase == "running" ? "已接入" : "处理中") · 127.0.0.1:\(settings.port)" : "未接入"
+            if active && status.phase == "conflict" { title.stringValue = "系统入口不一致 · 不代表应用仍经过流向" }
             if !fresh && active { title.stringValue = "后台状态暂未更新 · 不能确认网络是否正常" }
             detail.stringValue = status.message
             switchButton.isEnabled = active && fresh && status.phase == "running"
