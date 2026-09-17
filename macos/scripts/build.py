@@ -47,8 +47,9 @@ def main():
     run("codesign", "--verify", "--deep", "--strict", str(bundle))
     assert args.arch in run("lipo", "-archs", str(executable))
     assert args.arch in run("lipo", "-archs", str(resources / "mihomo"))
-    run(str(executable), "--version"); run(str(resources / "mihomo"), "-v")
-    run("python3", str(ROOT / "scripts/integration.py"), "--app", str(bundle))
+    print(run(str(executable), "--version")); print(run(str(resources / "mihomo"), "-v"))
+    print(run(str(executable), "--system-selftest"))
+    print(run("python3", str(ROOT / "scripts/integration.py"), "--app", str(bundle)))
     run(str(executable), "--ui-smoke", "--screenshot", str(output / "ui-smoke.png"))
     manifest = {"version":VERSION, "arch":args.arch, "sourceCommit":run("git", "rev-parse", "HEAD"), "signature":"ad-hoc; not notarized", "files":{str(f.relative_to(bundle)):hashlib.sha256(f.read_bytes()).hexdigest() for f in bundle.rglob("*") if f.is_file()}}
     (output / "verification.json").write_text(json.dumps(manifest, indent=2))
@@ -60,7 +61,7 @@ def main():
     # Execute the actual archive after relocation, not only the staging directory.
     check = output / "archive-check"; run("ditto", "-x", "-k", str(archive), str(check))
     run("codesign", "--verify", "--deep", "--strict", str(check / "FlowSwitch.app"))
-    run("python3", str(ROOT / "scripts/integration.py"), "--app", str(check / "FlowSwitch.app"))
+    print(run("python3", str(ROOT / "scripts/integration.py"), "--app", str(check / "FlowSwitch.app")))
     (output / f"SHA256-{args.arch}.txt").write_text(hashlib.sha256(archive.read_bytes()).hexdigest()+"  "+archive.name+"\n")
     print(json.dumps({"archive":archive.name,"bytes":archive.stat().st_size,"sha256":hashlib.sha256(archive.read_bytes()).hexdigest()}))
 
