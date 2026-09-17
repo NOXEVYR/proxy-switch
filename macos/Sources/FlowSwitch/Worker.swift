@@ -89,6 +89,7 @@ final class Worker {
             report("authorizing","线路检测通过。请允许 macOS 修改网络设置；取消则不接管。")
             try proxy.activate(port:settings.port)
             var lastCommand = "", lastHealth = Date.distantPast, restarts: [Date] = []
+            var entryOwned = true
             var message = "已接入系统代理。新连接按规则分流；探测成功不代表账号登录成功。"
             while getppid() == parent && !interrupted {
                 if let command = try? loadJSON(Command.self,root.appendingPathComponent("command.json")), command.id != lastCommand {
@@ -124,9 +125,10 @@ final class Worker {
                 }
                 if Date().timeIntervalSince(lastHealth) >= 8 {
                     try tickHealth(); lastHealth = Date()
-                    if (try? proxy.isOwned()) != true { message = "系统入口发生变化 / 无法核验，未自动抢回。请停止后处理其他代理的守护或 TUN。" }
+                    entryOwned = (try? proxy.isOwned()) == true
+                    if !entryOwned { message = "系统入口发生变化 / 无法核验，未自动抢回。请停止后处理其他代理的守护或 TUN。" }
                 }
-                report("running",message); Thread.sleep(forTimeInterval:1)
+                report(entryOwned ? "running" : "conflict",message); Thread.sleep(forTimeInterval:1)
             }
             report("stopping","先恢复系统设置，再停止自有内核…"); restoreAndStop(); return 0
         } catch {
