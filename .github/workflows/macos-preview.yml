@@ -1,0 +1,37 @@
+name: macOS preview
+on:
+  push:
+    branches: ['codex/macos-preview']
+    paths: ['macos/**', '.github/workflows/macos-preview.yml', 'assets/FlowSwitch.png']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Policy tests
+        working-directory: macos
+        run: swift test
+      - name: Build and isolated acceptance
+        working-directory: macos
+        run: python3 scripts/build.py --arch '${{ matrix.arch }}' --output '../dist/${{ matrix.arch }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlowSwitch-macOS-${{ matrix.arch }}
+          path: |
+            dist/${{ matrix.arch }}/*.zip
+            dist/${{ matrix.arch }}/*.txt
+            dist/${{ matrix.arch }}/verification.json
+            dist/${{ matrix.arch }}/ui-smoke.png
+          if-no-files-found: error
