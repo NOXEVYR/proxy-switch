@@ -5,6 +5,14 @@ class Fixture(http.server.BaseHTTPRequestHandler):
     marker = b""
     def do_GET(self):
         self.send_response(200); self.send_header("Content-Length", str(len(self.marker))); self.end_headers(); self.wfile.write(self.marker)
+    def do_CONNECT(self):
+        self.send_response(200); self.end_headers(); self.wfile.flush()
+        self.connection.settimeout(5)
+        # The isolated destination is plaintext HTTP. mihomo's HTTP upstream dials it through CONNECT.
+        for _ in range(100):
+            line = self.rfile.readline(8192)
+            if line in (b"\r\n", b"\n", b""): break
+        self.wfile.write(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: " + str(len(self.marker)).encode() + b"\r\n\r\n" + self.marker)
     def log_message(self, *args): pass
 
 @contextlib.contextmanager

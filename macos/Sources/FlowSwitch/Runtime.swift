@@ -5,6 +5,7 @@ import Darwin
 
 let appVersion = "0.1.0-preview.1"
 let healthURL = "https://www.gstatic.com/generate_204"
+let healthURLs = [healthURL,"https://www.msftconnecttest.com/connecttest.txt"]
 let fm = FileManager.default
 func dataDirectory() -> URL {
     fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("FlowSwitch", isDirectory: true)
@@ -86,18 +87,20 @@ struct Controller: Codable {
         _ = try call("PUT", "/proxies/" + group, ["name":value])
         guard (try call("GET", "/proxies/" + group))["now"] as? String == value else { throw FlowError("出口切换核验失败。") }
     }
-    func health(_ routes: [Route], url: String = healthURL) -> [String:Bool] {
+    func health(_ routes: [Route], urls: [String] = healthURLs) -> [String:Bool] {
         let jobs = DispatchGroup(), lock = NSLock(); var results = [String:Bool]()
-        let encoded = url.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
         for route in routes {
             jobs.enter()
             DispatchQueue.global(qos: .utility).async {
                 defer { jobs.leave() }
-                let result: Bool?
-                do { result = try self.call("GET", "/proxies/UP-\(route.id)/delay?timeout=3000&url=\(encoded)", timeout: 4)["delay"] != nil }
-                catch {
-                    // A functioning controller plus a failed route probe is a route failure.
-                    result = (try? self.call("GET", "/version", timeout: 1)) == nil ? nil : false
+                var result: Bool? = false
+                for url in urls {
+                    let encoded = url.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+                    do {
+                        if try self.call("GET", "/proxies/UP-\(route.id)/delay?timeout=3000&url=\(encoded)", timeout: 4)["delay"] != nil { result = true; break }
+                    } catch {
+                        if (try? self.call("GET", "/version", timeout: 1)) == nil { result = nil; break }
+                    }
                 }
                 lock.lock(); results["UP-" + route.id] = result; lock.unlock()
             }
@@ -113,7 +116,8 @@ struct WorkerStatus: Codable {
     var connections: Int? = nil
 }
 struct Command: Codable { var id = UUID().uuidString; var action: String; var route: String? = nil }
-func proxyProbe(port: Int, url: String = healthURL) -> Bool {
+func proxyProbe(port: Int) -> Bool { healthURLs.contains { proxyProbeOnce(port:port,url:$0) } }
+func proxyProbeOnce(port: Int, url: String) -> Bool {
     let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
     p.arguments = ["--silent", "--output", "/dev/null", "--write-out", "%{http_code}", "--connect-timeout", "3", "--max-time", "6", "--noproxy", "", "--proxy", "http://127.0.0.1:\(port)", url]
     let output = Pipe(); p.standardOutput = output; p.standardError = FileHandle.nullDevice
