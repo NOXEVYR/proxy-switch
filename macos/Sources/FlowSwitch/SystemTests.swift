@@ -12,7 +12,9 @@ func systemSelfTest() throws {
     let old: [String:Any] = ["HTTPEnable":1,"HTTPProxy":"127.0.0.1","HTTPPort":dead,"ProxyAutoConfigEnable":1,"ProxyAutoConfigURLString":"https://example.invalid/proxy.pac","ExceptionsList":["localhost","*.internal"]]
     func write(_ value: [String:Any]) throws {
         let prefs = try proxy.prefs()
-        guard SCPreferencesPathSetValue(prefs,"/NetworkServices/fixture" as CFString,["UserDefinedName":"Isolated fixture","Interface":["DeviceName":"en0","Hardware":"Ethernet","Type":"Ethernet"],"Proxies":value] as CFDictionary), SCPreferencesCommitChanges(prefs), SCPreferencesApplyChanges(prefs) else { throw FlowError("Fixture preferences failed") }
+        let row: [String:Any] = ["UserDefinedName":"Isolated fixture","Interface":["DeviceName":"en0","Hardware":"Ethernet","Type":"Ethernet"],"Proxies":value]
+        guard SCPreferencesSetValue(prefs,"NetworkServices" as CFString,["fixture":row] as CFDictionary) else { throw FlowError("Fixture set failed: \(SCError())") }
+        try proxy.commit(prefs)
     }
     func read() throws -> [String:Any] {
         let p = try proxy.prefs(); guard let proto = proxy.protocols(p).first?.1 else { throw FlowError("Fixture protocol missing") }; return proxy.config(proto)

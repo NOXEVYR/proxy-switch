@@ -24,6 +24,7 @@ final class SystemProxy {
         guard status == errAuthorizationSuccess else { throw FlowError("未获得修改网络设置的授权；系统代理未接管。") }
     }
     func prefs() throws -> SCPreferences {
+        if let testPreferences, let value = SCPreferencesCreate(nil,"FlowSwitch test" as CFString,testPreferences.path as CFString) { return value }
         guard let value = SCPreferencesCreateWithAuthorization(nil, "FlowSwitch" as CFString, testPreferences.map { $0.path as CFString }, authorization) else { throw FlowError("无法读取系统网络设置。") }; return value
     }
     func protocols(_ prefs: SCPreferences) -> [(String, SCNetworkProtocol)] {
@@ -35,7 +36,8 @@ final class SystemProxy {
     }
     func config(_ proto: SCNetworkProtocol) -> [String:Any] { SCNetworkProtocolGetConfiguration(proto) as? [String:Any] ?? [:] }
     func commit(_ prefs: SCPreferences) throws {
-        guard SCPreferencesCommitChanges(prefs), SCPreferencesApplyChanges(prefs) else { throw FlowError("系统代理写入或应用失败；已保留恢复记录。") }
+        guard SCPreferencesCommitChanges(prefs) else { throw FlowError("系统代理写入失败（\(SCError())）；已保留恢复记录。") }
+        if testPreferences == nil && !SCPreferencesApplyChanges(prefs) { throw FlowError("系统代理应用失败；已保留恢复记录。") }
     }
     func activate(port: Int) throws {
         guard !fm.fileExists(atPath: ledger.path) else { throw FlowError("存在待恢复会话，请先恢复残留设置。") }
