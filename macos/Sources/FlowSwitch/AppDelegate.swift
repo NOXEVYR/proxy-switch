@@ -1,6 +1,14 @@
 import AppKit
 import FlowModel
 
+final class MainPanel: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        NSBezierPath(rect:bounds).fill()
+        super.draw(dirtyRect)
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var window: NSWindow!
     var tray: NSStatusItem!
@@ -56,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func build() {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:980,height:810),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+        window.contentView = MainPanel(frame:NSRect(x:0,y:0,width:980,height:810))
         window.title = "流向 FlowSwitch · macOS \(appVersion)"; window.delegate = self; window.minSize = NSSize(width:900,height:810); window.center()
         let menu = NSMenu(); let top = NSMenuItem(); menu.addItem(top)
         top.submenu = NSMenu(title:"FlowSwitch"); top.submenu?.addItem(withTitle:"停止服务并退出",action:#selector(quit),keyEquivalent:"q").target = self
