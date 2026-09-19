@@ -54,6 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func row(_ views: [NSView]) -> NSStackView {
         let stack = NSStackView(views:views); stack.orientation = .horizontal; stack.distribution = .fill; stack.spacing = 8; stack.alignment = .centerY
         for view in views { stack.setVisibilityPriority(.mustHold,for:view) }
+        if views.contains(where: { $0 is NSButton }) {
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1),for:.horizontal)
+            spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1),for:.horizontal)
+            stack.addArrangedSubview(spacer)
+            spacer.widthAnchor.constraint(greaterThanOrEqualToConstant:0).isActive = true
+        }
         return stack
     }
     func scroll(_ text: NSTextView, height: CGFloat) -> NSScrollView {
