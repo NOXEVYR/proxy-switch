@@ -32,11 +32,14 @@ extension AppDelegate {
                     if view is NSScrollView { return }
                     for child in view.subviews {
                         let rect = child.convert(child.bounds,to:window.contentView)
-                        try check(rect.minX >= -1 && rect.maxX <= window.contentView!.bounds.width+1 && rect.minY >= -1 && rect.maxY <= window.contentView!.bounds.height+1,"Control escaped window: \(type(of:child))")
+                        try check(rect.minX >= -1 && rect.maxX <= window.contentView!.bounds.width+1 && rect.minY >= -1 && rect.maxY <= window.contentView!.bounds.height+1,"Control escaped window: \(type(of:child)), rect=\(rect), window=\(window.contentView!.bounds), page=\(index)")
                         try verify(child)
                     }
                 }
                 try verify(page)
+                for control in index == 0 ? [name,host,port] : index == 1 ? [ruleValue] : [] {
+                    try check(!control.isHiddenOrHasHiddenAncestor && control.visibleRect.width >= control.bounds.width-1,"Input hidden or clipped after resize")
+                }
             }
         }
         try check(try Data(contentsOf:root.appendingPathComponent("settings.json")) == saved,"Layout changed saved settings")
@@ -52,7 +55,7 @@ extension AppDelegate {
         if let index = CommandLine.arguments.firstIndex(of:"--screenshot"), index+1 < CommandLine.arguments.count {
             let target = URL(fileURLWithPath:CommandLine.arguments[index+1])
             for page in 0..<3 {
-                selectPage(page); window.displayIfNeeded()
+                selectPage(page); window.contentView!.layoutSubtreeIfNeeded(); window.displayIfNeeded()
                 guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in:view.bounds) else { throw FlowError("Screenshot unavailable") }
                 view.cacheDisplay(in:view.bounds,to:rep)
                 let file = page == 0 ? target : target.deletingLastPathComponent().appendingPathComponent("ui-page-\(page).png")

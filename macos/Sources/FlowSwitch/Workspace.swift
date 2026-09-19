@@ -130,7 +130,9 @@ extension AppDelegate {
         name.placeholderString = "如：日常线路"; host.placeholderString = "127.0.0.1"; port.placeholderString = "7897"
         ruleValue.placeholderString = "example.com 或程序可执行文件路径"
         editing += [name,host,port,ingress,kind,removeRoute,allowDirect,ruleKind,ruleRoute,ruleValue,removeRule]
-        let routeFields = row([field("名称",name,width:150),field("协议",kind,width:90),field("服务器地址",host),field("端口",port,width:75)])
+        let hostField = field("服务器地址",host)
+        let routeFields = row([field("名称",name,width:150),field("协议",kind,width:90),hostField,field("端口",port,width:75)])
+        hostField.widthAnchor.constraint(equalTo:routeFields.widthAnchor,constant:-339).isActive = true
         let routeEditor = card("添加线路",[routeFields,row([note("使用已有的 HTTP / SOCKS5 代理入口。"),button("添加线路",#selector(addRoute),edit:true)])])
         removeRoute.widthAnchor.constraint(equalToConstant:220).isActive = true
         let routeList = card("已配置线路",[scroll(routeText,height:88),row([removeRoute,button("删除线路",#selector(deleteRoute),edit:true)]),note("自动备用按列表顺序选择，当前备用可用时不会自动跳回。")])
@@ -140,7 +142,9 @@ extension AppDelegate {
 
         removeRule.widthAnchor.constraint(equalToConstant:280).isActive = true
         let ruleList = card("已保存规则",[scroll(ruleText,height:136),row([removeRule,button("删除规则",#selector(deleteRule),edit:true)])])
-        let ruleFields = row([field("匹配方式",ruleKind,width:140),field("域名或程序路径",ruleValue),field("指定线路",ruleRoute,width:150)])
+        let valueField = field("域名或程序路径",ruleValue)
+        let ruleFields = row([field("匹配方式",ruleKind,width:140),valueField,field("指定线路",ruleRoute,width:150)])
+        valueField.widthAnchor.constraint(equalTo:ruleFields.widthAnchor,constant:-306).isActive = true
         let ruleEditor = card("添加分流规则",[ruleFields,row([button("选择程序…",#selector(chooseApp),edit:true),button("添加规则",#selector(addRule),edit:true)]),note("网站规则优先于程序规则。程序路径匹配依赖内核识别，仅影响进入流向的连接。")])
         let rulePage = page([ruleList,ruleEditor])
         repairButton = button("修复失效入口 / 恢复残留",#selector(repair))
