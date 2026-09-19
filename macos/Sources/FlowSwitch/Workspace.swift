@@ -51,12 +51,14 @@ extension AppDelegate {
         return stack
     }
     func buildWorkspace() {
+        func stage(_ text: String) { if CommandLine.arguments.contains("--ui-smoke") { fputs("UI build: \(text)\n",stderr) } }
+        stage("sidebar")
         window.appearance = NSAppearance(named:.darkAqua)
         let container = window.contentView!
         let sidebar = WorkspaceSurface(NSColor(srgbRed:19/255,green:33/255,blue:40/255,alpha:1))
         sidebar.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(sidebar)
         NSLayoutConstraint.activate([sidebar.leadingAnchor.constraint(equalTo:container.leadingAnchor),sidebar.topAnchor.constraint(equalTo:container.topAnchor),sidebar.bottomAnchor.constraint(equalTo:container.bottomAnchor),sidebar.widthAnchor.constraint(equalToConstant:184)])
-        let icon = NSImageView(image:NSImage(named:NSImage.applicationIconName) ?? NSImage()); icon.imageScaling = .scaleProportionallyUpOrDown
+        let icon = NSImageView(image:NSImage(contentsOf:Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/FlowSwitch.icns")) ?? NSImage()); icon.imageScaling = .scaleProportionallyUpOrDown
         icon.widthAnchor.constraint(equalToConstant:68).isActive = true; icon.heightAnchor.constraint(equalToConstant:68).isActive = true
         let brand = label("流向",size:28); brand.font = .systemFont(ofSize:28,weight:.semibold)
         let wordmark = note("F L O W S W I T C H")
@@ -74,6 +76,7 @@ extension AppDelegate {
         sideFooter.translatesAutoresizingMaskIntoConstraints = false; sidebar.addSubview(sideFooter)
         NSLayoutConstraint.activate([sideFooter.leadingAnchor.constraint(equalTo:navigation.leadingAnchor),sideFooter.trailingAnchor.constraint(equalTo:navigation.trailingAnchor),sideFooter.bottomAnchor.constraint(equalTo:sidebar.bottomAnchor,constant:-24)])
 
+        stage("connection control")
         pageTitle.font = .systemFont(ofSize:26,weight:.semibold)
         pageSubtitle.textColor = FlowStyle.muted; pageSubtitle.font = .systemFont(ofSize:12)
         title.font = .systemFont(ofSize:14,weight:.semibold); detail.font = .systemFont(ofSize:12); detail.textColor = FlowStyle.muted
@@ -91,6 +94,7 @@ extension AppDelegate {
         for view in content.arrangedSubviews { view.widthAnchor.constraint(equalTo:content.widthAnchor).isActive = true }
         hostView.setContentHuggingPriority(.defaultLow,for:.vertical)
 
+        stage("pages")
         kind.addItems(withTitles:["HTTP","SOCKS5"]); ruleKind.addItems(withTitles:["域名及子域","精确域名","程序路径"])
         name.placeholderString = "如：日常线路"; host.placeholderString = "127.0.0.1"; port.placeholderString = "7897"
         ruleValue.placeholderString = "example.com 或程序可执行文件路径"
@@ -114,7 +118,9 @@ extension AppDelegate {
         for p in pages { pin(p,to:hostView) }
         ingress.stringValue = String(settings.port); allowDirect.state = settings.allowDirect ? .on : .off
         diagnostics.string = "尚未开始检查。点击「排查网络」只读检查系统代理。\n\n当前为 macOS 试用版：未公证，没有 TUN。\n忽略系统代理的程序不会被自动接管。\n配置仅保存在本机，不导入第三方订阅或账号。"
+        stage("initial selection")
         selectPage(0); poll()
+        stage("ready")
     }
     @objc func navigate(_ sender: NSButton) { selectPage(sender.tag) }
     func selectPage(_ index: Int) {
@@ -123,6 +129,6 @@ extension AppDelegate {
         for (i,b) in navigationButtons.enumerated() { b.bezelColor = i == index ? FlowStyle.accent.withAlphaComponent(0.22) : .clear; b.contentTintColor = i == index ? FlowStyle.accent : FlowStyle.muted; b.state = i == index ? .on : .off }
         pageTitle.stringValue = ["线路管理","分流规则","网络诊断"][index]
         pageSubtitle.stringValue = ["连接已有代理，为日常网络选择一个可靠入口。","让网站和程序，各自走合适的线路。","查看入口状态，找出断连原因，再进行修复。"][index]
-        window.contentView?.layoutSubtreeIfNeeded()
+        window.contentView?.needsLayout = true
     }
 }
