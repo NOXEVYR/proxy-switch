@@ -3,7 +3,7 @@ import FlowModel
 import Network
 import Darwin
 
-let appVersion = "0.1.0-preview.2"
+let appVersion = "0.1.0-preview.3"
 let healthURL = "https://www.gstatic.com/generate_204"
 let healthURLs = [healthURL,"https://www.msftconnecttest.com/connecttest.txt"]
 let fm = FileManager.default

@@ -1,4 +1,4 @@
-# 流向 FlowSwitch · macOS 测试版 0.1.0-preview.2
+# 流向 FlowSwitch · macOS 测试版 0.1.0-preview.3
 
 原生 AppKit 桌面程序，macOS 13 及以上，分别构建 Apple 芯片 arm64 和 Intel x86_64。程序包自带锁定的 mihomo 1.19.29，不需要安装 Node、Python、Homebrew 或 Clash。仍需要用户自己的无认证 HTTP / SOCKS5 上游，不提供节点、订阅或 VPN 服务。
 

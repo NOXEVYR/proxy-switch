@@ -2,7 +2,7 @@
 import argparse, gzip, hashlib, json, os, pathlib, plistlib, shutil, subprocess, sys, urllib.request, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-preview.2"
+VERSION = "0.1.0-preview.3"
 
 def run(*args):
     print("RUN", pathlib.Path(args[0]).name, args[1] if len(args) > 1 else "", flush=True)
@@ -34,7 +34,7 @@ def main():
         (resources / "mihomo-LICENSE").write_bytes(z.read("mihomo-1.19.29/LICENSE"))
     for file in ["README.md", "runtime.lock.json"]: shutil.copy2(ROOT / file, resources / file)
     shutil.copy2(ROOT.parent / "LICENSE", resources / "FlowSwitch-LICENSE")
-    info = {"CFBundleExecutable":"FlowSwitch", "CFBundleIdentifier":"io.github.turnsolesama.FlowSwitch", "CFBundleName":"FlowSwitch", "CFBundleDisplayName":"流向 FlowSwitch", "CFBundlePackageType":"APPL", "CFBundleShortVersionString":"0.1.0", "CFBundleVersion":"2", "LSMinimumSystemVersion":"13.0", "NSHighResolutionCapable":True, "NSPrincipalClass":"NSApplication", "NSHumanReadableCopyright":"FlowSwitch contributors. Includes mihomo GPL-3.0."}
+    info = {"CFBundleExecutable":"FlowSwitch", "CFBundleIdentifier":"io.github.turnsolesama.FlowSwitch", "CFBundleName":"FlowSwitch", "CFBundleDisplayName":"流向 FlowSwitch", "CFBundlePackageType":"APPL", "CFBundleShortVersionString":"0.1.0", "CFBundleVersion":"3", "LSMinimumSystemVersion":"13.0", "NSHighResolutionCapable":True, "NSPrincipalClass":"NSApplication", "NSHumanReadableCopyright":"FlowSwitch contributors. Includes mihomo GPL-3.0."}
     (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     iconset = output / "FlowSwitch.iconset"; iconset.mkdir()
     for size in [16, 32, 128, 256, 512]:

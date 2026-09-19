@@ -2,18 +2,17 @@ import AppKit
 import FlowModel
 
 enum FlowStyle {
-    static let canvas = NSColor(srgbRed:16/255,green:25/255,blue:31/255,alpha:1)
-    static let surface = NSColor(srgbRed:24/255,green:37/255,blue:44/255,alpha:1)
-    static let accent = NSColor(srgbRed:112/255,green:221/255,blue:189/255,alpha:1)
-    static let muted = NSColor(srgbRed:165/255,green:187/255,blue:185/255,alpha:1)
+    static let canvas = NSColor(srgbRed:18/255,green:28/255,blue:43/255,alpha:1)
+    static let surface = NSColor(srgbRed:27/255,green:42/255,blue:61/255,alpha:1)
+    static let accent = NSColor(srgbRed:158/255,green:219/255,blue:250/255,alpha:1)
+    static let muted = NSColor(srgbRed:175/255,green:190/255,blue:208/255,alpha:1)
     static var menuIcon: NSImage {
         let image = NSImage(size:NSSize(width:18,height:18),flipped:false) { _ in
             let path = NSBezierPath(); path.lineWidth = 1.8; path.lineCapStyle = .round; path.lineJoinStyle = .round
-            path.move(to:NSPoint(x:2,y:9)); path.line(to:NSPoint(x:6,y:9))
-            path.curve(to:NSPoint(x:12,y:14),controlPoint1:NSPoint(x:10,y:9),controlPoint2:NSPoint(x:8,y:14)); path.line(to:NSPoint(x:16,y:14))
-            path.move(to:NSPoint(x:13,y:17)); path.line(to:NSPoint(x:16,y:14)); path.line(to:NSPoint(x:13,y:11))
-            path.move(to:NSPoint(x:6,y:9)); path.curve(to:NSPoint(x:12,y:4),controlPoint1:NSPoint(x:10,y:9),controlPoint2:NSPoint(x:8,y:4)); path.line(to:NSPoint(x:16,y:4))
-            path.move(to:NSPoint(x:13,y:7)); path.line(to:NSPoint(x:16,y:4)); path.line(to:NSPoint(x:13,y:1))
+            path.appendRoundedRect(NSRect(x:2,y:5,width:5,height:11),xRadius:1.3,yRadius:1.3)
+            path.appendRoundedRect(NSRect(x:11,y:2,width:5,height:11),xRadius:1.3,yRadius:1.3)
+            path.move(to:NSPoint(x:1,y:11))
+            path.curve(to:NSPoint(x:17,y:7),controlPoint1:NSPoint(x:7,y:15),controlPoint2:NSPoint(x:10,y:3))
             NSColor.black.setStroke(); path.stroke(); return true
         }
         image.isTemplate = true; return image
@@ -23,7 +22,7 @@ enum FlowStyle {
 final class FlowActionButton: NSButton {
     override var intrinsicContentSize: NSSize { let size = super.intrinsicContentSize; return NSSize(width:size.width+16,height:34) }
     override func draw(_ dirtyRect: NSRect) {
-        let fill = bezelColor == nil || bezelColor == .clear ? NSColor(srgbRed:35/255,green:52/255,blue:60/255,alpha:1) : bezelColor!
+        let fill = bezelColor == nil || bezelColor == .clear ? NSColor(srgbRed:38/255,green:58/255,blue:81/255,alpha:1) : bezelColor!
         (isEnabled ? fill : fill.withAlphaComponent(0.35)).setFill()
         let path = NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:7,yRadius:7); path.fill()
         if isHighlighted { NSColor.white.withAlphaComponent(0.08).setFill(); path.fill() }
@@ -87,7 +86,7 @@ extension AppDelegate {
         stage("sidebar")
         window.appearance = NSAppearance(named:.darkAqua)
         let container = window.contentView!
-        let sidebar = WorkspaceSurface(NSColor(srgbRed:19/255,green:33/255,blue:40/255,alpha:1))
+        let sidebar = WorkspaceSurface(NSColor(srgbRed:22/255,green:35/255,blue:55/255,alpha:1))
         sidebar.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(sidebar)
         NSLayoutConstraint.activate([sidebar.leadingAnchor.constraint(equalTo:container.leadingAnchor),sidebar.topAnchor.constraint(equalTo:container.topAnchor),sidebar.bottomAnchor.constraint(equalTo:container.bottomAnchor),sidebar.widthAnchor.constraint(equalToConstant:184)])
         let icon = NSImageView(image:NSImage(contentsOf:Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/FlowSwitch.icns")) ?? NSImage()); icon.imageScaling = .scaleProportionallyUpOrDown
