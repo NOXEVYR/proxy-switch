@@ -6,6 +6,38 @@ enum FlowStyle {
     static let surface = NSColor(srgbRed:24/255,green:37/255,blue:44/255,alpha:1)
     static let accent = NSColor(srgbRed:112/255,green:221/255,blue:189/255,alpha:1)
     static let muted = NSColor(srgbRed:165/255,green:187/255,blue:185/255,alpha:1)
+    static var menuIcon: NSImage {
+        let image = NSImage(size:NSSize(width:18,height:18),flipped:false) { _ in
+            let path = NSBezierPath(); path.lineWidth = 1.8; path.lineCapStyle = .round; path.lineJoinStyle = .round
+            path.move(to:NSPoint(x:2,y:9)); path.line(to:NSPoint(x:6,y:9))
+            path.curve(to:NSPoint(x:12,y:14),controlPoint1:NSPoint(x:10,y:9),controlPoint2:NSPoint(x:8,y:14)); path.line(to:NSPoint(x:16,y:14))
+            path.move(to:NSPoint(x:13,y:17)); path.line(to:NSPoint(x:16,y:14)); path.line(to:NSPoint(x:13,y:11))
+            path.move(to:NSPoint(x:6,y:9)); path.curve(to:NSPoint(x:12,y:4),controlPoint1:NSPoint(x:10,y:9),controlPoint2:NSPoint(x:8,y:4)); path.line(to:NSPoint(x:16,y:4))
+            path.move(to:NSPoint(x:13,y:7)); path.line(to:NSPoint(x:16,y:4)); path.line(to:NSPoint(x:13,y:1))
+            NSColor.black.setStroke(); path.stroke(); return true
+        }
+        image.isTemplate = true; return image
+    }
+}
+
+final class FlowActionButton: NSButton {
+    override var intrinsicContentSize: NSSize { let size = super.intrinsicContentSize; return NSSize(width:size.width+16,height:34) }
+    override func draw(_ dirtyRect: NSRect) {
+        let fill = bezelColor == nil || bezelColor == .clear ? NSColor(srgbRed:35/255,green:52/255,blue:60/255,alpha:1) : bezelColor!
+        (isEnabled ? fill : fill.withAlphaComponent(0.35)).setFill()
+        let path = NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:7,yRadius:7); path.fill()
+        if isHighlighted { NSColor.white.withAlphaComponent(0.08).setFill(); path.fill() }
+        if window?.firstResponder === self { FlowStyle.accent.setStroke(); path.lineWidth = 1.5; path.stroke() }
+        let color = isEnabled ? (contentTintColor ?? .labelColor) : FlowStyle.muted.withAlphaComponent(0.5)
+        let paragraph = NSMutableParagraphStyle(); paragraph.alignment = alignment == .left ? .left : .center; paragraph.lineBreakMode = .byTruncatingTail
+        let text = NSAttributedString(string:title,attributes:[.font:NSFont.systemFont(ofSize:12,weight:.medium),.foregroundColor:color,.paragraphStyle:paragraph])
+        var inset: CGFloat = 10
+        if let image = image {
+            let symbol = image.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors:[color])) ?? image
+            symbol.draw(in:NSRect(x:12,y:(bounds.height-16)/2,width:16,height:16)); inset = 38
+        }
+        text.draw(in:NSRect(x:inset,y:(bounds.height-text.size().height)/2,width:bounds.width-inset-10,height:text.size().height))
+    }
 }
 
 final class WorkspaceSurface: NSView {
