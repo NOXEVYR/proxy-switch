@@ -1,3 +1,16 @@
+# macOS 0.1.0-preview.3 双入口主题验收 · 2026-09-19
+
+运行代码来源 `5acef692a267e8c5b5919a02026b74a7168a5ced`。Apple 芯片与 Intel 两种架构的 [原生 CI](https://github.com/turnsolesama/proxy-switch/actions/runs/35435129241) 均成功。
+
+- 双入口 Dock 图标与单色菜单栏轮廓，深蓝灰、冰蓝、银白工作台。
+- 修正窄窗口的输入区域约束，禁止操作控件被自动挤出；补充输入框可见性检查，截图前等待布局完成。
+- `swift test`、隔离 SystemConfiguration、真实内核 A→B→直连→B、网站例外、关闭 A 后切 B、拒绝兜底与控制器认证检查通过。
+- 真实 AppKit 检查切页、草稿保留、线路/规则增删和持久化、三种窗口尺寸。ZIP 解压后重新验证 ad-hoc 签名并运行请求测试。
+- 最终资产大小、SHA-256 与包内逐文件摘要保存在 Release 的校验文件中。
+
+仍为未公证测试版，最低 macOS 13。CI 不代表真实用户授权弹窗、进程归属、账号登录或长期会话验收。以下为历史记录。
+
+---
 # macOS 0.1.0-preview.2 界面验收 · 2026-09-19
 
 代码与二进制来源：`2d18e1a0a4592324c1b72cf67f8548a1dc1cbdbd`。双架构 [原生 CI 记录](https://github.com/turnsolesama/proxy-switch/actions/runs/35430997194) 均成功。
