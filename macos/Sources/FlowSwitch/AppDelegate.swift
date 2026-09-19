@@ -49,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func label(_ text: String, size: CGFloat = 13) -> NSTextField { let view = NSTextField(labelWithString:text); view.font = .systemFont(ofSize:size); return view }
     func button(_ text: String, _ action: Selector, edit: Bool = false) -> NSButton {
-        let b = NSButton(title:text,target:self,action:action); b.bezelStyle = .rounded; if edit { editing.append(b) }; return b
+        let b = FlowActionButton(title:text,target:self,action:action); b.bezelStyle = .rounded; b.isBordered = false; if edit { editing.append(b) }; return b
     }
     func row(_ views: [NSView]) -> NSStackView {
         let stack = NSStackView(views:views); stack.orientation = .horizontal; stack.spacing = 8; stack.alignment = .centerY; return stack
@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let editTop = NSMenuItem(); menu.addItem(editTop); editTop.submenu = NSMenu(title:"编辑")
         for (t,s,k) in [("复制",#selector(NSText.copy(_:)),"c"),("粘贴",#selector(NSText.paste(_:)),"v"),("全选",#selector(NSText.selectAll(_:)),"a")] { editTop.submenu?.addItem(withTitle:t,action:s,keyEquivalent:k) }
         NSApp.mainMenu = menu
-        tray = NSStatusBar.system.statusItem(withLength:NSStatusItem.variableLength); tray.button?.title = "流向"
+        tray = NSStatusBar.system.statusItem(withLength:NSStatusItem.variableLength); tray.button?.title = "流向"; tray.button?.image = FlowStyle.menuIcon
         let tm = NSMenu(); tm.addItem(withTitle:"打开流向",action:#selector(showWindow),keyEquivalent:"").target = self
         tm.addItem(withTitle:"停止服务并退出",action:#selector(quit),keyEquivalent:"").target = self; tray.menu = tm
         buildWorkspace()
