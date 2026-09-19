@@ -7,13 +7,13 @@ namespace FlowSwitch.UI
 {
     public static class Palette
     {
-        public static readonly Color Canvas = ColorTranslator.FromHtml("#14171C");
-        public static readonly Color Surface = ColorTranslator.FromHtml("#1C2027");
-        public static readonly Color Raised = ColorTranslator.FromHtml("#282E38");
-        public static readonly Color Border = ColorTranslator.FromHtml("#39424F");
-        public static readonly Color Text = ColorTranslator.FromHtml("#EDF0F5");
-        public static readonly Color Muted = ColorTranslator.FromHtml("#ADB6C4");
-        public static readonly Color Accent = ColorTranslator.FromHtml("#ACC8F0");
+        public static readonly Color Canvas = ColorTranslator.FromHtml("#10191F");
+        public static readonly Color Surface = ColorTranslator.FromHtml("#18252C");
+        public static readonly Color Raised = ColorTranslator.FromHtml("#23343C");
+        public static readonly Color Border = ColorTranslator.FromHtml("#32474F");
+        public static readonly Color Text = ColorTranslator.FromHtml("#EDF5F3");
+        public static readonly Color Muted = ColorTranslator.FromHtml("#A5BBB9");
+        public static readonly Color Accent = ColorTranslator.FromHtml("#70DDBD");
         public static GraphicsPath Round(Rectangle rect, int radius)
         {
             var p = new GraphicsPath(); int d = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height));
@@ -59,6 +59,7 @@ namespace FlowSwitch.UI
         public bool Primary {get;set;}
         public bool Selected {get;set;}
         public bool Navigation {get;set;}
+        public int Glyph {get;set;}
         public ActionButton() { DoubleBuffered=true; FlatStyle=FlatStyle.Flat; FlatAppearance.BorderSize=0; UseVisualStyleBackColor=false; BackColor=Palette.Raised; ForeColor=Palette.Text; }
         protected override void OnMouseEnter(EventArgs e){over=true;Invalidate();base.OnMouseEnter(e);}
         protected override void OnMouseLeave(EventArgs e){over=false;down=false;Invalidate();base.OnMouseLeave(e);}
@@ -68,7 +69,7 @@ namespace FlowSwitch.UI
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode=SmoothingMode.AntiAlias; e.Graphics.Clear(Parent==null ? Palette.Canvas : Parent.BackColor);
-            Color fill=Primary?Palette.Accent:(Selected?ColorTranslator.FromHtml("#2B394D"):BackColor);
+            Color fill=Primary?Palette.Accent:(Selected?ColorTranslator.FromHtml("#24493F"):BackColor);
             if(over && Enabled) fill=ControlPaint.Light(fill,0.12f);
             if(down && Enabled) fill=ControlPaint.Dark(fill,0.1f);
             if(!Enabled) fill=Palette.Surface;
@@ -76,10 +77,18 @@ namespace FlowSwitch.UI
             using(var brush=new SolidBrush(fill))
             using(var pen=new Pen(Focused?Palette.Accent:(Primary || Selected?fill:Palette.Border),Focused?2:1))
             { e.Graphics.FillPath(brush,path);e.Graphics.DrawPath(pen,path); }
-            var textColor=!Enabled?Palette.Muted:(Primary?ColorTranslator.FromHtml("#172333"):(Selected?Palette.Accent:ForeColor));
+            if(Navigation) {
+                using(var pen=new Pen(Selected?Palette.Accent:Palette.Muted,1.8f)) {
+                    float x=18,y=Height/2f; pen.StartCap=pen.EndCap=LineCap.Round;
+                    if(Glyph==0){e.Graphics.DrawLine(pen,x,y,x+6,y);e.Graphics.DrawLines(pen,new[]{new PointF(x+6,y-7),new PointF(x+6,y+7),new PointF(x+14,y+7)});e.Graphics.DrawLine(pen,x+6,y-7,x+14,y-7);}
+                    else if(Glyph==1){for(int i=0;i<3;i++){float yy=y-7+i*7;e.Graphics.DrawLine(pen,x,yy,x+16,yy);e.Graphics.DrawEllipse(pen,x+3+i*3,yy-2,4,4);}}
+                    else{e.Graphics.DrawLines(pen,new[]{new PointF(x,y),new PointF(x+4,y),new PointF(x+7,y-7),new PointF(x+11,y+7),new PointF(x+14,y),new PointF(x+18,y)});}
+                }
+            }
+            var textColor=!Enabled?Palette.Muted:(Primary?ColorTranslator.FromHtml("#102D26"):(Selected?Palette.Accent:ForeColor));
             var flags=TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine;
             flags|=Navigation?TextFormatFlags.Left:TextFormatFlags.HorizontalCenter;
-            TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(Navigation?16:7,0,Width-(Navigation?28:14),Height),textColor,flags);
+            TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(Navigation?46:7,0,Width-(Navigation?55:14),Height),textColor,flags);
         }
     }
     public sealed class PageHost : TabControl
@@ -93,7 +102,7 @@ namespace FlowSwitch.UI
         public RouteChoice(){DrawMode=DrawMode.OwnerDrawFixed;ItemHeight=27;FlatStyle=FlatStyle.Flat;BackColor=Palette.Raised;ForeColor=Palette.Text;}
         protected override void OnDrawItem(DrawItemEventArgs e)
         {
-            Color fill=(e.State&DrawItemState.Selected)!=0?ColorTranslator.FromHtml("#30415A"):Palette.Raised;
+            Color fill=(e.State&DrawItemState.Selected)!=0?ColorTranslator.FromHtml("#24493F"):Palette.Raised;
             using(var b=new SolidBrush(fill))e.Graphics.FillRectangle(b,e.Bounds);
             string text=e.Index>=0?GetItemText(Items[e.Index]):Text;
             TextRenderer.DrawText(e.Graphics,text,Font,new Rectangle(e.Bounds.X+8,e.Bounds.Y,e.Bounds.Width-12,e.Bounds.Height),Palette.Text,TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
@@ -184,7 +193,7 @@ namespace FlowSwitch.UI
         protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
         {
             bool selected=e.Item.Selected;
-            Color fill=selected?ColorTranslator.FromHtml("#30415A"):(e.ItemIndex%2==0?Palette.Surface:ColorTranslator.FromHtml("#20252D"));
+            Color fill=selected?ColorTranslator.FromHtml("#24493F"):(e.ItemIndex%2==0?Palette.Surface:ColorTranslator.FromHtml("#1C2B32"));
             using(var b=new SolidBrush(fill))e.Graphics.FillRectangle(b,e.Bounds);
             var color=selected || e.ColumnIndex<2?Palette.Text:e.Item.ForeColor;
             TextRenderer.DrawText(e.Graphics,e.SubItem.Text,Font,new Rectangle(e.Bounds.X+12,e.Bounds.Y,e.Bounds.Width-18,e.Bounds.Height),color,TextFormatFlags.VerticalCenter|TextFormatFlags.Left|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
