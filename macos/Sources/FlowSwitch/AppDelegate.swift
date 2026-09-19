@@ -52,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let b = FlowActionButton(title:text,target:self,action:action); b.bezelStyle = .rounded; b.isBordered = false; if edit { editing.append(b) }; return b
     }
     func row(_ views: [NSView]) -> NSStackView {
-        let stack = NSStackView(views:views); stack.orientation = .horizontal; stack.spacing = 8; stack.alignment = .centerY; return stack
+        let stack = NSStackView(views:views); stack.orientation = .horizontal; stack.distribution = .fill; stack.spacing = 8; stack.alignment = .centerY
+        for view in views { stack.setVisibilityPriority(.mustHold,for:view) }
+        return stack
     }
     func scroll(_ text: NSTextView, height: CGFloat) -> NSScrollView {
         text.isEditable = false; text.isSelectable = true; text.font = .monospacedSystemFont(ofSize:12,weight:.regular)
