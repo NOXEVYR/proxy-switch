@@ -36,7 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let path = root.appendingPathComponent("settings.json")
             if fm.fileExists(atPath:path.path) { settings = try loadJSON(Settings.self,path); try settings.validate() }
         } catch { detail.stringValue = "配置读取失败，未覆盖原文件：" + error.localizedDescription; busy = true }
+        if CommandLine.arguments.contains("--ui-smoke") { fputs("UI: building workspace\n",stderr) }
         build(); refresh(); showWindow()
+        if CommandLine.arguments.contains("--ui-smoke") { fputs("UI: window shown\n",stderr) }
         if !CommandLine.arguments.contains("--ui-smoke") { timer = Timer.scheduledTimer(withTimeInterval:1.5,repeats:true) { [weak self] _ in self?.poll() } }
         if CommandLine.arguments.contains("--ui-smoke") {
             DispatchQueue.main.asyncAfter(deadline:.now()+2) {
@@ -82,7 +84,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if worker?.isRunning == true { quitting = true; stop(); showWindow(); return .terminateLater }
         return .terminateNow
     }
-    func error(_ e: Error) { let alert = NSAlert(); alert.messageText = "操作未完成"; alert.informativeText = e.localizedDescription; alert.runModal() }
+    func error(_ e: Error) {
+        if CommandLine.arguments.contains("--ui-smoke") { fputs("UI action failed: \(e.localizedDescription)\n",stderr); exit(1) }
+        let alert = NSAlert(); alert.messageText = "操作未完成"; alert.informativeText = e.localizedDescription; alert.runModal()
+    }
     func routeName(_ id: String) -> String { id == "DIRECT" ? "直连" : settings.routes.first(where:{$0.id == id})?.name ?? "未知线路" }
     func routeID(_ popup: NSPopUpButton) -> String { popup.indexOfSelectedItem <= 0 ? "DIRECT" : settings.routes[popup.indexOfSelectedItem-1].id }
     func refresh() {

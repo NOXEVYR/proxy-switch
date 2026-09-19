@@ -9,6 +9,7 @@ extension AppDelegate {
         try check(window.isVisible && pages.count == 3,"Missing workspace")
         try check(root.path.hasPrefix(fm.temporaryDirectory.path) && root.lastPathComponent.hasPrefix("FlowSwitch-UI-"),"UI test is not isolated")
         defer { try? fm.removeItem(at:root) }
+        fputs("UI: route and rule actions\n",stderr)
         name.stringValue = "日常线路"; host.stringValue = "127.0.0.1"; port.stringValue = "17891"; addRoute()
         name.stringValue = "备用线路"; host.stringValue = "127.0.0.1"; port.stringValue = "17892"; addRoute()
         try check(settings.routes.count == 2,"Add route did not persist")
@@ -18,6 +19,7 @@ extension AppDelegate {
         for index in [1,2,0] { navigationButtons[index].performClick(nil); try check(currentPage == index && !pages[index].isHidden,"Navigation failed") }
         try check(ruleValue.stringValue == "未保存的输入","Navigation discarded a draft")
         let saved = try Data(contentsOf:root.appendingPathComponent("settings.json"))
+        fputs("UI: resize and navigation\n",stderr)
         for size in [NSSize(width:1040,height:860),NSSize(width:1140,height:900),NSSize(width:1440,height:980)] {
             window.setContentSize(size)
             for index in 0..<3 {
@@ -38,6 +40,7 @@ extension AppDelegate {
             }
         }
         try check(try Data(contentsOf:root.appendingPathComponent("settings.json")) == saved,"Layout changed saved settings")
+        fputs("UI: persistence and captures\n",stderr)
         removeRule.selectItem(at:0); deleteRule(); removeRoute.selectItem(at:1); deleteRoute()
         try check(settings.rules.isEmpty && settings.routes.count == 1,"Delete actions failed")
         let reloaded = try loadJSON(Settings.self,root.appendingPathComponent("settings.json"))
