@@ -18,6 +18,12 @@ $config=@{Version=3;Routing=@{Adapter='none';ProfileId=''};Profiles=@(@{Id='alph
 [IO.File]::WriteAllText((Join-Path $qaRoot 'env.json'),'{"HTTP_PROXY":null,"HTTPS_PROXY":null,"ALL_PROXY":null,"NO_PROXY":null}')
 [IO.File]::AppendAllText((Join-Path $qaRoot 'ProxyBackend.ps1'),@'
 
+# This test owns the UI dispatch/priority boundary; managed gateway migration is
+# covered by Test-ManagedRouting and the real-core integration suite.
+function Set-UniversalProxy([string]$Key){
+    [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'universal-request'),$Key)
+    Set-SelectedProxy $Key
+}
 function Get-SystemSnapshot {Get-Content -LiteralPath (Join-Path $PSScriptRoot 'system.json') -Raw|ConvertFrom-Json}
 function Get-UserProxyEnv {Get-Content -LiteralPath (Join-Path $PSScriptRoot 'env.json') -Raw|ConvertFrom-Json}
 function Set-SystemSnapshot($Value){Write-LocalJson (Join-Path $PSScriptRoot 'system.json') $Value}
@@ -51,6 +57,7 @@ $qaTimer.Add_Tick({
             [void]$combo.GetType().GetMethod('OnSelectionChangeCommitted',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($combo,@([EventArgs]::Empty))
             $global:clickedAt=$clock.Elapsed.TotalSeconds;(Find-Control $main '统一切换').PerformClick();$global:step=1
         }elseif($global:step -eq 1 -and (Find-Control $main 'QA Beta')){
+            if((Get-Content -LiteralPath (Join-Path $qaRoot 'universal-request') -Raw) -ne 'beta'){throw 'UI did not dispatch the universal route action'}
             $system=Get-Content -LiteralPath (Join-Path $qaRoot 'system.json') -Raw|ConvertFrom-Json
             $environment=Get-Content -LiteralPath (Join-Path $qaRoot 'env.json') -Raw|ConvertFrom-Json
             if($system.Server -ne '127.0.0.1:18082' -or $environment.HTTPS_PROXY -ne 'http://127.0.0.1:18082'){throw 'UI changed without applying both settings'}
@@ -63,4 +70,4 @@ $qaTimer.Add_Tick({
 })
 $qaTimer.Start();try{& (Join-Path $qaRoot 'ProxySwitch.ps1')}finally{$qaTimer.Stop();$qaTimer.Dispose()}
 if($global:failure){throw $global:failure};if($global:step -ne 2){throw 'Switch UI incomplete'}
-'PASS: manual switch preempted inspection, used fast checks, applied system and environment snapshots, displayed progress and verified UI state.'
+'PASS: manual switch preempted inspection, used fast checks, dispatched the universal route action, applied simulated system/environment snapshots and displayed progress; gateway migration is a separate test.'

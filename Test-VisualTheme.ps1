@@ -39,6 +39,7 @@ $checks=@'
             $form.Size=New-Object Drawing.Size($dimensions[0],$dimensions[1]);$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
             if($liveList.Columns[0].Width -lt 140 -or $undo.Right -gt $switchRow.Width -or $unify.Left -le $networkChoice.Right){throw 'Controls overlap or escape the resized window.'}
             if($liveList.Items.Count -ne 120){throw 'Resizing lost application rows.'}
+            foreach($panel in $panels){if($panel.Bottom -gt $cards.ClientSize.Height){throw 'Summary card clipped'};foreach($label in $panel.Controls){if($label.Right -gt $panel.ClientSize.Width -or $label.Bottom -gt $panel.ClientSize.Height){throw 'Summary label clipped'}}}
             $total=($liveList.Columns|Measure-Object Width -Sum).Sum
             if($total -gt $liveList.ClientSize.Width){throw ('Columns overflow: '+$total+' > '+$liveList.ClientSize.Width)}
             if($layout.Right -gt $shellLayout.Width -or $layout.Bottom -gt $shellLayout.Height -or $footer.Bottom -gt $layout.Height){throw 'Workspace or footer clipped.'}

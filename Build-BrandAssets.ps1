@@ -1,4 +1,4 @@
-param([string]$Destination=(Join-Path $PSScriptRoot 'assets'))
+﻿param([string]$Destination=(Join-Path $PSScriptRoot 'assets'))
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 # Original vector geometry, rendered independently at each Windows icon size.
