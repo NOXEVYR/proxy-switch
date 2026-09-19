@@ -54,7 +54,14 @@ def main():
     # This mode uses no default preferences and never calls SCPreferencesApplyChanges.
     print(run("sudo", "-n", str(executable), "--system-selftest"))
     print(run("python3", str(ROOT / "scripts/integration.py"), "--app", str(bundle)))
-    run(str(executable), "--ui-smoke", "--screenshot", str(output / "ui-smoke.png"))
+    ui = subprocess.Popen([str(executable), "--ui-smoke", "--screenshot", str(output / "ui-smoke.png")], cwd=ROOT)
+    try:
+        assert ui.wait(timeout=45) == 0, "Native UI acceptance failed"
+    except subprocess.TimeoutExpired:
+        sample = output / "ui-timeout.txt"
+        subprocess.run(["sample", str(ui.pid), "1", "-file", str(sample)], timeout=10)
+        if sample.exists(): print(sample.read_text()[:22000], flush=True)
+        ui.kill(); ui.wait(); raise
     with zipfile.ZipFile(output / "UI-review.zip", "w", zipfile.ZIP_DEFLATED) as review:
         for image in sorted(output.glob("ui-*.png")): review.write(image, "FlowSwitch-UI/" + image.name)
     provenance = ROOT.parent / "SOURCE_COMMIT.txt"
