@@ -3,7 +3,7 @@ import FlowModel
 
 final class MainPanel: NSView {
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
+        FlowStyle.canvas.setFill()
         NSBezierPath(rect:bounds).fill()
         super.draw(dirtyRect)
     }
@@ -17,7 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var timer: Timer?
     var quitting = false
     var busy = false
-    let root = dataDirectory()
+    let root = CommandLine.arguments.contains("--ui-smoke") ? FileManager.default.temporaryDirectory.appendingPathComponent("FlowSwitch-UI-" + UUID().uuidString) : dataDirectory()
+    var pages = [NSView](), navigationButtons = [NSButton](), currentPage = 0
+    let pageTitle = NSTextField(labelWithString:""), pageSubtitle = NSTextField(labelWithString:"")
     let title = NSTextField(labelWithString:"未接入 · 打开流向不会修改网络")
     let detail = NSTextField(wrappingLabelWithString:"添加已有 HTTP / SOCKS5 入口，然后点击接入。流向不提供线路或订阅。")
     let name = NSTextField(), host = NSTextField(), port = NSTextField(), ingress = NSTextField()
@@ -35,15 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if fm.fileExists(atPath:path.path) { settings = try loadJSON(Settings.self,path); try settings.validate() }
         } catch { detail.stringValue = "配置读取失败，未覆盖原文件：" + error.localizedDescription; busy = true }
         build(); refresh(); showWindow()
-        timer = Timer.scheduledTimer(withTimeInterval:1.5,repeats:true) { [weak self] _ in self?.poll() }
+        if !CommandLine.arguments.contains("--ui-smoke") { timer = Timer.scheduledTimer(withTimeInterval:1.5,repeats:true) { [weak self] _ in self?.poll() } }
         if CommandLine.arguments.contains("--ui-smoke") {
             DispatchQueue.main.asyncAfter(deadline:.now()+2) {
-                assert(self.window.isVisible && self.startButton != nil && self.selected.numberOfItems >= 1)
-                if let index = CommandLine.arguments.firstIndex(of:"--screenshot"), index+1 < CommandLine.arguments.count,
-                   let view = self.window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in:view.bounds) {
-                    view.cacheDisplay(in:view.bounds,to:rep)
-                    try? rep.representation(using:.png,properties:[:])?.write(to:URL(fileURLWithPath:CommandLine.arguments[index+1]))
-                }
+                do { try self.verifyWorkspace() } catch { fputs("UI verification failed: \(error.localizedDescription)\n",stderr); exit(1) }
                 NSApp.terminate(nil)
             }
         }
@@ -57,15 +54,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func scroll(_ text: NSTextView, height: CGFloat) -> NSScrollView {
         text.isEditable = false; text.isSelectable = true; text.font = .monospacedSystemFont(ofSize:12,weight:.regular)
-        text.textContainerInset = NSSize(width:10,height:8); text.autoresizingMask = [.width]
-        let view = NSScrollView(); view.documentView = text; view.hasVerticalScroller = true; view.borderType = .bezelBorder
+        text.textContainerInset = NSSize(width:12,height:10); text.autoresizingMask = [.width]; text.backgroundColor = FlowStyle.canvas; text.textColor = .labelColor
+        let view = NSScrollView(); view.documentView = text; view.hasVerticalScroller = true; view.borderType = .noBorder
         view.heightAnchor.constraint(equalToConstant:height).isActive = true
         return view
     }
     func build() {
-        window = NSWindow(contentRect:NSRect(x:0,y:0,width:980,height:810),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.contentView = MainPanel(frame:NSRect(x:0,y:0,width:980,height:810))
-        window.title = "流向 FlowSwitch · macOS \(appVersion)"; window.delegate = self; window.minSize = NSSize(width:900,height:810); window.center()
+        window = NSWindow(contentRect:NSRect(x:0,y:0,width:1140,height:900),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+        window.contentView = MainPanel(frame:NSRect(x:0,y:0,width:1140,height:900))
+        window.title = "流向 FlowSwitch · macOS \(appVersion)"; window.delegate = self; window.minSize = NSSize(width:1040,height:860); window.center()
         let menu = NSMenu(); let top = NSMenuItem(); menu.addItem(top)
         top.submenu = NSMenu(title:"FlowSwitch"); top.submenu?.addItem(withTitle:"停止服务并退出",action:#selector(quit),keyEquivalent:"q").target = self
         let editTop = NSMenuItem(); menu.addItem(editTop); editTop.submenu = NSMenu(title:"编辑")
@@ -74,39 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         tray = NSStatusBar.system.statusItem(withLength:NSStatusItem.variableLength); tray.button?.title = "流向"
         let tm = NSMenu(); tm.addItem(withTitle:"打开流向",action:#selector(showWindow),keyEquivalent:"").target = self
         tm.addItem(withTitle:"停止服务并退出",action:#selector(quit),keyEquivalent:"").target = self; tray.menu = tm
-        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12; stack.translatesAutoresizingMaskIntoConstraints = false
-        let container = window.contentView!; container.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:container.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:container.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:container.topAnchor,constant:20)])
-        let brand = label("流向  /  FlowSwitch",size:26); brand.font = .systemFont(ofSize:26,weight:.semibold)
-        stack.addArrangedSubview(brand); title.font = .systemFont(ofSize:15,weight:.semibold); stack.addArrangedSubview(title)
-        detail.maximumNumberOfLines = 3; stack.addArrangedSubview(detail); detail.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive = true
-        startButton = button("接入系统代理",#selector(start)); stopButton = button("停止并恢复",#selector(stop)); switchButton = button("切换新连接",#selector(switchRoute))
-        stack.addArrangedSubview(row([label("默认线路"),selected,switchButton,startButton,stopButton]))
-        stack.addArrangedSubview(label("线路 · 自动备用按列表顺序选择；有效备用不会自动跳回首选",size:14))
-        for (field,placeholder,width) in [(name,"线路名称",140.0),(host,"127.0.0.1 或服务器地址",220.0),(port,"端口",70.0),(ingress,"18790",70.0)] {
-            field.placeholderString = placeholder; field.widthAnchor.constraint(equalToConstant:width).isActive = true; editing.append(field)
-        }
-        kind.addItems(withTitles:["HTTP","SOCKS5"]); editing.append(kind)
-        stack.addArrangedSubview(row([name,kind,host,port,button("添加线路",#selector(addRoute),edit:true)]))
-        let rs = scroll(routeText,height:72); stack.addArrangedSubview(rs); rs.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive = true
-        editing.append(removeRoute); editing.append(allowDirect); editing.append(ingress)
-        stack.addArrangedSubview(row([removeRoute,button("删除线路",#selector(deleteRoute),edit:true),label("固定入口"),ingress,allowDirect]))
-        stack.addArrangedSubview(label("分流规则 · 网站优先于程序；仅影响进入流向的流量",size:14))
-        ruleKind.addItems(withTitles:["域名及子域","精确域名","程序路径"]); editing.append(ruleKind); editing.append(ruleRoute); editing.append(ruleValue); editing.append(removeRule)
-        ruleValue.placeholderString = "example.com 或 /Applications/…/Contents/MacOS/…"; ruleValue.widthAnchor.constraint(equalToConstant:330).isActive = true
-        stack.addArrangedSubview(row([ruleKind,ruleValue,button("选择程序",#selector(chooseApp),edit:true),ruleRoute,button("添加规则",#selector(addRule),edit:true)]))
-        let rules = scroll(ruleText,height:83); stack.addArrangedSubview(rules); rules.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive = true
-        stack.addArrangedSubview(row([removeRule,button("删除规则",#selector(deleteRule),edit:true),button("保存设置",#selector(saveSettings),edit:true)]))
-        repairButton = button("修复失效入口 / 恢复残留",#selector(repair))
-        stack.addArrangedSubview(row([button("排查网络",#selector(diagnose)),repairButton,button("打开使用说明",#selector(help))]))
-        let ds = scroll(diagnostics,height:112); stack.addArrangedSubview(ds); ds.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive = true
-        stack.addArrangedSubview(label("关闭窗口继续在菜单栏运行；退出会先恢复代理。修改线路和规则前请停止服务。",size:12))
-        selected.widthAnchor.constraint(equalToConstant:180).isActive = true
-        removeRoute.widthAnchor.constraint(equalToConstant:150).isActive = true; removeRule.widthAnchor.constraint(equalToConstant:220).isActive = true
-        ruleRoute.widthAnchor.constraint(equalToConstant:130).isActive = true
-        ingress.stringValue = String(settings.port); allowDirect.state = settings.allowDirect ? .on : .off
-        diagnostics.string = "测试版：未使用 Developer ID 公证。没有 TUN，不接管忽略系统代理的程序。\n程序路径匹配依赖内核在当前权限下识别进程；未识别时按默认线路处理。\n配置保存在 ~/Library/Application Support/FlowSwitch；不自动导入第三方订阅或账号。"
+        buildWorkspace()
     }
+
     @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     func applicationShouldHandleReopen(_ sender: NSApplication,hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -124,7 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         removeRoute.removeAllItems(); removeRoute.addItems(withTitles:settings.routes.map(\.name))
         removeRule.removeAllItems(); removeRule.addItems(withTitles:settings.rules.map { $0.value })
         routeText.string = settings.routes.enumerated().map { "\($0.offset+1). \($0.element.name)    \($0.element.kind.uppercased())  \($0.element.host):\($0.element.port)" }.joined(separator:"\n")
+        if settings.routes.isEmpty { routeText.string = "还没有线路。\n在下方添加已有代理，即可选择默认线路或设置备用。" }
         ruleText.string = settings.rules.map { "\($0.kind)  \($0.value)  →  \(routeName($0.route))" }.joined(separator:"\n")
+        if settings.rules.isEmpty { ruleText.string = "暂未设置专用规则。\n进入流向的连接将按默认线路处理。" }
     }
     func persist() throws {
         guard !busy else { throw FlowError("原配置无法读取；请先备份并检查配置文件。") }

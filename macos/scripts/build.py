@@ -2,7 +2,7 @@
 import argparse, gzip, hashlib, json, os, pathlib, plistlib, shutil, subprocess, sys, urllib.request, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-preview.1"
+VERSION = "0.1.0-preview.2"
 
 def run(*args):
     print("RUN", pathlib.Path(args[0]).name, args[1] if len(args) > 1 else "", flush=True)
@@ -34,7 +34,7 @@ def main():
         (resources / "mihomo-LICENSE").write_bytes(z.read("mihomo-1.19.29/LICENSE"))
     for file in ["README.md", "runtime.lock.json"]: shutil.copy2(ROOT / file, resources / file)
     shutil.copy2(ROOT.parent / "LICENSE", resources / "FlowSwitch-LICENSE")
-    info = {"CFBundleExecutable":"FlowSwitch", "CFBundleIdentifier":"io.github.turnsolesama.FlowSwitch", "CFBundleName":"FlowSwitch", "CFBundleDisplayName":"流向 FlowSwitch", "CFBundlePackageType":"APPL", "CFBundleShortVersionString":"0.1.0", "CFBundleVersion":"1", "LSMinimumSystemVersion":"13.0", "NSHighResolutionCapable":True, "NSPrincipalClass":"NSApplication", "NSHumanReadableCopyright":"FlowSwitch contributors. Includes mihomo GPL-3.0."}
+    info = {"CFBundleExecutable":"FlowSwitch", "CFBundleIdentifier":"io.github.turnsolesama.FlowSwitch", "CFBundleName":"FlowSwitch", "CFBundleDisplayName":"流向 FlowSwitch", "CFBundlePackageType":"APPL", "CFBundleShortVersionString":"0.1.0", "CFBundleVersion":"2", "LSMinimumSystemVersion":"13.0", "NSHighResolutionCapable":True, "NSPrincipalClass":"NSApplication", "NSHumanReadableCopyright":"FlowSwitch contributors. Includes mihomo GPL-3.0."}
     (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     iconset = output / "FlowSwitch.iconset"; iconset.mkdir()
     for size in [16, 32, 128, 256, 512]:
@@ -55,6 +55,8 @@ def main():
     print(run("sudo", "-n", str(executable), "--system-selftest"))
     print(run("python3", str(ROOT / "scripts/integration.py"), "--app", str(bundle)))
     run(str(executable), "--ui-smoke", "--screenshot", str(output / "ui-smoke.png"))
+    with zipfile.ZipFile(output / "UI-review.zip", "w", zipfile.ZIP_DEFLATED) as review:
+        for image in sorted(output.glob("ui-*.png")): review.write(image, "FlowSwitch-UI/" + image.name)
     provenance = ROOT.parent / "SOURCE_COMMIT.txt"
     source_commit = provenance.read_text().strip() if provenance.exists() else run("git", "rev-parse", "HEAD")
     manifest = {"version":VERSION, "arch":args.arch, "sourceCommit":source_commit, "signature":"ad-hoc; not notarized", "files":{str(f.relative_to(bundle)):hashlib.sha256(f.read_bytes()).hexdigest() for f in bundle.rglob("*") if f.is_file()}}
