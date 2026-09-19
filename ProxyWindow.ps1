@@ -28,10 +28,10 @@ $script:Worker=$null;$script:LastState=$null;$script:LastApps=$null;$script:Next
 $script:Controls=@();$script:RouteButtons=@{};$script:UiRoot=$PSScriptRoot
 $script:MenuOpen=$false;$script:DialogOpen=$false
 $script:DiscoveryStatus='正在自动识别';$script:ChoiceDirty=$false;$script:DiscoveryCache=@()
-$ink=[Drawing.ColorTranslator]::FromHtml('#EDF5F3')
-$muted=[Drawing.ColorTranslator]::FromHtml('#A5BBB9')
-$mint=[Drawing.ColorTranslator]::FromHtml('#70DDBD')
-$paper=[Drawing.ColorTranslator]::FromHtml('#10191F')
+$ink=[Drawing.ColorTranslator]::FromHtml('#EBF3FC')
+$muted=[Drawing.ColorTranslator]::FromHtml('#AFBED0')
+$accent=[Drawing.ColorTranslator]::FromHtml('#9EDBFA')
+$paper=[Drawing.ColorTranslator]::FromHtml('#121C2B')
 $form=New-Object Windows.Forms.Form
 $form.Text='流向 · 网络代理管家 | FlowSwitch '+$script:ProductVersion
 $form.ClientSize=New-Object Drawing.Size(1260,840)
@@ -59,7 +59,7 @@ function New-Label($Parent,$Text,$X,$Y,$W,$H,$Size=10,$Bold=$false) {
 }
 function New-Button($Parent,$Text,$X,$Y,$W,$H,$Action) {
     $b=New-Object FlowSwitch.UI.ActionButton;$b.Text=$Text;$b.SetBounds($X,$Y,$W,$H)
-    $b.FlatStyle='Flat';$b.FlatAppearance.BorderSize=0;$b.BackColor=[Drawing.ColorTranslator]::FromHtml('#23343C')
+    $b.FlatStyle='Flat';$b.FlatAppearance.BorderSize=0;$b.BackColor=[Drawing.ColorTranslator]::FromHtml('#263A51')
     $b.ForeColor=$ink;$b.Cursor=[Windows.Forms.Cursors]::Hand;$b.Add_Click($Action)
     $Parent.Controls.Add($b);$script:Controls+=$b;return $b
 }
@@ -82,7 +82,7 @@ $shellLayout=New-Object Windows.Forms.TableLayoutPanel;$shellLayout.Dock='Fill';
 [void]$shellLayout.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Absolute,180)))
 [void]$shellLayout.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,100)))
 $form.Controls.Add($shellLayout)
-$sidebar=New-Object Windows.Forms.Panel;$sidebar.Dock='Fill';$sidebar.Margin=New-Object Windows.Forms.Padding(0);$sidebar.BackColor=[Drawing.ColorTranslator]::FromHtml('#132128');$shellLayout.Controls.Add($sidebar,0,0)
+$sidebar=New-Object Windows.Forms.Panel;$sidebar.Dock='Fill';$sidebar.Margin=New-Object Windows.Forms.Padding(0);$sidebar.BackColor=[Drawing.ColorTranslator]::FromHtml('#162337');$shellLayout.Controls.Add($sidebar,0,0)
 $shellLayout.Controls.Add($layout,1,0)
 $sideIcon=New-Object Windows.Forms.PictureBox;$sideIcon.SetBounds(18,24,64,64);$sideIcon.SizeMode='Zoom';$sideIcon.Image=(New-Object Drawing.Icon($iconPath,64,64)).ToBitmap();$sidebar.Controls.Add($sideIcon)
 $null=New-Label $sidebar '流向' 24 100 150 48 23 $true
@@ -93,8 +93,8 @@ $sidebar.Add_SizeChanged({$sideFoot.Top=$sidebar.ClientSize.Height-84})
 $header=New-Object Windows.Forms.Panel;$header.Dock='Fill';$header.BackColor=$paper;$header.Margin=New-Object Windows.Forms.Padding(0,0,0,12)
 $layout.Controls.Add($header,0,0)
 $brand=New-Label $header '程序分流' 0 1 240 36 20 $true;$brand.ForeColor=[Drawing.Color]::White
-$sub=New-Label $header '网络工作台' 250 15 280 26 10;$sub.ForeColor=[Drawing.ColorTranslator]::FromHtml('#70DDBD')
-$tagline=New-Label $header '为每个程序选择线路，查看连接的实际去向。' 2 39 670 24 9;$tagline.ForeColor=[Drawing.ColorTranslator]::FromHtml('#A5BBB9')
+$sub=New-Label $header '网络工作台' 250 15 280 26 10;$sub.ForeColor=[Drawing.ColorTranslator]::FromHtml('#9EDBFA')
+$tagline=New-Label $header '为每个程序选择线路，查看连接的实际去向。' 2 39 670 24 9;$tagline.ForeColor=[Drawing.ColorTranslator]::FromHtml('#AFBED0')
 $help=New-Button $header '使用指南' 816 17 92 34 {Show-Guide};$help.Anchor='Top,Right'
 $settings=New-Button $header '代理管理' 916 17 96 34 {$tabs.SelectedTab=$proxyPage};$settings.Anchor='Top,Right'
 $settings.Visible=$false;$sub.Visible=$false
@@ -121,7 +121,7 @@ $networkChoice=New-Object FlowSwitch.UI.RouteChoice;$networkChoice.DropDownStyle
 $networkChoice.Add_SelectionChangeCommitted({$script:ChoiceDirty=$true;$noticeLabel.Text='已选择待应用目标；点击「统一切换」才会更改网络。'})
 $unify=New-Button $switchRow '统一切换' 548 12 146 38 {
     if($networkChoice.SelectedItem){Start-Work 'Switch' $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}
-};$unify.Primary=$true;$unify.BackColor=$mint;$unify.ForeColor=[Drawing.ColorTranslator]::FromHtml('#102D26')
+};$unify.Primary=$true;$unify.BackColor=$accent;$unify.ForeColor=[Drawing.ColorTranslator]::FromHtml('#132D43')
 $undo=New-Button $switchRow '撤回上次更改' 786 12 158 38 {Start-Work 'Restore' ''}
 $switchRow.Add_Layout({$gap=[Math]::Max(12,[int]($form.Font.Height*0.7));$undo.Left=$switchRow.ClientSize.Width-$undo.Width-16;$unify.Left=$undo.Left-$unify.Width-$gap;$networkChoice.Width=[Math]::Max(80,$unify.Left-$networkChoice.Left-$gap)})
 $noticePanel=New-Object Windows.Forms.Panel;$noticePanel.Dock='Fill';$noticePanel.Margin=New-Object Windows.Forms.Padding(0,0,0,8)
@@ -183,7 +183,7 @@ $null=New-Button $clientBar '打开所选代理程序' 0 0 212 36 {if($networkCh
 $null=New-Button $clientBar '代理管理' 0 0 153 36 {$tabs.SelectedTab=$proxyPage}
 $null=New-Label $clientBar '统一切换重置程序专线，保留网站例外；可撤回。' 0 0 510 36 9
 $logHost=New-Object FlowSwitch.UI.LogHost;$logHost.Dock='Fill';$logBox=$logHost.Log;$logBox.Multiline=$true;$logBox.ReadOnly=$true;$logBox.ScrollBars='Vertical';$logBox.Dock='None'
-$logBox.BackColor=[Drawing.ColorTranslator]::FromHtml('#18252C');$logBox.ForeColor=$ink;$logBox.BorderStyle='None'
+$logBox.BackColor=[Drawing.ColorTranslator]::FromHtml('#1B2A3D');$logBox.ForeColor=$ink;$logBox.BorderStyle='None'
 $toolsGrid.Controls.Add($logHost,0,2)
 $actionLabel=New-Label $layout '选择目标 → 统一切换。也可右键程序指定单独线路。' 0 0 1000 32 9
 $actionLabel.Dock='Fill';$actionLabel.TextAlign='MiddleLeft';$actionLabel.ForeColor=$muted;$layout.SetCellPosition($actionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,5)))
@@ -535,7 +535,7 @@ function Show-Applications($Apps) {
         $note=$app.Status
         if($app.Mode -eq 'engine' -and -not $app.RequiresRepair -and $script:LastState.Key -ne (Get-GatewayKey)){$note+=' · 系统入口未接入引擎'}
         [void]$item.SubItems.Add($note)
-        if($app.Policy -ne 'Follow'){$item.ForeColor=$mint;if(-not $app.Loaded -or $note -match '旧连接|失效|切回'){$item.ForeColor=[Drawing.ColorTranslator]::FromHtml('#DEC395')}}
+        if($app.Policy -ne 'Follow'){$item.ForeColor=$accent;if(-not $app.Loaded -or $note -match '旧连接|失效|切回'){$item.ForeColor=[Drawing.ColorTranslator]::FromHtml('#DEC395')}}
         if($app.NeedsRelaunch -or $app.RequiresRepair){$item.ForeColor=[Drawing.ColorTranslator]::FromHtml('#DEC395')}
         [void]$liveList.Items.Add($item);if($selectedPath -and $selectedPath -ieq (Get-ApplicationDisplayKey $app)){$item.Selected=$true}
         if($topPath -and $topPath -ieq (Get-ApplicationDisplayKey $app)){$liveList.TopItem=$item}
@@ -581,7 +581,7 @@ function Open-Client([string]$Key) {
     }catch{Write-Activity $_.Exception.Message}
 }
 function Show-State($State) {
-    $first=($null -eq $script:LastState);$script:LastState=$State;$headline='入口配置一致';$color=$mint
+    $first=($null -eq $script:LastState);$script:LastState=$State;$headline='入口配置一致';$color=$accent
     if(-not $State.Aligned){$headline='系统入口与代理变量尚未统一';$color=[Drawing.ColorTranslator]::FromHtml('#DEC395')}
     if($State.Drift){$headline='当前入口与上次选择不同 · 保留当前设置';$color=$muted}
     if($State.EndpointReady -eq $false){$headline+=' · 入口未就绪';$color=[Drawing.ColorTranslator]::FromHtml('#E5A6A2')}

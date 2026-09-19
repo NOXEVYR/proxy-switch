@@ -7,13 +7,13 @@ namespace FlowSwitch.UI
 {
     public static class Palette
     {
-        public static readonly Color Canvas = ColorTranslator.FromHtml("#10191F");
-        public static readonly Color Surface = ColorTranslator.FromHtml("#18252C");
-        public static readonly Color Raised = ColorTranslator.FromHtml("#23343C");
-        public static readonly Color Border = ColorTranslator.FromHtml("#32474F");
-        public static readonly Color Text = ColorTranslator.FromHtml("#EDF5F3");
-        public static readonly Color Muted = ColorTranslator.FromHtml("#A5BBB9");
-        public static readonly Color Accent = ColorTranslator.FromHtml("#70DDBD");
+        public static readonly Color Canvas = ColorTranslator.FromHtml("#121C2B");
+        public static readonly Color Surface = ColorTranslator.FromHtml("#1B2A3D");
+        public static readonly Color Raised = ColorTranslator.FromHtml("#263A51");
+        public static readonly Color Border = ColorTranslator.FromHtml("#40566F");
+        public static readonly Color Text = ColorTranslator.FromHtml("#EBF3FC");
+        public static readonly Color Muted = ColorTranslator.FromHtml("#AFBED0");
+        public static readonly Color Accent = ColorTranslator.FromHtml("#9EDBFA");
         public static GraphicsPath Round(Rectangle rect, int radius)
         {
             var p = new GraphicsPath(); int d = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height));
@@ -69,7 +69,7 @@ namespace FlowSwitch.UI
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode=SmoothingMode.AntiAlias; e.Graphics.Clear(Parent==null ? Palette.Canvas : Parent.BackColor);
-            Color fill=Primary?Palette.Accent:(Selected?ColorTranslator.FromHtml("#24493F"):BackColor);
+            Color fill=Primary?Palette.Accent:(Selected?ColorTranslator.FromHtml("#28445F"):BackColor);
             if(over && Enabled) fill=ControlPaint.Light(fill,0.12f);
             if(down && Enabled) fill=ControlPaint.Dark(fill,0.1f);
             if(!Enabled) fill=Palette.Surface;
@@ -85,7 +85,7 @@ namespace FlowSwitch.UI
                     else{e.Graphics.DrawLines(pen,new[]{new PointF(x,y),new PointF(x+4,y),new PointF(x+7,y-7),new PointF(x+11,y+7),new PointF(x+14,y),new PointF(x+18,y)});}
                 }
             }
-            var textColor=!Enabled?Palette.Muted:(Primary?ColorTranslator.FromHtml("#102D26"):(Selected?Palette.Accent:ForeColor));
+            var textColor=!Enabled?Palette.Muted:(Primary?ColorTranslator.FromHtml("#132D43"):(Selected?Palette.Accent:ForeColor));
             var flags=TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine;
             flags|=Navigation?TextFormatFlags.Left:TextFormatFlags.HorizontalCenter;
             TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(Navigation?46:7,0,Width-(Navigation?55:14),Height),textColor,flags);
@@ -102,7 +102,7 @@ namespace FlowSwitch.UI
         public RouteChoice(){DrawMode=DrawMode.OwnerDrawFixed;ItemHeight=27;FlatStyle=FlatStyle.Flat;BackColor=Palette.Raised;ForeColor=Palette.Text;}
         protected override void OnDrawItem(DrawItemEventArgs e)
         {
-            Color fill=(e.State&DrawItemState.Selected)!=0?ColorTranslator.FromHtml("#24493F"):Palette.Raised;
+            Color fill=(e.State&DrawItemState.Selected)!=0?ColorTranslator.FromHtml("#304F6C"):Palette.Raised;
             using(var b=new SolidBrush(fill))e.Graphics.FillRectangle(b,e.Bounds);
             string text=e.Index>=0?GetItemText(Items[e.Index]):Text;
             TextRenderer.DrawText(e.Graphics,text,Font,new Rectangle(e.Bounds.X+8,e.Bounds.Y,e.Bounds.Width-12,e.Bounds.Height),Palette.Text,TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
@@ -193,7 +193,7 @@ namespace FlowSwitch.UI
         protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
         {
             bool selected=e.Item.Selected;
-            Color fill=selected?ColorTranslator.FromHtml("#24493F"):(e.ItemIndex%2==0?Palette.Surface:ColorTranslator.FromHtml("#1C2B32"));
+            Color fill=selected?ColorTranslator.FromHtml("#304F6C"):(e.ItemIndex%2==0?Palette.Surface:ColorTranslator.FromHtml("#203247"));
             using(var b=new SolidBrush(fill))e.Graphics.FillRectangle(b,e.Bounds);
             var color=selected || e.ColumnIndex<2?Palette.Text:e.Item.ForeColor;
             TextRenderer.DrawText(e.Graphics,e.SubItem.Text,Font,new Rectangle(e.Bounds.X+12,e.Bounds.Y,e.Bounds.Width-18,e.Bounds.Height),color,TextFormatFlags.VerticalCenter|TextFormatFlags.Left|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
@@ -274,7 +274,7 @@ namespace FlowSwitch.UI
         protected override void OnPaint(PaintEventArgs e){
             e.Graphics.Clear(BackColor);if(target is ListView)using(var b=new SolidBrush(Palette.Raised))e.Graphics.FillRectangle(b,0,0,Width,TrackTop);
             var r=ThumbBounds;if(r.IsEmpty)return;e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
-            using(var path=Palette.Round(r,4))using(var b=new SolidBrush(dragging?Palette.Accent:ColorTranslator.FromHtml("#707D90")))e.Graphics.FillPath(b,path);
+            using(var path=Palette.Round(r,4))using(var b=new SolidBrush(dragging?Palette.Accent:ColorTranslator.FromHtml("#7693B0")))e.Graphics.FillPath(b,path);
         }
         protected override void OnMouseDown(MouseEventArgs e){
             base.OnMouseDown(e);if(e.Button!=MouseButtons.Left)return;var r=ThumbBounds;if(r.IsEmpty)return;
