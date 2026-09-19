@@ -1,4 +1,4 @@
-![流向 FlowSwitch](https://raw.githubusercontent.com/turnsolesama/portfolio/35ecc7e17cb9053279ecc422c3a577f5dafa5104/proxy-switch/assets/FlowSwitch.png)
+<img src="assets/FlowSwitch.png" alt="流向 FlowSwitch" width="144" />
 
 # 流向 FlowSwitch 3.8.2
 
@@ -17,6 +17,12 @@ macOS 13+，自带代理内核，无需 Node、Python 或 Homebrew。支持 HTTP
 **[下载 Apple 芯片版](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/FlowSwitch-macOS-0.1.0-preview.1-arm64.zip)** · **[下载 Intel 版](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/FlowSwitch-macOS-0.1.0-preview.1-x86_64.zip)** · [Mac 源码包](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/FlowSwitch-macOS-0.1.0-preview.1-Source.zip) · [SHA-256](https://github.com/turnsolesama/proxy-switch/releases/download/macos-v0.1.0-preview.1/SHA256SUMS.txt)
 
 解压后将 `FlowSwitch.app` 拖到“应用程序”。详细安装步骤、功能边界见 [Mac 使用说明](macos/README.md)，实际执行证据见 [Mac 验收记录](macos/TEST_REPORT.md)。两个架构均已完成原生构建、隔离请求测试及公开下载包回检；这不代表 Windows 的全部程序适配功能已经移植。
+
+## 桌面工作台
+
+Windows 与 Mac 使用统一的分叉路径图标和深墨绿配色，保持各自的原生界面。线路切换始终放在顶部，分流与诊断分别操作；本轮仅调整布局与呈现，原有代理逻辑保持一致。
+
+![Windows 程序分流工作台（演示数据）](assets/screenshot.png)
 
 ## 快速开始
 

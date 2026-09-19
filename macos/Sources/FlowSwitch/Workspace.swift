@@ -67,8 +67,8 @@ extension AppDelegate {
         for (index,entry) in [("线路管理","point.3.connected.trianglepath.dotted"),("分流规则","arrow.triangle.branch"),("网络诊断","waveform.path.ecg")].enumerated() {
             let b = button(entry.0,#selector(navigate)); b.tag = index; b.image = NSImage(systemSymbolName:entry.1,accessibilityDescription:nil)
             b.imagePosition = .imageLeading; b.alignment = .left; b.heightAnchor.constraint(equalToConstant:42).isActive = true
-            b.widthAnchor.constraint(equalTo: navigation.widthAnchor).isActive = true
             navigation.addArrangedSubview(b); navigationButtons.append(b)
+            b.widthAnchor.constraint(equalTo: navigation.widthAnchor).isActive = true
         }
         navigation.translatesAutoresizingMaskIntoConstraints = false; sidebar.addSubview(navigation)
         NSLayoutConstraint.activate([navigation.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:18),navigation.trailingAnchor.constraint(equalTo:sidebar.trailingAnchor,constant:-18),navigation.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24)])
