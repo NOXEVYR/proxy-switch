@@ -388,6 +388,9 @@ function Set-RoutingSnapshot($Snapshot,$ExpectedBefore=$null) {
     if($null -ne $ExpectedBefore -and -not (Test-SameRouting $current $ExpectedBefore)){throw '程序规则已经被其他窗口改动，保留最新记录；请刷新后重试。'}
     if(-not $current.installed -and (@($current.entries).Count -or $current.defaultRoute)){throw '程序规则状态不一致，未更改任何设置。'}
     $hasLaunch=$null -ne $Snapshot.PSObject.Properties['launchEntries']
+    # A rule-only change must not rewrite unrelated launch records. Besides avoiding
+    # needless file changes, this leaves concurrent launcher edits outside our write set.
+    $needsLaunchWrite=$hasLaunch -and -not (Test-SameRouting ([pscustomobject]@{launchEntries=@($current.launchEntries)}) ([pscustomobject]@{launchEntries=@($Snapshot.launchEntries)}))
     $needsEngine=@($current.programIngresses).Count -or @($Snapshot.programIngresses|Where-Object {$_}).Count -or @($Snapshot.siteRules|Where-Object {$_}).Count -or $current.installed -or @($current.entries).Count -or $current.defaultRoute -or @($Snapshot.entries).Count -or $Snapshot.defaultRoute
     if($needsEngine){
         $boundProfiles=Get-RuleMaintenanceProfiles $writeContext
@@ -397,7 +400,7 @@ function Set-RoutingSnapshot($Snapshot,$ExpectedBefore=$null) {
     }
     $launchWritten=$false
     try{
-        if($hasLaunch){
+        if($needsLaunchWrite){
             if((Read-RuleMaintenanceFile $writeContext.Files['program-proxies.json'].Path).Hash -cne $writeContext.Files['program-proxies.json'].Hash){throw '启动代理记录已改变，请刷新后重试。'}
             Set-ProgramLaunchEntries @($Snapshot.launchEntries);$launchWritten=$true
         }
@@ -564,3 +567,5 @@ function Assert-RestorableEnvironment($Values) {
 
 . (Join-Path $PSScriptRoot 'RuleMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'ManagedRouting.ps1')
+. (Join-Path $PSScriptRoot 'ProgramFamilyRouting.ps1')
+. (Join-Path $PSScriptRoot 'ProgramCleanStart.ps1')

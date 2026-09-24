@@ -1,0 +1,73 @@
+name: Windows verified release
+on:
+  push:
+    branches: ['release/windows-3.9.0']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-release-3.9.0
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify requested version and run isolated tests
+        run: |
+          $ErrorActionPreference='Stop'
+          if([regex]::Match([IO.File]::ReadAllText('Preferences.ps1'),"ProductVersion='([0-9.]+)'").Groups[1].Value -ne '3.9.0'){throw 'This release workflow is limited to 3.9.0'}
+          & .\Test-All.ps1
+          if($LASTEXITCODE -ne 0){throw 'Isolated tests failed'}
+      - name: Prepare official locked runtime
+        run: |
+          & .\Prepare-Runtime.ps1 -Destination "$env:RUNNER_TEMP\flowswitch-runtime"
+      - name: Test real isolated request routing
+        run: |
+          & .\Test-ManagedSwitchChain.ps1 -RuntimeDirectory "$env:RUNNER_TEMP\flowswitch-runtime"
+          if($LASTEXITCODE -ne 0){throw 'Managed switch chain failed'}
+          & node .\Test-ProgramIngressIntegration.cjs "$env:RUNNER_TEMP\flowswitch-runtime\FlowSwitch.Core.exe"
+          if($LASTEXITCODE -ne 0){throw 'Program ingress integration failed'}
+      - name: Build and verify packages
+        run: |
+          $ErrorActionPreference='Stop'
+          $windows=& .\Build-WindowsPackage.ps1 -Destination "$env:RUNNER_TEMP\windows-package" -RuntimeDirectory "$env:RUNNER_TEMP\flowswitch-runtime"
+          $source=& .\Build-Release.ps1 -Destination "$env:RUNNER_TEMP\source-package"
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-WindowsPackage.ps1 -PackageDirectory $windows.Directory
+          if($LASTEXITCODE -ne 0){throw 'Windows package verification failed'}
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-DesktopBranding.ps1 -PackageDirectory $windows.Directory
+          if($LASTEXITCODE -ne 0){throw 'Brand verification failed'}
+          [void][IO.Directory]::CreateDirectory('release-files')
+          Copy-Item -LiteralPath $windows.Archive,$source.Archive -Destination release-files
+          $checksums=@(Get-ChildItem release-files -Filter '*.zip'|ForEach-Object {(Get-FileHash $_.FullName).Hash.ToLowerInvariant()+'  '+$_.Name})
+          [IO.File]::WriteAllText((Join-Path $PWD 'release-files\SHA256SUMS.txt'),($checksums -join "`n")+"`n",(New-Object Text.UTF8Encoding($false)))
+          [IO.File]::WriteAllText((Join-Path $PWD 'release-files\BUILD.txt'),("Source commit: "+$env:GITHUB_SHA+"`nWindows PowerShell 5.1; locked runtime; isolated tests and package tests passed.`n"),(New-Object Text.UTF8Encoding($false)))
+          Copy-Item -LiteralPath (Join-Path $windows.Directory 'manifest.json') -Destination release-files\Windows-manifest.json
+      - name: Publish versioned release without replacing old assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $notes=@'
+          游戏登录排查改进：区分真实入口与出口，预览并补齐已验证的整组程序规则，提供干净环境启动和最长五分钟的直连登录对照。直连对照需要明确确认并影响当前用户系统代理，恢复保留外部修改。
+
+          修复 EXE、窗口与快捷方式的品牌标识一致性。旧窗口须正常退出后打开新版；旧固定入口可重新固定。真实游戏登录与实际任务栏显示仍需在用户电脑验收。
+
+          附带 Windows x64 程序包、源码包、校验文件、运行文件清单及构建来源。运行依赖版本未变，macOS 未更新。完整解压后运行 FlowSwitch.exe，保留 app 文件夹。
+          '@
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-notes.md'),$notes,(New-Object Text.UTF8Encoding($false)))
+          $assets=@(Get-ChildItem release-files -File|ForEach-Object FullName)
+          & gh release create v3.9.0 @assets --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title '流向 FlowSwitch 3.9.0' --notes-file "$env:RUNNER_TEMP\release-notes.md" --latest
+          if($LASTEXITCODE -ne 0){throw 'Release creation failed; existing releases and assets are preserved'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FlowSwitch-Windows-3.9.0
+          path: release-files/*
+          if-no-files-found: ignore

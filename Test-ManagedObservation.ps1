@@ -29,7 +29,7 @@ function Engine([string]$Path,[int]$Source,[string]$Route='b',[string]$Expected=
 }
 function Observe($Family,$Tcp=@(),$Connections=@(),$Rule=$script:Ingress,$FamilySnapshot=$null,$Core=$script:ManagedCore){
     $byId=@{};foreach($p in $Family){$byId[[int]$p.Id]=$p}
-    $evidence=Get-ApplicationConnectionEvidence $Family $Tcp $Connections 'gateway' $byId $app $true @($script:Ingress)
+    $evidence=Get-ApplicationConnectionEvidence $Family $Tcp $Connections 'gateway' $byId $app $true @($script:Ingress) $FamilySnapshot
     $row=Get-ApplicationObservationRow $candidate $Family $evidence $Core $Rule $null $null $true $FamilySnapshot
     [pscustomobject]@{Evidence=$evidence;Row=$row}
 }
@@ -39,6 +39,14 @@ Check ($seen.Row.Loaded -and $seen.Evidence.Counts.b -eq 1 -and $seen.Evidence.L
 $mixed=Observe @($main,$worker) @((Socket 10 50001),(Socket 11 50002)) @((Engine $app 50001 'b' 'b'),(Engine $child 50002 'Direct' 'Direct'))
 Check ($mixed.Row.Loaded -and $mixed.Row.Status -match '网站分流' -and $mixed.Row.Status -notmatch '旧线路') 'Current website policy may legitimately mix direct and proxied connections in one program'
 Check ($mixed.Evidence.ChildProxyObserved -eq 1 -and $mixed.Row.Status -match '子进程') 'A verified worker''s private ingress route appears in its parent row'
+Check ($mixed.Row.Actual -match '经流向→直连 ×1' -and $mixed.Row.ConnectionDetails[1].IngressKind -eq 'Managed' -and $mixed.Row.ConnectionDetails[1].RouteName -eq '经流向→直连') 'A direct website exception remains explicitly routed through the fixed program ingress'
+$ipcFamily=[pscustomobject]@{Members=@($main,$worker);UnknownIds=@();RetainedIds=@();Available=$true}
+$ipcSockets=@((Socket 10 50001),(Socket 10 54001 54002),(Socket 11 54002 54001))
+$seen=Observe @($main,$worker) $ipcSockets @((Engine $app 50001)) $script:Ingress $ipcFamily
+Check ($seen.Row.Loaded -and $seen.Evidence.LocalInternal -eq 2 -and $seen.Row.Status -notmatch '未确认接管') 'A confirmed main/worker IPC pair does not create a false managed-ingress coverage fault'
+Check ($seen.Row.ConnectionDetails.Count -eq 3 -and $seen.Row.ConnectionDetails[0].IngressId -eq $script:Ingress.id -and $seen.Row.ConnectionDetails[1].PeerPID -eq 11) 'Managed and internal connections both keep reviewable independent evidence'
+$seen=Observe @($main,$worker) $ipcSockets @((Engine $app 50001))
+Check (-not $seen.Row.Loaded -and $seen.Evidence.LocalUnknown -eq 2) 'A family lacking current identity verification still leaves paired loopback coverage unknown'
 $stale=Observe @($main) @((Socket 10 50001)) @((Engine $app 50001 'a' 'b'))
 Check (-not $stale.Row.Loaded -and $stale.Evidence.PolicyMismatch -eq 1 -and $stale.Row.Status -match '不符合当前线路') 'A connection retained on old A after selecting B remains visibly stale'
 $unknownPolicy=Engine $app 50001;$unknownPolicy.policyMatches=$null;$unknownPolicy.expectedRoute='Unknown'

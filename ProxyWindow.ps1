@@ -177,11 +177,13 @@ $null=New-Button $toolsBar '检测所选代理' 0 0 128 36 {if($networkChoice.Se
 $null=New-Button $toolsBar 'Google 登录诊断' 0 0 144 36 {Start-Work 'LoginDiagnostic' ''}
 $null=New-Button $toolsBar '重载程序规则' 0 0 128 36 {Start-Work 'AppSync' ''}
 $null=New-Button $toolsBar '导出诊断报告' 0 0 138 36 {Export-Diagnostics}
+
 $clientBar=New-Object Windows.Forms.FlowLayoutPanel;$clientBar.Dock='Fill';$clientBar.WrapContents=$false;$clientBar.Margin=New-Object Windows.Forms.Padding(0)
 $toolsGrid.Controls.Add($clientBar,0,1)
 $null=New-Button $clientBar '打开所选代理程序' 0 0 212 36 {if($networkChoice.SelectedItem -and $networkChoice.SelectedItem.Id -ne 'Direct'){Open-Client $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择已关联程序的代理。'}}
 $null=New-Button $clientBar '代理管理' 0 0 153 36 {$tabs.SelectedTab=$proxyPage}
-$null=New-Label $clientBar '统一切换重置程序专线，保留网站例外；可撤回。' 0 0 510 36 9
+$cleanStopButton=New-Button $clientBar '结束直连对照' 0 0 128 36 {Start-Work 'CleanStartStop' ''}
+$null=New-Label $clientBar '统一切换保留网站例外，可撤回。' 0 0 300 36 9
 $logHost=New-Object FlowSwitch.UI.LogHost;$logHost.Dock='Fill';$logBox=$logHost.Log;$logBox.Multiline=$true;$logBox.ReadOnly=$true;$logBox.ScrollBars='Vertical';$logBox.Dock='None'
 $logBox.BackColor=[Drawing.ColorTranslator]::FromHtml('#1B2A3D');$logBox.ForeColor=$ink;$logBox.BorderStyle='None'
 $toolsGrid.Controls.Add($logHost,0,2)
@@ -208,6 +210,9 @@ $entryRepairItem=New-Object Windows.Forms.ToolStripMenuItem('修复旧代理启�
 $websiteProgramItem=New-Object Windows.Forms.ToolStripMenuItem('此程序的网站分流…');$websiteProgramItem.Add_Click({if($script:AppTarget){Start-Work 'WebsiteRules' $script:AppTarget.Path}});[void]$appMenu.Items.Add($websiteProgramItem)
 $removeSettingItem=New-Object Windows.Forms.ToolStripMenuItem('移除此程序设置');$removeSettingItem.Add_Click({if($script:AppTarget){$saved=$script:AppTarget.SavedPath;if(-not $saved){$saved=$script:AppTarget.Path};Start-Work 'AppRemove' $saved}});[void]$appMenu.Items.Add($removeSettingItem)
 $reconnectItem=New-Object Windows.Forms.ToolStripMenuItem('重连此程序的旧线路连接…');$reconnectItem.Add_Click({if($script:AppTarget){Start-Work 'AppReconnectPlan' $script:AppTarget.Path}});[void]$appMenu.Items.Add($reconnectItem)
+$familyRuleItem=New-Object Windows.Forms.ToolStripMenuItem('检查并补齐整组程序规则…');$familyRuleItem.Add_Click({if($script:AppTarget -and -not $script:AppTarget.RequiresRepair){$route=$script:AppTarget.Policy;if($route -eq 'Follow' -or -not $route){Write-Activity '请先为主程序选择明确的直连或代理，再预览整组规则。';return};Start-Work 'FamilyRoutePlan' (@{Path=$script:AppTarget.Path;Route=$route}|ConvertTo-Json -Compress)}});[void]$appMenu.Items.Add($familyRuleItem)
+$cleanStartItem=New-Object Windows.Forms.ToolStripMenuItem('干净环境启动（请先退出整组程序）…');$cleanStartItem.Add_Click({if($script:AppTarget -and -not $script:AppTarget.RequiresRepair){Start-Work 'CleanStartPlan' (@{Path=$script:AppTarget.Path;DirectTest=$false}|ConvertTo-Json -Compress)}});[void]$appMenu.Items.Add($cleanStartItem)
+$directTestItem=New-Object Windows.Forms.ToolStripMenuItem('直连登录对照（限时恢复）…');$directTestItem.Add_Click({if($script:AppTarget -and -not $script:AppTarget.RequiresRepair){Start-Work 'CleanStartPlan' (@{Path=$script:AppTarget.Path;DirectTest=$true}|ConvertTo-Json -Compress)}});[void]$appMenu.Items.Add($directTestItem)
 $entryItem=New-Object Windows.Forms.ToolStripMenuItem('复制代理启动入口');$entryItem.Add_Click({
     try{$entries=@(Get-VerifiedProgramShortcuts $script:AppTarget.Path);if(-not $entries.Count){throw '没有可验证的代理入口，请重新指定该程序线路。'};[Windows.Forms.Clipboard]::SetText(($entries -join "`r`n"));Write-Activity ('已复制代理入口：'+($entries -join '；'))}catch{Write-Activity $_.Exception.Message}
 });[void]$appMenu.Items.Add($entryItem)
@@ -219,6 +224,7 @@ $appMenu.Add_Opening({
     foreach($item in @($appMenu.Items)){if($item.Tag -and $item.Tag -notin @('Follow','Direct')){$appMenu.Items.Remove($item);$item.Dispose()}}
     $entryRepairItem.Visible=($script:AppTarget.Mode -in @('launch','managed') -and -not $script:AppTarget.RequiresRepair)
     $websiteProgramItem.Enabled=(-not $script:AppTarget.RequiresRepair)
+    $familyRuleItem.Enabled=(-not $script:AppTarget.RequiresRepair);$cleanStartItem.Enabled=(-not $script:AppTarget.RequiresRepair);$directTestItem.Enabled=(-not $script:AppTarget.RequiresRepair)
     $removeSettingItem.Visible=[bool]($script:AppTarget.SavedPath -or $script:AppTarget.HasSavedRule)
     $insert=3
     foreach($p in $script:Profiles.Profiles){
@@ -286,9 +292,19 @@ function Show-AppDetails {
     $app=$liveList.SelectedItems[0].Tag;$script:DialogOpen=$true
     try{
         $entryText=''
-        if($app.CanLaunch){$entries=@(Get-VerifiedProgramShortcuts $app.Path);$entryText="`r`n`r`n代理启动入口：`r`n"+$(if($entries.Count){$entries -join "`r`n"}else{'入口不存在或已被修改，请重新指定线路。'})+"`r`n请完整退出后使用上述入口，或右键「按指定线路打开」。其他启动入口未接入此设置。"}
+        if($app.ConnectionDetails){$entryText+="`r`n`r`n连接证据（当前 TCP 快照）：`r`n"+(($app.ConnectionDetails|Select-Object -First 12|ForEach-Object {'PID '+$_.PID+' · '+$_.LocalAddress+':'+$_.LocalPort+' → '+$_.RemoteAddress+':'+$_.RemotePort+' · '+$_.IngressName+' → '+$_.RouteName+' · '+$_.State+$(if($_.TargetAddress){' · 目标 '+$_.TargetAddress+':'+$_.TargetPort}else{''})}) -join "`r`n")}
+        if($app.CanLaunch){$entries=@(Get-VerifiedProgramShortcuts $app.Path);$entryText+="`r`n`r`n代理启动入口：`r`n"+$(if($entries.Count){$entries -join "`r`n"}else{'入口不存在或已被修改，请重新指定线路。'})+"`r`n请完整退出后使用上述入口，或右键「按指定线路打开」。其他启动入口未接入此设置。"}
         [void][Windows.Forms.MessageBox]::Show($form,($app.Name+"`r`n`r`n程序路径："+$app.Path+"`r`n保存的路径："+$app.SavedPath+"`r`n身份识别："+$app.IdentityReason+"`r`n`r`n进程 ID："+$(if($app.PIDs){$app.PIDs}else{'未运行'})+"`r`n实际连接："+$app.Actual+"`r`n线路状态："+$app.Status+$entryText+"`r`n`r`n已识别子进程："+$app.ChildNames+"。接入固定入口的主程序与继承入口的子进程可一起改线；仍保留旧代理地址的进程需要完整重开。未经过入口的连接不能靠保存设置强制改变。`r`n`r`n观察范围："+$app.Coverage+"`r`n未观察到连接不等于断网；已建立连接也不证明登录成功。"),'程序详情','OK','Information')
     }finally{$script:DialogOpen=$false}
+}
+function Show-CleanStartDialog($Plan) {
+    $dialog=New-Object Windows.Forms.Form;$dialog.Text=$(if($Plan.DirectTest){'直连登录对照'}else{'干净环境启动'});$dialog.Size=New-Object Drawing.Size(640,390);$dialog.FormBorderStyle='FixedDialog';$dialog.StartPosition='CenterParent';$dialog.Font=$form.Font;$dialog.BackColor=$form.BackColor;$dialog.ForeColor=$form.ForeColor;$dialog.MinimizeBox=$false;$dialog.MaximizeBox=$false
+    $description=New-Object Windows.Forms.TextBox;$description.Multiline=$true;$description.ReadOnly=$true;$description.TabStop=$false;$description.ScrollBars='Vertical';$description.BorderStyle='None';$description.BackColor=$form.BackColor;$description.ForeColor=$form.ForeColor;$description.SetBounds(22,18,578,210);$description.Text=[IO.Path]::GetFileName($Plan.Path)+"`r`n"+$Plan.Path+"`r`n`r`n"+$Plan.Message+"`r`n`r`n请先正常退出启动器及全部相关进程。流向不会自动结束程序。";$dialog.Controls.Add($description)
+    $elevate=New-Object Windows.Forms.CheckBox;$elevate.Text='此程序需要管理员权限（显示正常 UAC 确认）';$elevate.SetBounds(22,240,575,30);$dialog.Controls.Add($elevate)
+    $accept=New-Object Windows.Forms.Button;$accept.Text='确认并启动';$accept.SetBounds(374,295,110,34);$accept.DialogResult='OK';$dialog.Controls.Add($accept)
+    $cancel=New-Object Windows.Forms.Button;$cancel.Text='取消';$cancel.SetBounds(495,295,100,34);$cancel.DialogResult='Cancel';$dialog.Controls.Add($cancel);$dialog.AcceptButton=$accept;$dialog.CancelButton=$cancel
+    $script:DialogOpen=$true
+    try{if($dialog.ShowDialog($form) -eq 'OK'){$Plan.Elevate=[bool]$elevate.Checked;$script:PendingAction=[pscustomobject]@{Kind='CleanStart';Key=($Plan|ConvertTo-Json -Depth 8 -Compress)}}}finally{$script:DialogOpen=$false;$dialog.Dispose()}
 }
 function Show-Guide {
     $script:DialogOpen=$true
@@ -483,7 +499,7 @@ function Remove-SelectedProfile {
 function Reload-ProfileViews($Settings=$null) {
     if($Settings){$script:Profiles=$Settings}elseif(-not $Demo){$script:Profiles=Read-ProfileSettings}
     $chosen=$null;if($networkChoice.SelectedItem){$chosen=$networkChoice.SelectedItem.Id}
-    $networkChoice.Items.Clear();[void]$networkChoice.Items.Add([pscustomobject]@{Id='Direct';Name='直连 · 不使用代理'})
+    $networkChoice.Items.Clear();[void]$networkChoice.Items.Add([pscustomobject]@{Id='Direct';Name='直连出口 · 入口按当前模式'})
     foreach($p in $script:Profiles.Profiles){if($script:Profiles.Routing.Adapter -eq 'standalone' -and $p.Id -eq (Get-GatewayKey)){continue};[void]$networkChoice.Items.Add([pscustomobject]@{Id=$p.Id;Name=($p.Name+'  ·  '+$p.Protocol.ToUpperInvariant()+'  '+$p.Host+':'+$p.Port)})}
     $index=0;for($i=0;$i -lt $networkChoice.Items.Count;$i++){if($networkChoice.Items[$i].Id -eq $chosen){$index=$i}}
     $networkChoice.SelectedIndex=$index;Show-ProxyCatalog
@@ -678,6 +694,11 @@ function Start-Work([string]$Kind,[string]$Key) {
                 'AppEntryRepair'{$result=Repair-ProgramProxyEntry $Key}
                 'AppReconnectPlan'{$result=Get-ApplicationReconnectPlan $Key}
                 'AppReconnect'{$result=Invoke-ApplicationReconnect ($Key | ConvertFrom-Json)}
+                'FamilyRoutePlan'{$change=$Key|ConvertFrom-Json;$result=Get-ProgramFamilyRoutePlan -Path $change.Path -Route $change.Route}
+                'FamilyRouteApply'{$result=Set-ProgramFamilyRoute -Plan ($Key|ConvertFrom-Json) -Confirmed}
+                'CleanStartPlan'{$change=$Key|ConvertFrom-Json;$result=Get-ProgramCleanStartPlan -Path $change.Path -DirectTest ([bool]$change.DirectTest)}
+                'CleanStart'{$result=Start-ProgramCleanSession -Plan ($Key|ConvertFrom-Json) -Confirmed}
+                'CleanStartStop'{$result=Stop-ProgramCleanSession}
                 'LoginDiagnostic'{$result=Test-LoginChain $Key}
                 'NetworkDiagnose'{$result=Get-NetworkDiagnosis -Probe}
                 'NetworkRepair'{$result=Repair-NetworkDiagnosis $Key}
@@ -693,7 +714,8 @@ function Start-Work([string]$Kind,[string]$Key) {
                 $tcpSnapshot=Get-TcpObservationSnapshot;$tcpRows=$tcpSnapshot.Rows
                 $apps=Get-ApplicationRoutes -TcpRows $tcpRows -TcpAvailable $tcpSnapshot.Available
                 $state=Get-ProxyStatus $apps -TcpRows $tcpRows -TcpAvailable $tcpSnapshot.Available
-                [pscustomobject]@{OK=$true;Kind=$Kind;Result=$result;State=$state;Apps=$apps;Settings=$script:Profiles;Discovery=$discovery;DiscoveryError=$discoveryError;Scanned=($Scan -or $Automatic);Automatic=$Automatic;RefreshError=''}
+                $cleanSession=$null;try{$cleanSession=Get-CleanStartSession}catch{}
+                [pscustomobject]@{OK=$true;Kind=$Kind;Result=$result;State=$state;Apps=$apps;Settings=$script:Profiles;Discovery=$discovery;DiscoveryError=$discoveryError;Scanned=($Scan -or $Automatic);Automatic=$Automatic;RefreshError='';CleanSession=$cleanSession}
             }catch{
                 if($Kind -eq 'Status' -or $null -eq $result){throw}
                 [pscustomobject]@{OK=$true;Kind=$Kind;Result=$result;State=$null;Apps=$null;Settings=$script:Profiles;Discovery=$discovery;DiscoveryError=$discoveryError;Scanned=($Scan -or $Automatic);Automatic=$Automatic;RefreshError='状态刷新失败，请重试；操作结果已保留。'}
@@ -819,7 +841,14 @@ $timer.Add_Tick({
                 if($reply.Kind -in @('Switch','Restore','AppRoute','ManagedAppRoute')){$script:ChoiceDirty=$false}
                 if($reply.State -and $reply.Apps){$script:ObservationStale=$false;Show-State $reply.State;Show-Applications $reply.Apps}
                 elseif($reply.RefreshError){Mark-ObservationStale;Write-Activity $reply.RefreshError}
-                if($reply.Kind -eq 'WebsiteRules'){Show-WebsiteRulesEditor $reply.Result}
+                if($reply.CleanSession -and $reply.CleanSession.Status){$notice=$reply.CleanSession.Status.Phase+'|'+$reply.CleanSession.Status.Message;if($notice -cne $script:LastCleanStartNotice){$script:LastCleanStartNotice=$notice;Write-Activity $reply.CleanSession.Status.Message}}
+                if($reply.Kind -eq 'CleanStartPlan'){Show-CleanStartDialog $reply.Result}
+                elseif($reply.Kind -eq 'FamilyRoutePlan'){
+                    $plan=$reply.Result;$stateNames=@{Missing='待补齐';Covered='已覆盖';Conflict='保留冲突'};$lines=@('待补齐 '+$plan.MissingCount+' · 已覆盖 '+$plan.CoveredCount+' · 保留冲突 '+$plan.ConflictCount+' · 身份待确认 '+@($plan.UnknownIds).Count);$lines+=@($plan.Members|ForEach-Object {$stateNames[[string]$_.State]+' · '+$_.Path+' · '+$_.Reason});if(@($plan.UnknownIds).Count){$lines+='身份尚未确认的进程不会添加规则；本次操作不代表整组已全部覆盖。'}
+                    $script:DialogOpen=$true
+                    try{if($plan.CanApply){if([Windows.Forms.MessageBox]::Show($form,($plan.Message+"`r`n`r`n"+($lines -join "`r`n")+"`r`n`r`n只添加已验证且遗漏的成员，已有冲突规则保留。"),'补齐整组程序规则','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='FamilyRouteApply';Key=($plan|ConvertTo-Json -Depth 16 -Compress)}}}else{[void][Windows.Forms.MessageBox]::Show($form,($plan.Message+"`r`n"+($lines -join "`r`n")),'整组程序规则','OK','Information')}}finally{$script:DialogOpen=$false}
+                }
+                elseif($reply.Kind -eq 'WebsiteRules'){Show-WebsiteRulesEditor $reply.Result}
                 elseif($reply.Kind -eq 'AppRepairPlan'){
                     $plan=$reply.Result;$script:DialogOpen=$true
                     try{if([Windows.Forms.MessageBox]::Show($form,($plan.Message+"`r`n`r`n旧路径："+$plan.SavedPath+"`r`n新路径："+$plan.CurrentPath+"`r`n`r`n"+$plan.Impact),'修复程序记录','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='AppRepair';Key=($plan|ConvertTo-Json -Depth 12 -Compress)}}}finally{$script:DialogOpen=$false}
@@ -849,7 +878,7 @@ $timer.Add_Tick({
         }
         finally{$job.PowerShell.Dispose();$job.Cancellation.Dispose();foreach($b in $script:Controls){$b.Enabled=$true};$script:NextPoll=[DateTime]::Now.AddSeconds(5)}
         if($SmokeTest){
-            $brandProperties=@{5='FlowSwitch.Desktop'}
+            $brandProperties=@{5=[FlowSwitchDesktop]::AppId}
             if($script:TaskbarRelaunchReady){$brandProperties[4]='流向 · FlowSwitch';$brandProperties[3]=$iconPath+',0';$brandProperties[2]=$desktopCommand}
             foreach($propertyId in $brandProperties.Keys){
                 if([FlowSwitchDesktop]::ReadWindowProperty($form.Handle,[uint32]$propertyId) -cne $brandProperties[$propertyId]){$script:SmokeFailed=$true}

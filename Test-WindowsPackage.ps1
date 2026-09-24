@@ -56,7 +56,7 @@ $brandForm=New-Object Windows.Forms.Form
 try{
     $longCommand='"'+$exe+'" --data-directory "'+$qaRoot+'\'+('long-directory-'*24)+'"'
     $ready=[FlowSwitchDesktop]::ConfigureWindow($brandForm.Handle,$longCommand,(Join-Path $relocated 'app\assets\FlowSwitch.ico'))
-    Check ([FlowSwitchDesktop]::ReadWindowProperty($brandForm.Handle,5) -eq 'FlowSwitch.Desktop') 'Long source path lost its independent taskbar identity.'
+    Check ([FlowSwitchDesktop]::ReadWindowProperty($brandForm.Handle,5) -ceq [FlowSwitchDesktop]::AppId) 'Long source path lost its independent taskbar identity.'
     if($ready){Check ([FlowSwitchDesktop]::ReadWindowProperty($brandForm.Handle,2) -ceq $longCommand) 'Taskbar relaunch command was truncated.'}
     else{Check ([FlowSwitchDesktop]::ReadWindowProperty($brandForm.Handle,2) -eq $null) 'Rejected long taskbar command left a partial relaunch target.'}
 }finally{$brandForm.Dispose()}
@@ -78,6 +78,7 @@ try{
     $shortcut=Get-ChildItem -LiteralPath $desktop -Filter '*.lnk'|Select-Object -First 1
     $link=$shell.CreateShortcut($shortcut.FullName)
     Check ($link.TargetPath -ieq $exe -and $link.WorkingDirectory -ieq $relocated -and $link.Arguments -match 'isolated settings') 'Desktop shortcut does not target the relocated EXE and selected data directory.'
+    Check ([FlowSwitchDesktop]::ReadShortcutProperty($shortcut.FullName,5) -ceq [FlowSwitchDesktop]::AppId) 'Packaged shortcut identity differs from its native window identity.'
     $fromShortcut=Invoke-Fixture ($link.Arguments+' --smoke-test')
     Check ($fromShortcut.Code -eq 0 -and $fromShortcut.Out -match 'PASS: UI') ('Saved shortcut arguments did not reopen the UI: '+$fromShortcut.Error)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)

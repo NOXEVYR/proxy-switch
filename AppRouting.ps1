@@ -154,7 +154,7 @@ function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
             }
             if($excluded.Count){$family=@($family|Where-Object {-not $excluded.ContainsKey([int]$_.Id)})}
         }
-        $evidence=Get-ApplicationConnectionEvidence $family $tcp $core.connections $gateway $byId $app.Path $TcpAvailable $managedEntries
+        $evidence=Get-ApplicationConnectionEvidence $family $tcp $core.connections $gateway $byId $app.Path $TcpAvailable $managedEntries $familySnapshot
         $rows+=Get-ApplicationObservationRow $app $family $evidence $core $app.CoreRule $app.LaunchRule $app.Identity $processesAvailable $familySnapshot
     }
     $rulesAvailable=Test-ObservationFlag $core 'rulesAvailable' ([bool]$core.available)

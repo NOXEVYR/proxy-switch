@@ -5,17 +5,23 @@ const sourceCore=process.argv[2];if(!sourceCore||!path.isAbsolute(sourceCore)||!
 const data=fs.mkdtempSync(path.join(os.tmpdir(),'FlowSwitch-ProgramIngress-'));process.env.PROXY_SWITCH_DATA_DIR=data;
 const core=path.join(data,'FlowSwitch-TestEngine.exe');fs.copyFileSync(sourceCore,core);
 const r=require('./IndependentRouter.cjs'),policy=require('./RoutePolicy.cjs'),router=require('./AppRouter.cjs');
-const servers=[],clients=[],sockets=new Set();let checks=0,workerPid;
+const servers=[],clients=[],sockets=new Set();let checks=0,workerPid,workerStartTicks;
 const pause=ms=>new Promise(done=>setTimeout(done,ms));
 const check=(b,label)=>{assert.ok(b,label);checks++;console.log('PASS: '+label);};
 async function until(fn,label,ms=40000){const end=Date.now()+ms;while(Date.now()<end){try{if(await fn()){check(true,label);return;}}catch{}await pause(200);}throw Error('Timed out: '+label);}
 async function freePort(){const s=net.createServer();await new Promise(done=>s.listen(0,'127.0.0.1',done));const p=s.address().port;await new Promise(done=>s.close(done));return p;}
 async function upstream(marker,port=0){const x={server:http.createServer((req,res)=>{if(req.url==='/held')return;res.writeHead(200,{'Content-Length':1});res.end(marker);}),sockets:new Set()};
  x.server.on('connect',(req,s)=>{s.write('HTTP/1.1 200 Connection Established\r\n\r\n');s.once('data',b=>{if(b.toString().includes('/held'))return;s.end('HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n'+marker);});});
- x.server.on('connection',s=>{sockets.add(s);x.sockets.add(s);s.on('close',()=>{sockets.delete(s);x.sockets.delete(s);});});
+ x.server.on('connection',s=>{sockets.add(s);x.sockets.add(s);s.on('close',()=>{sockets.delete(s);x.sockets.delete(s);});if(x.closing)s.destroy();});
  await new Promise(done=>x.server.listen(port,'127.0.0.1',done));x.port=x.server.address().port;servers.push(x);return x;
 }
-async function closeServer(x){for(const s of x.sockets)s.destroy();if(x.server.listening)await new Promise(done=>x.server.close(done));}
+async function closeServer(x){
+ if(x.closed)return x.closed;x.closing=true;
+ // Stop accepting first. A queued connection callback must also see closing,
+ // otherwise it can add a new CONNECT socket after the destruction pass.
+ x.closed=new Promise((done,reject)=>{if(!x.server.listening)return done();x.server.close(error=>error?reject(error):done());});
+ for(const s of x.sockets)s.destroy();await x.closed;
+}
 function request(port,url){return new Promise((resolve,reject)=>{const req=http.get({host:'127.0.0.1',port,path:url,headers:{Host:new URL(url).host},agent:false,timeout:2000},res=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>res.statusCode===200?resolve(b):reject(Error('HTTP '+res.statusCode)));});req.on('error',reject);req.on('timeout',()=>req.destroy(Error('timeout')));});}
 async function hold(port,host,targetPort){const s=net.connect({host:'127.0.0.1',port});sockets.add(s);s.on('close',()=>sockets.delete(s));await new Promise((done,reject)=>{s.once('connect',()=>s.write('CONNECT '+host+':'+targetPort+' HTTP/1.1\r\nHost: '+host+':'+targetPort+'\r\n\r\n'));s.once('data',b=>b.toString().startsWith('HTTP/1.1 200')?done():reject(Error('CONNECT rejected')));s.once('error',reject);s.setTimeout(3000,()=>s.destroy(Error('timeout')));});s.setTimeout(0);s.write('GET /held HTTP/1.1\r\nHost: '+host+'\r\n\r\n');await pause(200);return s;}
 const last=file=>{try{return fs.readFileSync(file,'utf8').trim().split('\n').at(-1);}catch{return '';}};
@@ -40,7 +46,7 @@ async function main(){
  const baseEnv={...process.env};for(const k of Object.keys(baseEnv))if(/^(http|https|all)_proxy$/i.test(k))delete baseEnv[k];
  clients.push(spawn(exe.parent,[url,local,log,stop,parentStop,exe.child],{windowsHide:true,stdio:'ignore',env:{...baseEnv,HTTP_PROXY:'http://127.0.0.1:'+p1}}));
  clients.push(spawn(exe.other,[url,local,otherLog,stop,stop],{windowsHide:true,stdio:'ignore',env:{...baseEnv,HTTP_PROXY:'http://127.0.0.1:'+p2}}));
- await until(()=>last(log).endsWith('|AD')&&last(log+'.worker').endsWith('|AD')&&last(otherLog).endsWith('|BD'),'Actual parent plus different worker EXE inherit one ingress; second program remains independent');workerPid=Number(fs.readFileSync(log+'.pid','utf8'));
+ await until(()=>last(log).endsWith('|AD')&&last(log+'.worker').endsWith('|AD')&&last(otherLog).endsWith('|BD'),'Actual parent plus different worker EXE inherit one ingress; second program remains independent');workerPid=Number(fs.readFileSync(log+'.pid','utf8'));workerStartTicks=await r.processStartTicks(workerPid);
  const observed=await hold(p1,'network.invalid',direct.port);const view=await r.status();const conn=view.connections.find(c=>c.sourcePort===observed.localPort);check(conn?.ingressId===id&&conn.expectedRoute==='a'&&conn.policyMatches===true,'Controller reports actual child-family ingress and expected route without collecting URLs');
  const initialState=fs.readFileSync(path.join(data,'app-rules.json'),'utf8');
  await assert.rejects(()=>r.replace([],'b',undefined,undefined,false,{programIngresses:ingresses.filter(e=>e.id!==id)}),/活动连接/);checks++;
@@ -86,7 +92,28 @@ async function main(){
  await pause(11000);check(JSON.parse(fs.readFileSync(path.join(r.ROOT,'process.json'))).core===partialCore&&JSON.parse(fs.readFileSync(path.join(r.ROOT,'lifecycle-state.json'))).attempt===0,'A saved private-port conflict never restarts the healthy common core in a loop');
  ingresses=ingresses.filter(e=>e.id!==id);await r.replace([],'b',undefined,undefined,false,{programIngresses:ingresses});check(!(await r.status()).programIngresses.some(e=>e.id===id)&&await request(p1,url)==='E','An idle broken ingress can be explicitly removed without stopping the foreign listener');
  const repaired={id:'7'.repeat(32),path:exe.parent,port:await freePort(),route:'b'};ingresses.push(repaired);await r.replace([],'b',undefined,undefined,false,{programIngresses:ingresses});check((await r.status()).programIngresses.find(e=>e.id===repaired.id).ready&&await request(repaired.port,url)==='B'&&await request(p1,url)==='E','Explicit maintenance can create a new free program ingress after safely removing the unusable record');
- console.log('PASS: '+checks+' real-core general program ingress and website routing scenarios. '+data);
 }
-main().catch(e=>{console.error(e.stack);process.exitCode=1;}).finally(async()=>{fs.writeFileSync(path.join(data,'stop-clients'),'stop');for(const c of clients)if(c.exitCode===null)c.kill();// The worker observes our stop file; never kill a stale numeric PID after it exits.
-fs.mkdirSync(r.ROOT,{recursive:true});fs.writeFileSync(path.join(r.ROOT,'stop'),'stop');for(const s of sockets)s.destroy();for(const x of servers)if(x.server.listening)x.server.close();await pause(3000);});
+async function cleanup(){
+ fs.writeFileSync(path.join(data,'stop-clients'),'stop');
+ fs.mkdirSync(r.ROOT,{recursive:true});await r.main({action:'stop'});
+ // A fixed sleep does not establish that the detached supervisor released its
+ // controller/listeners. Keep the upstreams available until it has stopped.
+ await until(()=>!fs.existsSync(path.join(r.ROOT,'supervisor.lock')),'Cleanup waits for the owned supervisor to release its lock',20000);
+ const exited=c=>c.exitCode!==null||c.signalCode!==null;
+ const deadline=Date.now()+5000;while(clients.some(c=>!exited(c))&&Date.now()<deadline)await pause(50);
+ for(const c of clients)if(!exited(c))c.kill(); // Only retained handles of our own spawned fixtures.
+ await until(()=>clients.every(exited),'Cleanup observes every retained fixture child exit',5000);
+ // The orphan observes our stop file. Never terminate a potentially reused PID.
+ if(workerPid&&workerStartTicks)await until(async()=>await r.processStartTicks(workerPid)!==workerStartTicks,'Cleanup verifies the original orphan worker has exited',5000);
+ await Promise.all(servers.map(closeServer));
+ for(const s of sockets)s.destroy();
+ // Controller HTTP requests use Node's default agent in this isolated test
+ // process. Dispose its idle named-pipe connections as part of fixture teardown.
+ http.globalAgent.destroy();
+ await until(()=>sockets.size===0&&servers.every(x=>!x.server.listening),'Cleanup releases all fixture sockets and HTTP listeners',5000);
+}
+let mainPassed=false;
+main().then(()=>{mainPassed=true;}).catch(e=>{console.error(e.stack);process.exitCode=1;}).finally(async()=>{
+ try{await cleanup();if(mainPassed)console.log('PASS: '+checks+' real-core general program ingress, website routing and verified cleanup scenarios. '+data);}
+ catch(e){console.error('Fixture cleanup failed: '+e.stack);process.exitCode=1;}
+});
