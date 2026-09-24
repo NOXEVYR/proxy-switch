@@ -151,10 +151,52 @@ function Stop-ProgramCleanSession {
     elseif(-not $notified){return [pscustomobject]@{Message='结束请求未能写入，监护仍在运行；独立守护会在对照期限到时恢复。请查看恢复结果。'}}
     [pscustomobject]@{Message='已请求结束对照并恢复仍属于本次操作的系统设置。请查看恢复结果；游戏不会被结束。'}
 }
+function Get-CleanStartRestoreEndpointState([string]$Endpoint) {
+    # Reuse the strict local-endpoint parser. Never probe remote/complex addresses.
+    $parsed=Get-LocalEndpointObservation $Endpoint ([pscustomobject]@{Available=$false;Rows=@()})
+    if(-not $parsed){return 'not-local'}
+    try{
+        $tcp=Get-TcpObservationSnapshot
+        if(-not $tcp.Available){return 'unknown'}
+        $listeners=@($tcp.Rows|Where-Object {$_.State -eq 'Listen' -and $_.LocalPort -eq $parsed.Port -and $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::','::1')})
+        $endpointHost=(($Endpoint -replace '^(?:http|https|socks5|socks5h)://','') -replace ':[0-9]+/?$','').Trim('[',']').ToLowerInvariant()
+        $matching=$listeners
+        if($endpointHost -eq '127.0.0.1'){
+            $matching=@($listeners|Where-Object {$_.LocalAddress -in @('127.0.0.1','0.0.0.0')})
+            # The TCP table cannot reveal whether an IPv6 wildcard is dual-stack.
+            if(-not $matching.Count -and @($listeners|Where-Object LocalAddress -eq '::').Count){return 'unknown'}
+        }elseif($endpointHost -eq '::1'){$matching=@($listeners|Where-Object {$_.LocalAddress -in @('::1','::')})}
+        if(-not $matching.Count){return 'dead'}
+        $observed=Get-LocalEndpointObservation $Endpoint ([pscustomobject]@{Available=$true;Rows=@($matching)})
+        if($observed.Ready -eq $true){return 'live'}
+        # A listener with unreadable/exited ownership is not proven dead.
+        return 'unknown'
+    }catch{return 'unknown'}
+}
 function Restore-CleanStartSnapshot($Before,$Target) {
     Use-ChangeLock {
         $current=Get-CleanStartSystemSnapshot
-        if(Test-CleanStartSnapshot $current $Target){Set-SystemSnapshot $Before;if(-not (Test-CleanStartSnapshot (Get-CleanStartSystemSnapshot) $Before)){throw '原系统代理尚未通过恢复核验。'};return 'restored'}
+        $fallback=$null
+        if([int]$Before.Flags -band 2){
+            # Disable only the dead manual proxy; retain original PAC/autodetect modes.
+            $fallback=[pscustomobject]@{Flags=(([int]$Before.Flags -band (-bnot 2)) -bor 1);Server=$Before.Server;Bypass=$Before.Bypass;AutomaticConfigFingerprint=$Before.AutomaticConfigFingerprint}
+        }
+        # A concurrent Guard/Monitor may have already completed this safe fallback.
+        if($fallback -and -not (Test-CleanStartSnapshot $fallback $Target) -and (Test-CleanStartSnapshot $current $fallback)){return 'direct-fallback'}
+        if(Test-CleanStartSnapshot $current $Target){
+            $desired=$Before;$outcome='restored'
+            if($fallback){
+                $state=Get-CleanStartRestoreEndpointState $Before.Server
+                if($state -eq 'unknown'){throw '原本地代理入口状态未知，未重新启用；恢复快照已保留，请重试。'}
+                if($state -eq 'dead'){$desired=$fallback;$outcome='direct-fallback'}
+            }
+            # TCP/owner inspection can yield. Preserve a change made during that read.
+            $latest=Get-CleanStartSystemSnapshot
+            if(-not (Test-CleanStartSnapshot $latest $Target)){return 'external-change'}
+            if(-not (Test-CleanStartSnapshot $latest $desired)){Set-SystemSnapshot $desired}
+            if(-not (Test-CleanStartSnapshot (Get-CleanStartSystemSnapshot) $desired)){throw '原系统代理尚未通过恢复核验。'}
+            return $outcome
+        }
         if(Test-CleanStartSnapshot $current $Before){return 'restored'}
         return 'external-change'
     }

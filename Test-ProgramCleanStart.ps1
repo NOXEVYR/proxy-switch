@@ -14,6 +14,14 @@ function Set-SystemSnapshot($Value){$script:Writes++;$script:Current=$Value.PSOb
 function Set-UserProxyEnv {throw 'Tests must never change persistent environment variables'}
 function Use-ChangeLock([scriptblock]$Action){$script:LockDepth++;try{& $Action}finally{$script:LockDepth--}}
 function Invoke-AppRouter {throw 'Clean start tests must not contact a real routing engine'}
+$script:FixtureTcpAvailable=$true;$script:FixtureTcpReads=0;$script:FixtureTcpDrift=$false;$script:FixtureTcpThrows=$false
+$script:FixtureTcpRows=@([pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=19001;OwningProcess=$PID})
+function Get-TcpObservationSnapshot {
+    $script:FixtureTcpReads++;$script:FixtureTcpLockDepth=$script:LockDepth
+    if($script:FixtureTcpThrows){throw 'fixture TCP inventory unavailable'}
+    if($script:FixtureTcpDrift){$script:FixtureTcpDrift=$false;$script:Current=[pscustomobject]@{Flags=3;Server='127.0.0.1:19998';Bypass='external';AutomaticConfigFingerprint=$script:AutoFingerprint}}
+    [pscustomobject]@{Available=$script:FixtureTcpAvailable;Rows=@($script:FixtureTcpRows)}
+}
 $fixtureDirectory=Join-Path $qa 'fixture';[void][IO.Directory]::CreateDirectory($fixtureDirectory)
 $fixture=Join-Path $fixtureDirectory 'CleanFixture.exe'
 $code=@'
@@ -31,6 +39,10 @@ public static class CleanFixture {
 }
 '@
 Add-Type -TypeDefinition $code -OutputAssembly $fixture -OutputType WindowsApplication
+# CI may expose TEMP through an 8.3 alias. Compare plans against the verified
+# canonical executable, not the spelling used to create the fixture directory.
+$fixtureIdentity=Get-ProgramIdentityDescriptor $fixture (New-ProgramIdentityContext)
+$fixture=$fixtureIdentity.CanonicalPath;$fixtureDirectory=[IO.Path]::GetDirectoryName($fixture)
 $savedEnvironment=@{};foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','FTP_PROXY','NO_PROXY','FLOWSWITCH_TEST_KEEP','QTWEBENGINE_CHROMIUM_FLAGS')){$savedEnvironment[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 try{
     foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','FTP_PROXY')){[Environment]::SetEnvironmentVariable($name,'http://127.0.0.1:19999','Process')}
@@ -49,7 +61,7 @@ try{
     Throws {New-CleanProgramStartInfo $fixture} '额外.*网络'
     [Environment]::SetEnvironmentVariable('QTWEBENGINE_CHROMIUM_FLAGS',$null,'Process')
     $plan=Get-ProgramCleanStartPlan $fixture
-    Check ($plan.Path -eq $fixture -and -not $plan.DirectTest -and $plan.FileId -and $plan.Revision -and $script:Writes -eq 0) 'Preparing a clean launch is read-only and binds executable identity and configuration revision'
+    Check ($plan.Path -eq $fixture -and -not $plan.DirectTest -and $plan.FileId -ceq $fixtureIdentity.FileId -and $plan.Revision -and $script:Writes -eq 0) 'Preparing a clean launch is read-only and binds executable identity and configuration revision'
     $stale=$plan.PSObject.Copy();$stale.CreatedAt-=91;Throws {Assert-CleanStartPlan $stale} '过期'
     $future=$plan.PSObject.Copy();$future.CreatedAt+=20;Throws {Assert-CleanStartPlan $future} '过期'
     $changed=$plan.PSObject.Copy();$changed.FileId='not-the-file';Throws {Assert-CleanStartPlan $changed} '文件.*改变'
@@ -85,12 +97,45 @@ try{
     Check ((Restore-CleanStartSnapshot $script:Before $target) -eq 'external-change' -and $script:Writes -eq 0) 'A changed automatic proxy configuration is preserved even when manual proxy fields match'
     $script:AutoFingerprint='fixture-auto'
     $script:Current=$script:Before.PSObject.Copy();Check ((Restore-CleanStartSnapshot $script:Before $target) -eq 'restored' -and $script:Writes -eq 0) 'Restoration is idempotent when settings already match the original'
+    $liveFixtureRows=$script:FixtureTcpRows
+    $script:Current=$target.PSObject.Copy();$script:Writes=0;$script:FixtureTcpRows=@()
+    Check ((Restore-CleanStartSnapshot $script:Before $target) -eq 'direct-fallback' -and $script:Writes -eq 0 -and $script:Current.Flags -eq 1) 'An original local entry that stopped during comparison stays disabled instead of restoring a dead proxy'
+    Check ($script:FixtureTcpLockDepth -gt 0 -and $script:Current.AutomaticConfigFingerprint -ceq $script:Before.AutomaticConfigFingerprint) 'Entry inspection runs inside the shared change lock and does not discard PAC identity'
+    $automaticBefore=$script:Before.PSObject.Copy();$automaticBefore.Flags=15
+    Check ((Restore-CleanStartSnapshot $automaticBefore $target) -eq 'direct-fallback' -and $script:Writes -eq 1 -and $script:Current.Flags -eq 13) 'Dead manual proxy fallback preserves original PAC and automatic-detection modes'
+    $readsAfterFallback=$script:FixtureTcpReads
+    Check ((Restore-CleanStartSnapshot $automaticBefore $target) -eq 'direct-fallback' -and $script:Writes -eq 1 -and $script:FixtureTcpReads -eq $readsAfterFallback) 'A second restorer recognizes the already applied PAC-preserving fallback without another write'
+    $script:Current=$target.PSObject.Copy();$script:Writes=0;$script:FixtureTcpAvailable=$false
+    Throws {Restore-CleanStartSnapshot $script:Before $target} '入口状态未知'
+    Check ($script:Writes -eq 0 -and (Test-CleanStartSnapshot $script:Current $target)) 'Unavailable TCP inventory leaves the owned temporary settings intact and cannot report restoration'
+    $script:FixtureTcpAvailable=$true;$script:FixtureTcpRows=@([pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=19001;OwningProcess=2147483000})
+    Throws {Restore-CleanStartSnapshot $script:Before $target} '入口状态未知'
+    Check ($script:Writes -eq 0) 'A listener without readable current process ownership remains unknown instead of being classified dead'
+    $script:FixtureTcpRows=$liveFixtureRows;$script:FixtureTcpThrows=$true
+    Throws {Restore-CleanStartSnapshot $script:Before $target} '入口状态未知'
+    $script:FixtureTcpThrows=$false;$script:FixtureTcpDrift=$true
+    Check ((Restore-CleanStartSnapshot $script:Before $target) -eq 'external-change' -and $script:Writes -eq 0 -and $script:Current.Server -eq '127.0.0.1:19998') 'A system selection made during fresh endpoint inspection survives the second CAS check'
+    $readsBeforeOther=$script:FixtureTcpReads
+    Check ((Get-CleanStartRestoreEndpointState 'proxy.example.invalid:8080') -eq 'not-local' -and (Get-CleanStartRestoreEndpointState 'http=127.0.0.1:19001;https=127.0.0.1:19002') -eq 'not-local' -and $script:FixtureTcpReads -eq $readsBeforeOther) 'Remote and complex proxy expressions are not scanned or classified as dead local entries'
+    $script:FixtureTcpRows=@([pscustomobject]@{State='Listen';LocalAddress='::1';LocalPort=19001;OwningProcess=$PID})
+    Check ((Get-CleanStartRestoreEndpointState '127.0.0.1:19001') -eq 'dead') 'An IPv6-only loopback listener cannot validate an IPv4 proxy endpoint'
+    $script:FixtureTcpRows=$liveFixtureRows
+    Check ((Get-CleanStartRestoreEndpointState '[::1]:19001') -eq 'dead') 'An IPv4-only loopback listener cannot validate an IPv6 proxy endpoint'
+    $script:FixtureTcpRows=@([pscustomobject]@{State='Listen';LocalAddress='::';LocalPort=19001;OwningProcess=$PID})
+    Check ((Get-CleanStartRestoreEndpointState '127.0.0.1:19001') -eq 'unknown') 'An IPv6 wildcard cannot prove IPv4 reachability without dual-stack evidence'
+    $script:FixtureTcpRows=$liveFixtureRows
+    $script:Current=$target.PSObject.Copy();$script:Writes=0
+    Check ((Restore-CleanStartSnapshot $script:Before $target) -eq 'restored' -and $script:Writes -eq 1 -and $script:Current.Flags -eq 3) 'A still-live original local listener retains the normal exact restoration behavior'
 }finally{foreach($name in $savedEnvironment.Keys){[Environment]::SetEnvironmentVariable($name,$savedEnvironment[$name],'Process')}}
 
 # Exercise the actual worker in child PowerShell processes. Its backend is a test
 # adapter over the real functions; every Windows/RunOnce writer is replaced below.
 # The copied worker only changes its mutex namespace so it cannot block a live session.
 $harness=Join-Path $qa 'worker';[void][IO.Directory]::CreateDirectory($harness)
+# Production recovery stubs use a short root independent of DataDirectory. Keep
+# that topology in the adapter: an expanded 8.3 or Unicode TEMP fixture must not
+# accidentally turn a normal recovery scenario into the 260-character guard test.
+$recoveryRoot=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ('Temp\FSCR-'+[Guid]::NewGuid().ToString('N'))
 $workerSource=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'CleanStartWorker.ps1')).Replace('Local\FlowSwitch-CleanStart-','Local\FlowSwitch-Test-CleanStart-'+[Guid]::NewGuid().ToString('N')+'-')
 [IO.File]::WriteAllText((Join-Path $harness 'CleanStartWorker.ps1'),$workerSource,(New-Object Text.UTF8Encoding($true)))
 $backendPath=(Join-Path $PSScriptRoot 'ProxyBackend.ps1').Replace("'","''")
@@ -104,7 +149,8 @@ function Log-Mock([string]$Text){[IO.File]::AppendAllText((Join-Path $script:Dat
 function Use-ChangeLock([scriptblock]$Action){$script:MockLock++;try{& $Action}finally{$script:MockLock--}}
 function Get-SystemSnapshot {return $script:MockSystem.PSObject.Copy()}
 function Get-CleanStartSystemSnapshot {return Get-SystemSnapshot}
-function Get-CleanStartRecoveryRoot {Join-Path $script:DataRoot 'r'}
+function Get-CleanStartRestoreEndpointState([string]$Endpoint){return 'live'}
+function Get-CleanStartRecoveryRoot {'__RECOVERY_ROOT__'}
 function Start-CleanStartRecoveryGuard([string]$WorkerPath,[string]$SessionId,[string]$Directory){Log-Mock 'guard:ready';return [pscustomobject]@{PID=49002;StartTicks='1';Path='fixture-guard'}}
 function Get-CleanStartProcessState($Identity){if($Identity){return 'alive'};return 'unknown'}
 function Set-SystemSnapshot($Value){
@@ -126,7 +172,7 @@ function Start-Sleep {param($Milliseconds,$Seconds);$session=(Get-Content (Join-
 $realWriter=${function:Write-LocalJson}
 function Write-LocalJson($Path,$Value){if($script:Scenario -eq 'record-failure' -and [IO.Path]::GetFileName($Path) -eq 'launched.json'){throw 'fixture evidence write failure'};& $realWriter $Path $Value}
 '@
-[IO.File]::WriteAllText((Join-Path $harness 'ProxyBackend.ps1'),$backend.Replace('__BACKEND__',$backendPath),(New-Object Text.UTF8Encoding($true)))
+[IO.File]::WriteAllText((Join-Path $harness 'ProxyBackend.ps1'),$backend.Replace('__BACKEND__',$backendPath).Replace('__RECOVERY_ROOT__',$recoveryRoot.Replace("'","''")),(New-Object Text.UTF8Encoding($true)))
 function Run-WorkerScenario([string]$Scenario,[string]$Mode='Monitor'){
     $data=Join-Path $qa $Scenario;[void][IO.Directory]::CreateDirectory($data)
     [IO.File]::WriteAllText((Join-Path $data 'scenario'),$Scenario)
