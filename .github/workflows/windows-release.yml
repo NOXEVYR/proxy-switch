@@ -28,14 +28,15 @@ jobs:
           $env:TEMP=$fixtureTemp;$env:TMP=$fixtureTemp
           @("TEMP=$fixtureTemp","TMP=$fixtureTemp") | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           if([regex]::Match([IO.File]::ReadAllText('Preferences.ps1'),"ProductVersion='([0-9.]+)'").Groups[1].Value -ne '3.9.0'){throw 'This release workflow is limited to 3.9.0'}
-          & .\Test-All.ps1
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-All.ps1
           if($LASTEXITCODE -ne 0){throw 'Isolated tests failed'}
       - name: Prepare official locked runtime
         run: |
+          $ProgressPreference='SilentlyContinue'
           & .\Prepare-Runtime.ps1 -Destination "$env:RUNNER_TEMP\flowswitch-runtime"
       - name: Test real isolated request routing
         run: |
-          & .\Test-ManagedSwitchChain.ps1 -RuntimeDirectory "$env:RUNNER_TEMP\flowswitch-runtime"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-ManagedSwitchChain.ps1 -RuntimeDirectory "$env:RUNNER_TEMP\flowswitch-runtime"
           if($LASTEXITCODE -ne 0){throw 'Managed switch chain failed'}
           & node .\Test-ProgramIngressIntegration.cjs "$env:RUNNER_TEMP\flowswitch-runtime\FlowSwitch.Core.exe"
           if($LASTEXITCODE -ne 0){throw 'Program ingress integration failed'}
