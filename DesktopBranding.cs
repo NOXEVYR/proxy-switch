@@ -1,10 +1,14 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 
 // Give the PowerShell-hosted window its own taskbar identity and a usable pin target.
 public static class FlowSwitchDesktop
 {
-    public const string AppId = "FlowSwitch.Desktop";
+    // A one-time identity migration retires Explorer's old S-brand taskbar group.
+    // Keep this stable across releases; the launcher, window and shortcuts share it.
+    public const string AppId = "FlowSwitch.Desktop.DualPortal";
     private static readonly Guid PropertyFormat = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
@@ -13,6 +17,8 @@ public static class FlowSwitchDesktop
     private static extern int SHGetPropertyStoreForWindow(IntPtr window, ref Guid iid, out IPropertyStore store);
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PropVariant value);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(uint eventId, uint flags, string item, IntPtr other);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PropertyKey { public Guid Format; public uint Id; }
@@ -49,6 +55,36 @@ public static class FlowSwitchDesktop
     {
         Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(AppId));
     }
+    private static object OpenShortcut(string path, bool writable)
+    {
+        if (!Path.IsPathRooted(path) || !String.Equals(Path.GetExtension(path), ".lnk", StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
+            throw new ArgumentException("An existing absolute shortcut path is required.", "path");
+        object shortcut = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+        try { ((IPersistFile)shortcut).Load(path, writable ? 2 : 0); return shortcut; }
+        catch { Marshal.ReleaseComObject(shortcut); throw; }
+    }
+    public static void ConfigureShortcut(string path)
+    {
+        object shortcut = OpenShortcut(path, true);
+        try
+        {
+            var store = (IPropertyStore)shortcut;
+            Set(store, 5, AppId);
+            Marshal.ThrowExceptionForHR(store.Commit());
+            ((IPersistFile)shortcut).Save(path, true);
+        }
+        finally { Marshal.ReleaseComObject(shortcut); }
+        if (!String.Equals(ReadShortcutProperty(path, 5), AppId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Shortcut taskbar identity was not saved.");
+        // Refresh only the shortcut this installation owns, never global Shell caches.
+        SHChangeNotify(0x00002000, 0x0005, path, IntPtr.Zero);
+    }
+    public static string ReadShortcutProperty(string path, uint id)
+    {
+        object shortcut = OpenShortcut(path, false);
+        try { return Read((IPropertyStore)shortcut, id); }
+        finally { Marshal.ReleaseComObject(shortcut); }
+    }
     public static bool ConfigureWindow(IntPtr window, string command, string icon)
     {
         var store = Open(window);
@@ -84,13 +120,17 @@ public static class FlowSwitchDesktop
         var store = Open(window);
         try
         {
-            var key = new PropertyKey { Format = PropertyFormat, Id = id };
-            PropVariant value;
-            Marshal.ThrowExceptionForHR(store.GetValue(ref key, out value));
-            try { return value.Type == 31 ? Marshal.PtrToStringUni(value.Value) : null; }
-            finally { PropVariantClear(ref value); }
+            return Read(store, id);
         }
         finally { Marshal.ReleaseComObject(store); }
+    }
+    private static string Read(IPropertyStore store, uint id)
+    {
+        var key = new PropertyKey { Format = PropertyFormat, Id = id };
+        PropVariant value;
+        Marshal.ThrowExceptionForHR(store.GetValue(ref key, out value));
+        try { return value.Type == 31 ? Marshal.PtrToStringUni(value.Value) : null; }
+        finally { PropVariantClear(ref value); }
     }
 }
 

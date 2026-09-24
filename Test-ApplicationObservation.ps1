@@ -22,10 +22,10 @@ function Test-ManagedProgramSession {return $true}
 function Socket([int]$Owner,[int]$Source,[string]$Remote,[int]$Port,[string]$State='Established'){
     [pscustomobject]@{OwningProcess=$Owner;LocalAddress='127.0.0.1';LocalPort=$Source;RemoteAddress=$Remote;RemotePort=$Port;State=$State}
 }
-function Observe($Processes,$Connections=@(),$Rule=$null,$Launch=$null,$Core=$script:FixtureCore,$EngineConnections=@(),[bool]$TcpAvailable=$true,[bool]$ProcessesAvailable=$true,$App=$script:FixtureApp){
+function Observe($Processes,$Connections=@(),$Rule=$null,$Launch=$null,$Core=$script:FixtureCore,$EngineConnections=@(),[bool]$TcpAvailable=$true,[bool]$ProcessesAvailable=$true,$App=$script:FixtureApp,$FamilySnapshot=$null){
     $byId=@{};foreach($p in $Processes){$byId[[int]$p.Id]=$p}
-    $evidence=Get-ApplicationConnectionEvidence $Processes $Connections $EngineConnections 'gateway' $byId $App.Path $TcpAvailable
-    $row=Get-ApplicationObservationRow $App $Processes $evidence $Core $Rule $Launch $null $ProcessesAvailable
+    $evidence=Get-ApplicationConnectionEvidence $Processes $Connections $EngineConnections 'gateway' $byId $App.Path $TcpAvailable @() $FamilySnapshot
+    $row=Get-ApplicationObservationRow $App $Processes $evidence $Core $Rule $Launch $null $ProcessesAvailable $FamilySnapshot
     [pscustomobject]@{Evidence=$evidence;Row=$row}
 }
 
@@ -93,6 +93,66 @@ Check (-not $seen.Row.Loaded -and $seen.Row.Status -match '规则读取失败.*�
 $partial=$script:FixtureCore.PSObject.Copy();$partial.proxiesAvailable=$false
 $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897)) -Rule $rule -Core $partial -EngineConnections @($engine)
 Check (-not $seen.Row.Loaded -and $seen.Row.Status -match '当前出口读取失败.*未知' -and $seen.Row.Actual -match 'Fixture ×1') 'Unavailable current selector remains unknown despite an older observed proxy connection'
+
+# Direct egress retains its observed ingress, and unobserved ingress is never guessed direct.
+$directEngine=$engine.PSObject.Copy();$directEngine.route='Direct'
+$directRule=[pscustomobject]@{route='Direct';loaded=$true}
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897)) -Rule $directRule -EngineConnections @($directEngine)
+Check ($seen.Row.Loaded -and $seen.Evidence.Counts.Direct -eq 1 -and $seen.Row.Actual -eq '经流向→直连 ×1') 'Gateway direct exit is explicitly distinguished from bypassing the gateway'
+$detail=$seen.Row.ConnectionDetails[0]
+Check ($detail.PID -eq 10 -and $detail.Path -eq $exe -and $detail.LocalPort -eq 51000 -and $detail.RemotePort -eq 7897 -and $detail.IngressKind -eq 'Gateway' -and $detail.ActualRoute -eq 'Direct') 'Connection details preserve the owner, socket tuple, actual ingress and actual route'
+Check ($detail.TargetAddress -eq '198.51.100.1' -and $detail.TargetPort -eq 443 -and $detail.TargetSource -eq 'Controller' -and $detail.EvidenceSource -eq 'Controller') 'Gateway target details come from the matched controller connection, not the local proxy socket'
+Check ($detail.ObservedAt -eq $seen.Row.ObservedAt -and [DateTimeOffset]::Parse($detail.ObservedAt) -le [DateTimeOffset]::UtcNow -and -not $detail.AuthenticationVerified) 'Evidence is timestamped per current observation and does not certify authentication'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.5' 443)) -Rule $directRule
+Check (-not $seen.Row.Loaded -and $seen.Row.Actual -match '入口外 TCP.*接管未知' -and $seen.Evidence.Counts.Count -eq 0 -and $seen.Row.ConnectionDetails[0].ActualRoute -eq 'Unknown') 'A direct policy cannot promote outside TCP evidence to a confirmed direct egress'
+Check ($seen.Row.ConnectionDetails[0].TargetAddress -eq '203.0.113.5' -and $seen.Row.ConnectionDetails[0].TargetPort -eq 443 -and $seen.Row.ConnectionDetails[0].TargetSource -eq 'Tcp') 'An outside connection exposes only its observed TCP destination'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897))
+Check ($null -eq $seen.Row.ConnectionDetails[0].TargetAddress -and $null -eq $seen.Row.ConnectionDetails[0].TargetPort) 'An unmatched gateway socket cannot present its entry as the unknown final destination'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.5' 443 'SynSent'))
+Check ($seen.Row.ConnectionDetails[0].State -eq 'SynSent' -and $seen.Row.ConnectionDetails[0].ActualRoute -eq 'Unknown') 'Pending connection details never claim an established actual route'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.9' 443)) -EngineConnections @($tunB)
+Check ($seen.Row.Actual -eq '经分流内核→直连 ×1' -and $seen.Row.ConnectionDetails[0].IngressKind -eq 'Tun') 'TUN direct observations preserve the different ingress instead of claiming a bypass'
+
+# Internal communication is a paired, current socket fact, not a guess from a loopback IP.
+$selfIpc=@((Socket 10 53001 '127.0.0.1' 53002),(Socket 10 53002 '127.0.0.1' 53001))
+$seen=Observe -Processes @($main) -Connections $selfIpc -Rule $rule
+Check ($seen.Evidence.LocalInternal -eq 2 -and $seen.Evidence.LocalUnknown -eq 0 -and $seen.Row.Actual -eq '本机内部通信 ×2' -and -not $seen.Row.Loaded) 'Paired same-process IPC is known local communication, but provides no internet route evidence'
+Check ($seen.Row.ConnectionDetails[0].PeerPID -eq 10 -and $seen.Row.ConnectionDetails[0].PeerPath -eq $exe -and $seen.Row.ConnectionDetails[0].EvidenceSource -eq 'PairedSocket') 'Internal communication details include the verified reverse socket owner'
+$seen=Observe -Processes @($main) -Connections @($selfIpc[0]) -Rule $rule
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.LocalUnknown -eq 1) 'One-sided loopback remains unknown without its matching reverse socket'
+$broken=$selfIpc[1].PSObject.Copy();$broken.RemotePort=53009
+$seen=Observe -Processes @($main) -Connections @($selfIpc[0],$broken)
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.LocalUnknown -eq 2) 'Similar loopback sockets with different ports cannot prove internal communication'
+$broken=$selfIpc[1].PSObject.Copy();$broken.LocalAddress='127.0.0.2'
+$seen=Observe -Processes @($main) -Connections @($selfIpc[0],$broken)
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.LocalUnknown -eq 2) 'Both reversed addresses must match, not just ports'
+$seen=Observe -Processes @($main) -Connections @($selfIpc[0],$selfIpc[1],$selfIpc[1])
+Check ($seen.Row.ConnectionDetails[0].IngressKind -eq 'UnknownLocal') 'Duplicate reverse rows are ambiguous and cannot certify the socket'
+$familyIpc=@((Socket 10 54001 '127.0.0.1' 54002),(Socket 11 54002 '127.0.0.1' 54001))
+$seen=Observe -Processes @($main,$worker) -Connections $familyIpc
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.LocalUnknown -eq 2) 'A declared parent ID without verified current family evidence is insufficient for IPC grouping'
+$verified=[pscustomobject]@{Members=@($main,$worker);UnknownIds=@();RetainedIds=@();Available=$true}
+$seen=Observe -Processes @($main,$worker) -Connections $familyIpc -FamilySnapshot $verified
+Check ($seen.Evidence.LocalInternal -eq 2 -and $seen.Evidence.LocalUnknown -eq 0 -and $seen.Row.ConnectionDetails[0].PeerPID -eq 11) 'A verified current family with unique reversed sockets can explain interprocess loopback'
+$unknownFamily=$verified.PSObject.Copy();$unknownFamily.UnknownIds=@(11)
+$seen=Observe -Processes @($main,$worker) -Connections $familyIpc -FamilySnapshot $unknownFamily
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.LocalUnknown -eq 2) 'An unreadable family member cannot certify IPC ownership'
+$unavailableFamily=$verified.PSObject.Copy();$unavailableFamily.Available=$false
+$seen=Observe -Processes @($main,$worker) -Connections $familyIpc -FamilySnapshot $unavailableFamily
+Check ($seen.Evidence.LocalInternal -eq 0) 'Stale family members from a failed process query cannot certify IPC'
+$seen=Observe -Processes @($main) -Connections $familyIpc -FamilySnapshot $verified
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.LocalUnknown -eq 1) 'A reverse owner outside the current application family remains unknown'
+$proxyPair=@((Socket 10 53001 '127.0.0.1' 18082),(Socket 10 18082 '127.0.0.1' 53001))
+$seen=Observe -Processes @($main) -Connections $proxyPair
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Evidence.Counts.upstream -eq 1) 'A known proxy port cannot be hidden as harmless IPC even with the same owner'
+$ipv6Ipc=@((Socket 10 55001 '::ffff:127.0.0.1' 55002),(Socket 10 55002 '127.0.0.1' 55001))
+$ipv6Ipc[0].LocalAddress='::ffff:127.0.0.1'
+$seen=Observe -Processes @($main) -Connections $ipv6Ipc
+Check ($seen.Evidence.LocalInternal -eq 2) 'Equivalent IPv4 mapped loopback endpoints can form one strictly matched pair'
+$seen=Observe -Processes @($main) -Connections (@((Socket 10 51000 '127.0.0.1' 7897))+$selfIpc) -Rule $rule -EngineConnections @($engine)
+Check ($seen.Row.Loaded -and $seen.Row.Status -notmatch '未确认接管' -and $seen.Row.ConnectionDetails.Count -eq $seen.Evidence.Total) 'Verified IPC does not prevent an independently observed internet route from being shown as applied'
+$seen=Observe -Processes @($main) -Connections $selfIpc -TcpAvailable $false
+Check ($seen.Evidence.LocalInternal -eq 0 -and $seen.Row.ConnectionDetails.Count -eq 0) 'A failed TCP collection cannot reuse an earlier internal-communication snapshot'
 
 # The actual inventory integration separates a child with its own saved policy.
 $script:IntegratedRules=@([pscustomobject]@{path=$exe;route='upstream'},[pscustomobject]@{path=$helper;route='Direct'})

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -52,6 +52,8 @@ internal static class Launcher
         bool quiet = Array.Exists(args, a => a == "--quiet" || a == "--verify" || a == "--smoke-test" || a == "--status" || a == "--network-diagnostic");
         try
         {
+            // Match the hosted UI and installed shortcut before creating any windows.
+            FlowSwitchDesktop.Initialize();
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--quiet") continue;

@@ -24,9 +24,36 @@ function Get-ApplicationChildProcesses($Family,[string]$PrimaryPath) {
     $ids=@($Family|ForEach-Object Id)
     @($Family|Where-Object {$_.Path -ine $PrimaryPath -or ($_.ParentId -and $ids -contains [int]$_.ParentId)})
 }
-function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[string]$Gateway,$ById,[string]$PrimaryPath,[bool]$TcpAvailable=$true,$ManagedIngresses=@()) {
+function Test-ObservationLoopback([string]$Address) {
+    $ip=$null
+    if(-not [Net.IPAddress]::TryParse($Address,[ref]$ip)){return $false}
+    if($ip.IsIPv4MappedToIPv6){$ip=$ip.MapToIPv4()}
+    [Net.IPAddress]::IsLoopback($ip)
+}
+function Get-ObservationLocalPeer($Socket,$TcpRows,$FamilyIds,$ById,$VerifiedFamilyIds,$ManagedIngresses) {
+    # Loopback is not itself proof of IPC: require the unique reversed four-tuple,
+    # a current owner, and either one PID or a currently verified family relation.
+    if(-not (Test-ObservationLoopback $Socket.LocalAddress) -or -not (Test-ObservationLoopback $Socket.RemoteAddress)){return $null}
+    if([int]$Socket.LocalPort -eq [int]$Socket.RemotePort -and (Test-SameIpAddress $Socket.LocalAddress $Socket.RemoteAddress)){return $null}
+    $peers=@($TcpRows|Where-Object {
+        [string]$_.State -eq 'Established' -and [int]$_.LocalPort -eq [int]$Socket.RemotePort -and [int]$_.RemotePort -eq [int]$Socket.LocalPort -and
+        (Test-SameIpAddress $_.LocalAddress $Socket.RemoteAddress) -and (Test-SameIpAddress $_.RemoteAddress $Socket.LocalAddress)
+    })
+    if($peers.Count -ne 1){return $null}
+    $peer=$peers[0];$owner=[int]$Socket.OwningProcess;$peerId=[int]$peer.OwningProcess
+    if($FamilyIds -notcontains $owner -or -not $ById.ContainsKey($owner) -or -not $ById.ContainsKey($peerId)){return $null}
+    if($owner -ne $peerId -and ($VerifiedFamilyIds -notcontains $owner -or $VerifiedFamilyIds -notcontains $peerId)){return $null}
+    # Never relabel a registered proxy/program ingress as harmless internal traffic.
+    if((Get-ConnectionProfile $peer) -or @($ManagedIngresses|Where-Object {$_ -and [int]$_.port -eq [int]$peer.RemotePort}).Count){return $null}
+    $peer
+}
+function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[string]$Gateway,$ById,[string]$PrimaryPath,[bool]$TcpAvailable=$true,$ManagedIngresses=@(),$FamilySnapshot=$null) {
     $ids=@($Family|ForEach-Object Id);$children=@(Get-ApplicationChildProcesses $Family $PrimaryPath|ForEach-Object Id)
-    $counts=@{};$outside=0;$outsidePending=0;$localUnknown=0;$unknown=0;$pending=0;$pendingEndpoints=@{};$childPending=0;$childObserved=0;$total=0;$managedObserved=0;$policyMismatch=0;$policyUnknown=0;$managedPending=0;$ingressIds=@{}
+    # The verified snapshot may include a child with its own rule (and therefore
+    # its own display row). It is still an eligible IPC peer, not route evidence.
+    $verifiedFamilyIds=@();if($FamilySnapshot -and $FamilySnapshot.Available -eq $true){$verifiedFamilyIds=@($FamilySnapshot.Members|Where-Object {@($FamilySnapshot.UnknownIds) -notcontains [int]$_.Id}|ForEach-Object Id)}
+    $observedAt=[DateTimeOffset]::UtcNow.ToString('o');$details=New-Object 'Collections.Generic.List[object]'
+    $counts=@{};$outside=0;$outsidePending=0;$localUnknown=0;$localInternal=0;$unknown=0;$pending=0;$pendingEndpoints=@{};$childPending=0;$childObserved=0;$total=0;$managedObserved=0;$policyMismatch=0;$policyUnknown=0;$managedPending=0;$ingressIds=@{};$directViaGateway=0;$directViaTun=0
     if($TcpAvailable){foreach($c in $TcpRows){
         if([string]$c.State -notin @('Established','SynSent') -or $ids -notcontains [int]$c.OwningProcess){continue}
         $total++
@@ -34,6 +61,15 @@ function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[st
         $entry=Get-ConnectionProfile $c;$route=$null
         $owned=@($ManagedIngresses|Where-Object {$_ -and [int]$_.port -eq [int]$c.RemotePort -and $c.RemoteAddress -in @('127.0.0.1','::1','::ffff:127.0.0.1')})
         $ingress=$null;if($owned.Count -eq 1){$ingress=$owned[0]}
+        $processPath='';if($ById.ContainsKey([int]$c.OwningProcess)){$processPath=[string]$ById[[int]$c.OwningProcess].Path}
+        $kind='Outside';$entryName='入口外（接管未知）';$entryId=''
+        if($ingress){$kind='Managed';$entryName='固定程序入口';$entryId=[string]$ingress.id}
+        elseif($entry -and $entry -eq $Gateway){$kind='Gateway';$entryName='流向入口';$entryId=$entry}
+        elseif($entry){$kind='Proxy';$entryName='已登记代理：'+(Get-RouteName $entry);$entryId=$entry}
+        elseif(Test-ObservationLoopback $c.RemoteAddress){$kind='UnknownLocal';$entryName='未登记的本机入口'}
+        $detail=[pscustomobject]@{PID=[int]$c.OwningProcess;Path=$processPath;State=[string]$c.State;LocalAddress=[string]$c.LocalAddress;LocalPort=[int]$c.LocalPort;RemoteAddress=[string]$c.RemoteAddress;RemotePort=[int]$c.RemotePort;TargetAddress=$null;TargetPort=$null;TargetSource='Unknown';IngressKind=$kind;IngressName=$entryName;IngressId=$entryId;ActualRoute='Unknown';RouteName='出口待确认';EvidenceSource='TcpOnly';PeerPID=$null;PeerPath='';ObservedAt=$observedAt;AuthenticationVerified=$false}
+        if(-not $entry -and -not $ingress){$detail.TargetAddress=[string]$c.RemoteAddress;$detail.TargetPort=[int]$c.RemotePort;$detail.TargetSource='Tcp'}
+        $details.Add($detail)
         if([string]$c.State -eq 'SynSent'){
             $pending++;if($children -contains [int]$c.OwningProcess){$childPending++}
             if($ingress){$managedPending++}elseif(-not $entry){$outsidePending++}
@@ -49,7 +85,7 @@ function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[st
             if($_.inboundName -and $_.inboundName -ne ('FS-Program-'+$ingress.id)){return $false}
             return [bool]($_.ingressId -or $_.inboundName)
         })}
-        $engine=Find-EngineConnection $candidates ([string]$ById[[int]$c.OwningProcess].Path) $c
+        $engine=Find-EngineConnection $candidates $processPath $c
         if($ingress){
             if($engine -and $engine.route){$route=$engine.route;$managedObserved++;$ingressIds[[string]$ingress.id]=$true
                 if($route -in @('Unknown','Blocked')){$policyUnknown++}
@@ -59,25 +95,47 @@ function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[st
             }else{$unknown++}
         }
         elseif($entry){if($entry -eq $Gateway){if($engine -and $engine.route){$route=$engine.route}else{$unknown++}}else{$route=$entry}}
-        elseif($engine -and $engine.inbound -ieq 'Tun'){if($engine.route){$route=$engine.route}else{$unknown++}}
-        elseif($c.RemoteAddress -in @('127.0.0.1','::1','::ffff:127.0.0.1')){$localUnknown++}
+        elseif($engine -and $engine.inbound -ieq 'Tun'){$detail.IngressKind='Tun';$detail.IngressName='TUN 分流内核';if($engine.route){$route=$engine.route}else{$unknown++}}
+        elseif(Test-ObservationLoopback $c.RemoteAddress){
+            $peer=Get-ObservationLocalPeer $c $TcpRows $ids $ById $verifiedFamilyIds $ManagedIngresses
+            if($peer){$localInternal++;$detail.IngressKind='LocalInternal';$detail.IngressName='本机内部通信';$detail.ActualRoute='LocalInternal';$detail.RouteName='本机内部通信';$detail.EvidenceSource='PairedSocket';$detail.PeerPID=[int]$peer.OwningProcess;$detail.PeerPath=[string]$ById[[int]$peer.OwningProcess].Path}
+            else{$localUnknown++}
+        }
         else{$outside++}
-        if($route){if(-not $counts.ContainsKey($route)){$counts[$route]=0};$counts[$route]++;if($children -contains [int]$c.OwningProcess){$childObserved++}}
+        if($engine -and $detail.IngressKind -in @('Managed','Gateway','Tun')){
+            $detail.EvidenceSource='Controller';$detail.TargetSource='Unknown';$detail.TargetAddress=$null;$detail.TargetPort=$null
+            if($engine.destinationAddress){$detail.TargetAddress=[string]$engine.destinationAddress;$detail.TargetSource='Controller'}
+            if($engine.destinationPort){$detail.TargetPort=[int]$engine.destinationPort}
+        }
+        if($route){
+            if(-not $counts.ContainsKey($route)){$counts[$route]=0};$counts[$route]++;if($children -contains [int]$c.OwningProcess){$childObserved++}
+            $detail.ActualRoute=$route;$detail.RouteName=Get-RouteName $route;$detail.EvidenceSource='RegisteredEndpoint'
+            if($detail.IngressKind -in @('Managed','Gateway','Tun')){
+                $detail.EvidenceSource='Controller'
+                if($route -eq 'Direct'){if($detail.IngressKind -eq 'Tun'){$directViaTun++;$detail.RouteName='经分流内核→直连'}else{$directViaGateway++;$detail.RouteName='经流向→直连'}}
+            }
+        }
     }}
     $actual=@()
     $knownRoutes=@('Direct')+(Get-ProfileKeys)+@('Blocked','Unknown')
-    foreach($route in $knownRoutes){if($counts.ContainsKey($route)){$actual+=((Get-RouteName $route)+' ×'+$counts[$route])}}
+    foreach($route in $knownRoutes){if($counts.ContainsKey($route)){
+        if($route -eq 'Direct'){
+            if($directViaGateway){$actual+='经流向→直连 ×'+$directViaGateway}
+            if($directViaTun){$actual+='经分流内核→直连 ×'+$directViaTun}
+        }else{$actual+=((Get-RouteName $route)+' ×'+$counts[$route])}
+    }}
     $unrecognized=0;foreach($route in $counts.Keys){if($knownRoutes -notcontains $route){$unrecognized+=$counts[$route]}}
     if($unrecognized){$actual+='未识别线路 ×'+$unrecognized+' · 出口待确认'}
     if($unknown){$actual+='分流入口 ×'+$unknown+' · 出口待确认'}
-    if($outside){$actual+='入口外 TCP ×'+$outside}
+    if($outside){$actual+='入口外 TCP ×'+$outside+' · 接管未知'}
     if($localUnknown){$actual+='未登记的本机连接 ×'+$localUnknown}
+    if($localInternal){$actual+='本机内部通信 ×'+$localInternal}
     if($pending){$targets=@($pendingEndpoints.Keys|Sort-Object|ForEach-Object {$_+' ×'+$pendingEndpoints[$_]});$actual+='连接尚未建立 / SynSent ×'+$pending+'（'+($targets -join '、')+'）'}
     $state='Idle'
     if(-not $TcpAvailable){$state='Unknown';$actual=@('连接读取失败 · 状态未知')}
-    elseif($counts.Count -or $outside -or $unknown -or $localUnknown){$state='Connected'}
+    elseif($counts.Count -or $outside -or $unknown -or $localUnknown -or $localInternal){$state='Connected'}
     elseif($pending){$state='Connecting'}
-    [pscustomobject]@{Counts=$counts;Outside=$outside;OutsidePending=$outsidePending;LocalUnknown=$localUnknown;GatewayUnknown=$unknown;Pending=$pending;PendingEndpoints=$pendingEndpoints;ChildPending=$childPending;ChildProxyObserved=$childObserved;Total=$total;ManagedObserved=$managedObserved;ManagedPending=$managedPending;PolicyMismatch=$policyMismatch;PolicyUnknown=$policyUnknown;ObservedIngressIds=@($ingressIds.Keys);State=$state;Actual=($actual -join '，');Available=$TcpAvailable;Layer='TCP';AuthenticationVerified=$false}
+    [pscustomobject]@{Counts=$counts;Outside=$outside;OutsidePending=$outsidePending;LocalUnknown=$localUnknown;LocalInternal=$localInternal;GatewayUnknown=$unknown;Pending=$pending;PendingEndpoints=$pendingEndpoints;ChildPending=$childPending;ChildProxyObserved=$childObserved;Total=$total;ManagedObserved=$managedObserved;ManagedPending=$managedPending;PolicyMismatch=$policyMismatch;PolicyUnknown=$policyUnknown;ObservedIngressIds=@($ingressIds.Keys);State=$state;Actual=($actual -join '，');Available=$TcpAvailable;Layer='TCP';ConnectionDetails=$details.ToArray();ObservedAt=$observedAt;AuthenticationVerified=$false}
 }
 function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launch,$Identity,[bool]$ProcessesAvailable=$true,$FamilySnapshot=$null) {
     $ids=@($Family|ForEach-Object Id);$children=@(Get-ApplicationChildProcesses $Family $App.Path|ForEach-Object ProcessName|Select-Object -Unique)
@@ -158,5 +216,5 @@ function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launc
     $policyName=Get-RouteName $policy;if($mode -eq 'observe'){$policyName='未单独指定'}
     $reason='';if($Identity){$reason=[string]$Identity.Reason}
     $canRepair=$repair -and [bool]$Identity.CanRepair -and -not $App.Conflict
-    [pscustomobject]@{Name=$App.Name;Path=$App.Path;SavedPath=$App.SavedPath;RowKey=$App.RowKey;Policy=$policy;PolicyName=$policyName;Mode=$mode;Managed=($mode -eq 'managed');NeedsRelaunch=$needsRelaunch;FamilyRetained=($familyRetained.Count -gt 0);FamilyUnknownIds=$familyUnknown;Loaded=$loaded;RuleLoaded=$ruleLoaded;Actual=$actual;Status=$status;PIDs=($ids -join ',');ChildNames=($children -join '、');OutsidePending=$Evidence.OutsidePending;Pending=$Evidence.Pending;ChildPending=$Evidence.ChildPending;ObservationState=$observation;IdentityReason=$reason;RequiresRepair=$repair;CanRepair=$canRepair;Identity=$Identity.Identity;CanLaunch=($mode -in @('launch','managed') -and -not $repair);HasSavedRule=($mode -ne 'observe');AuthenticationVerified=$false;Coverage='TCP Established/SynSent；连接证据不代表代理握手、目标网站可达或账号登录成功。短时连接、UDP/QUIC 与独立隧道可能不在此快照中'}
+    [pscustomobject]@{Name=$App.Name;Path=$App.Path;SavedPath=$App.SavedPath;RowKey=$App.RowKey;Policy=$policy;PolicyName=$policyName;Mode=$mode;Managed=($mode -eq 'managed');NeedsRelaunch=$needsRelaunch;FamilyRetained=($familyRetained.Count -gt 0);FamilyUnknownIds=$familyUnknown;Loaded=$loaded;RuleLoaded=$ruleLoaded;Actual=$actual;Status=$status;PIDs=($ids -join ',');ChildNames=($children -join '、');OutsidePending=$Evidence.OutsidePending;Pending=$Evidence.Pending;ChildPending=$Evidence.ChildPending;LocalInternal=$Evidence.LocalInternal;ConnectionDetails=@($Evidence.ConnectionDetails|Where-Object {$_});ObservedAt=$Evidence.ObservedAt;ObservationState=$observation;IdentityReason=$reason;RequiresRepair=$repair;CanRepair=$canRepair;Identity=$Identity.Identity;CanLaunch=($mode -in @('launch','managed') -and -not $repair);HasSavedRule=($mode -ne 'observe');AuthenticationVerified=$false;Coverage='TCP Established/SynSent；连接证据不代表代理握手、目标网站可达或账号登录成功。入口外 TCP 的接管状态未知，不自动认定为直接出站。短时连接、UDP/QUIC 与独立隧道可能不在此快照中'}
 }

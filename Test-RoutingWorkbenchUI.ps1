@@ -3,7 +3,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FlowWebsiteVisual{[DllImport("user32.dll")]public static extern int GetWindowLong(IntPtr window,int index);}'
 $qa=Join-Path $env:TEMP ('FlowSwitch-routing-workbench-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
@@ -18,6 +18,9 @@ $checks=@'
         Check-UI ($null -eq $script:Requested) 'Repair without a diagnosis cannot change settings'
         $priorSize=$form.Size;$form.Size=$form.MinimumSize;[Windows.Forms.Application]::DoEvents()
         Check-UI (@($toolsBar.Controls|Where-Object {$_.Right -gt $toolsBar.ClientSize.Width}).Count -eq 0) 'All diagnostic action buttons fit at minimum window width'
+        Check-UI (@($clientBar.Controls|Where-Object {$_.Right -gt $clientBar.ClientSize.Width -or $_.Bottom -gt $clientBar.ClientSize.Height}).Count -eq 0) 'Second action row and comparison stop button fit at minimum width and height'
+        $script:Requested=$null;$cleanStopButton.PerformClick()
+        Check-UI ($script:Requested.Kind -eq 'CleanStartStop' -and $script:Requested.Key -eq '') 'Comparison stop action dispatches the current session stop operation'
         $form.Size=$priorSize;$tabs.SelectedTab=$programPage
         $script:AppTarget=[pscustomobject]@{Name='Fixture Editor';Path='C:\Fixtures\editor.exe';SavedPath='C:\Fixtures\editor.exe';Mode='managed';Policy='backup';RequiresRepair=$false;HasSavedRule=$true;CanLaunch=$true}
         foreach($mode in @('launch','engine','observe','managed')){
@@ -29,6 +32,48 @@ $checks=@'
         $websiteButton.PerformClick()
         Check-UI ($script:Requested.Kind -eq 'WebsiteRules' -and $script:Requested.Key -eq '') 'Main website action opens global rules'
         $script:AppTarget.Mode='managed';$script:LastApps=Get-DemoApps
+        $script:Requested=$null;$familyRuleItem.PerformClick();$payload=$script:Requested.Key|ConvertFrom-Json
+        Check-UI ($script:Requested.Kind -eq 'FamilyRoutePlan' -and $payload.Path -ceq $script:AppTarget.Path -and $payload.Route -eq 'backup') 'Family rules action previews the selected executable and explicit route'
+        $script:Requested=$null;$cleanStartItem.PerformClick();$payload=$script:Requested.Key|ConvertFrom-Json
+        Check-UI ($script:Requested.Kind -eq 'CleanStartPlan' -and $payload.Path -ceq $script:AppTarget.Path -and $payload.DirectTest -eq $false) 'Clean environment action requests a preview without disabling the system proxy'
+        $script:Requested=$null;$directTestItem.PerformClick();$payload=$script:Requested.Key|ConvertFrom-Json
+        Check-UI ($script:Requested.Kind -eq 'CleanStartPlan' -and $payload.Path -ceq $script:AppTarget.Path -and $payload.DirectTest -eq $true) 'Direct login comparison is a separate explicit preview'
+        $script:AppTarget.Policy='Follow';$script:Requested=$null;$familyRuleItem.PerformClick()
+        Check-UI ($null -eq $script:Requested) 'Family rules cannot guess a route from Follow'
+        $script:AppTarget.Policy='backup';$script:AppTarget.RequiresRepair=$true
+        $appMenu.Show($liveList,(New-Object Drawing.Point(1,1)));[Windows.Forms.Application]::DoEvents()
+        Check-UI (-not $familyRuleItem.Enabled -and -not $cleanStartItem.Enabled -and -not $directTestItem.Enabled) 'Unresolved executable identity disables all three new actions'
+        $appMenu.Close()
+        foreach($item in @($familyRuleItem,$cleanStartItem,$directTestItem)){
+            $script:Requested=$null;$item.Enabled=$true;$item.PerformClick()
+            Check-UI ($null -eq $script:Requested) 'Click handlers also reject stale identity before dispatching previews'
+        }
+        $script:AppTarget.RequiresRepair=$false
+        foreach($confirm in @($false,$true)){
+            $script:PendingAction=$null;$script:ModalError='';$script:ModalChecked=$false;$script:ModalConfirm=$confirm
+            $plan=[pscustomobject]@{Path='C:\Fixtures\launcher.exe';DirectTest=$confirm;Elevate=$false;Message='隔离验证：请先完整退出程序。直连对照最多五分钟，并恢复原系统入口。';Version=1}
+            $modalTimer=New-Object Windows.Forms.Timer;$modalTimer.Interval=50
+            $modalTimer.Add_Tick({
+                $candidate=@([Windows.Forms.Application]::OpenForms|Where-Object {$_.Text -in @('干净环境启动','直连登录对照')})|Select-Object -First 1
+                if(-not $candidate){return}
+                $modalTimer.Stop()
+                try{
+                    if($candidate.FormBorderStyle -ne 'FixedDialog'){throw 'Fixed-position clean-start dialog can be shrunk until actions are clipped.'}
+                    if(@($candidate.Controls|Where-Object {$_.Right -gt $candidate.ClientSize.Width -or $_.Bottom -gt $candidate.ClientSize.Height}).Count){throw 'Clean-start confirmation controls are clipped.'}
+                    $notice=@($candidate.Controls|Where-Object {$_ -is [Windows.Forms.TextBox]})[0]
+                    if($notice.Text -notmatch '完整退出' -or $notice.Text -notmatch 'launcher.exe'){throw 'Clean-start confirmation lost the target or restart instructions.'}
+                    $modalBitmap=New-Object Drawing.Bitmap($candidate.Width,$candidate.Height)
+                    try{$candidate.DrawToBitmap($modalBitmap,(New-Object Drawing.Rectangle(0,0,$candidate.Width,$candidate.Height)));$modalBitmap.Save((Join-Path ([IO.Path]::GetDirectoryName($PreviewPath)) ('clean-start-'+$script:ModalConfirm+'.png')))}finally{$modalBitmap.Dispose()}
+                    $script:ModalChecked=$true
+                    if($script:ModalConfirm){@($candidate.Controls|Where-Object {$_ -is [Windows.Forms.CheckBox]})[0].Checked=$true;$candidate.AcceptButton.PerformClick()}else{$candidate.CancelButton.PerformClick()}
+                }catch{$script:ModalError=$_.Exception.Message;$candidate.Close()}
+            })
+            try{$modalTimer.Start();Show-CleanStartDialog $plan}finally{$modalTimer.Stop();$modalTimer.Dispose()}
+            Check-UI ($script:ModalChecked -and -not $script:ModalError -and -not $script:DialogOpen) ('Actual clean-start dialog controls and closing state: '+$script:ModalError)
+            if($confirm){$payload=$script:PendingAction.Key|ConvertFrom-Json;Check-UI ($script:PendingAction.Kind -eq 'CleanStart' -and $payload.DirectTest -eq $true -and $payload.Elevate -eq $true -and $payload.Path -ceq $plan.Path) 'Only confirmation queues the exact preview and explicit elevation choice'}
+            else{Check-UI ($null -eq $script:PendingAction) 'Canceling the actual clean-start dialog queues no process or network operation'}
+        }
+        $script:PendingAction=$null
         $appMenu.Show($liveList,(New-Object Drawing.Point(1,1)));[Windows.Forms.Application]::DoEvents();$websiteProgramItem.PerformClick();$appMenu.Close()
         Check-UI ($script:Requested.Kind -eq 'WebsiteRules' -and $script:Requested.Key -eq $script:AppTarget.Path) 'Program menu passes precise executable scope'
         $snapshot=[pscustomobject]@{Entries=@([pscustomobject]@{Id=('a'*32);Domain='initial.example';Match='exact';Route='Direct';Executable=''});Revision=('b'*64);Available=$true;Loaded=$true;Message='测试规则已加载';ContextExecutable='C:\Fixtures\editor.exe'}
@@ -79,4 +124,6 @@ $checks=@'
 $path=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($path)
 $source=$source.Replace('$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)',$checks+"`r`n"+'$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)')
 [IO.File]::WriteAllText($path,$source,(New-Object Text.UTF8Encoding($true)))
-& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'routing-workbench.png')
+$uiResult=@(& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'routing-workbench.png'))
+$uiResult|Write-Output
+if(-not ($uiResult -match '^PASS: \d+ routing workbench UI assertions')){throw 'Routing workbench UI did not complete its control assertions.'}

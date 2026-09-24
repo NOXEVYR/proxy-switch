@@ -1,3 +1,20 @@
+# Windows 3.9.0 游戏登录排查验收 · 2026-09-24
+
+本轮源码、隔离测试和程序包分层验证；没有把端口连接或合成测试当作真实游戏登录结果。
+
+- `Test-All.ps1`：完整静态与单元回归通过。首轮与并行测试争用全局 Windows 切换互斥锁后中断，串行重跑通过，未放宽生产锁。
+- `Test-ProgramFamilyRouting.ps1`：45 项通过，覆盖进程重用、文件变化、预览过期、冲突保留和并发启动记录不丢失。
+- `Test-ProgramCleanStart.ps1`：37 项通过，含真实临时父子进程环境继承、预览身份与 PAC 指纹、过期、重复提交、CAS 恢复和日志失败。
+- `Test-CleanStartWorker.ps1`：16 项通过；使用真实 Monitor/Child/Guard 和目标 EXE，验证到期、监护崩溃/挂起、锁住恢复标记、损坏启动日志，以及启动发生后的记录故障。Windows 与 RunOnce 写入仅使用临时桩，未改真实用户网络。
+- `Test-ApplicationObservation.ps1` / `Test-ManagedObservation.ps1`：52 / 29 项通过，真实入口与直连出口分开，未知回环不猜测；TCP 证据不证明登录。
+- `Test-ManagedSwitchChain.ps1`：15 项真实内核、HTTP 和父子程序检查通过。`Test-ProgramIngressIntegration.cjs`：46 项通过，含 A/B/Direct、网站例外、备用恢复及最后的进程、监听和锁清理；进程自然退出码 0。清理完成前不再打印总体通过。
+- `Test-RoutingWorkbenchUI.ps1`：49 项真实 WinForms 控件检查；`Test-ObservationUI.ps1`：29 项。新菜单预览、拒绝未修复路径、确认/取消和最小窗口按钮边界通过。`Test-SwitchInteraction.ps1` 通过。
+- `Test-VisualTheme.ps1`：100%、125%、150% 布局模拟通过，未改变系统 DPI。
+- 从最终 ZIP 解压后，`Test-WindowsPackage.ps1` 16 项、`Test-DesktopBranding.ps1` 25 项通过，覆盖文件清单、Unicode/空格换目录、实际 EXE 窗口冒烟、隔离桌面快捷方式、EXE/窗口图标和稳定 AppUserModelID。最终附件附带 SHA256SUMS 和构建来源。
+
+本机正常退出旧版后通过更新的桌面入口启动，窗口版本核对为 3.9.0；系统代理保持原样，用户已确认实际任务栏显示新图标。真实游戏大厅、新版长期使用、外部软件持续改写代理和实际 UAC 仍需在目标电脑验收。所有公开截图使用演示数据；私人配置、真实连接记录、恢复快照没有进入发布清单。旧版不删除，运行依赖版本未变。
+
+---
 # Windows 3.8.4 双入口图标与冰蓝主题验收 · 2026-09-19
 
 运行代码来源 `5acef692a267e8c5b5919a02026b74a7168a5ced`。Windows 运行文件与该提交一致，后续仅补充文档与下载入口。代理后端和运行依赖未修改。

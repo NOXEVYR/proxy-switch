@@ -28,3 +28,6 @@ gateway/
 macos/.build/
 macos/.swiftpm/
 __pycache__/
+
+clean-start/
+clean-start-current.json

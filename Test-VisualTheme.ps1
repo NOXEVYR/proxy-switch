@@ -15,7 +15,7 @@ public static class FlowVisualInput {
 '@
 $qa=Join-Path $env:TEMP ('FlowSwitch-visual-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
 $scriptFile=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($scriptFile)
@@ -89,6 +89,8 @@ $source=$source.Replace('$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Hei
 [IO.File]::WriteAllText($scriptFile,$source,(New-Object Text.UTF8Encoding($true)))
 $clock=[Diagnostics.Stopwatch]::StartNew()
 $env:FLOW_VISUAL_SCALE=$Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
-& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'large-list.png')
+$uiResult=@(& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'large-list.png'))
+$uiResult|Write-Output
+if(-not ($uiResult -match '^PASS: visual checks')){throw 'Visual UI did not complete its control assertions.'}
 if($OutputDirectory){[void][IO.Directory]::CreateDirectory($OutputDirectory);Copy-Item -LiteralPath (Join-Path $qa 'large-list.png') -Destination (Join-Path $OutputDirectory ('large-list-'+$Scale+'.png'));Copy-Item -LiteralPath (Join-Path $qa 'rail.png') -Destination (Join-Path $OutputDirectory ('rail-'+$Scale+'.png'))}
 if($clock.Elapsed.TotalSeconds -gt 20){throw 'Visual fixture exceeded 20 seconds; check resize/render loops.'}

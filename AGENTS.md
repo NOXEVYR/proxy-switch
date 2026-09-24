@@ -1,3 +1,12 @@
+# 3.9.0 游戏诊断约定
+
+- 连接证据必须区分入口与出口；经流向直连不是绕过入口，已建立 TCP 不等于登录成功。内部通信只接受精确反向四元组及已验证同进程/家族身份，不能猜测未知回环端口。
+- ProgramFamilyRouting 仅向已验证的当前家族成员补缺规则；预览有效期、规则 revision、进程创建时间和文件身份均须复核，保留冲突和网站例外。
+- ProgramCleanStart/CleanStartWorker 只启动用户确认的原 EXE，不结束用户进程。临时直连是显式操作，最多五分钟；WinINet 写入/恢复须短事务锁和所有权检查，保持外部修改。监视器异常退出须有恢复兜底，恢复失败保留记录。
+- 清理仅限子进程环境块。启动成功后的记录失败不得报告为未启动；启动结果与恢复结果分开。新界面动作与拒绝路径须由真实控件测试覆盖。
+- 品牌标识集中于 DesktopBranding.cs，EXE、窗口、快捷方式必须一致。仅刷新本工具快捷方式，不清空系统缓存或重启 Explorer。
+- 新验证：Test-ProgramFamilyRouting、Test-ProgramCleanStart、Test-CleanStartWorker、Test-DesktopBranding 纳入 Test-All；新模块同步加入测试夹具及两个打包白名单。不得发布 clean-start 会话、真实用户进程或网络记录。
+
 # 3.8.2 网络修复约定
 
 - 失效入口修复只接受明确确认、全量配置 revision 与新鲜 TCP 观察。简单回环代理在没有监听时才可清理；远程/复杂/未知不能按失效处理。
