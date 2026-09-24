@@ -45,6 +45,17 @@ $install=Join-Path $qa 'game';$childDirectory=Join-Path $install 'login';$extern
 foreach($directory in @($install,$childDirectory,$external)){[void][IO.Directory]::CreateDirectory($directory)}
 $app=Join-Path $install 'Game.exe';$worker=Join-Path $childDirectory 'QtWebEngineProcess.exe';$conflict=Join-Path $install 'Helper.exe';$unrelated=Join-Path $install 'Unused.exe';$outside=Join-Path $external 'QtWebEngineProcess.exe';$second=Join-Path $childDirectory 'worker.exe'
 foreach($path in @($app,$worker,$conflict,$unrelated,$outside,$second)){[IO.File]::WriteAllText($path,('identity fixture '+$path))}
+# Hosted runners can expose TEMP through an 8.3 alias such as RUNNER~1. The
+# production preview deliberately treats saved alias paths as conflicts. This
+# fixture tests normal coverage, so its process rows and saved records must use
+# the actual file paths returned by the same OS identity reader.
+$fixtureAliasCount=0
+$app,$worker,$conflict,$unrelated,$outside,$second=@(@($app,$worker,$conflict,$unrelated,$outside,$second)|ForEach-Object {
+    $identity=Get-ProgramIdentityDescriptor $_ (New-ProgramIdentityContext -Packages @())
+    if(-not $identity.Exists -or -not $identity.FileId -or -not $identity.CanonicalPath){throw 'Fixture executable identity could not be verified.'}
+    if($_ -ine $identity.CanonicalPath){$fixtureAliasCount++}
+    $identity.CanonicalPath
+})
 $birth=[DateTime]::UtcNow.AddMinutes(-1)
 function ProcessRow([int]$Id,[int]$ParentId,[string]$Path,[int]$Age=0){[pscustomobject]@{Id=$Id;ParentId=$ParentId;Path=$Path;PathStatus='Available';ProcessName=[IO.Path]::GetFileNameWithoutExtension($Path);StartTime=$birth.AddSeconds($Age)}}
 function Reset-Fixture {
@@ -57,7 +68,8 @@ function Reset-Fixture {
 Reset-Fixture
 $initial=(Get-RuleMaintenanceSnapshot '').Fingerprint
 $plan=Get-ProgramFamilyRoutePlan $app 'Direct'
-Check ($plan.Members.Count -eq 4 -and $plan.MissingCount -eq 2 -and $plan.CoveredCount -eq 1 -and $plan.ConflictCount -eq 1) 'Preview classifies verified root, descendants, coverage and conflicting dedicated routes'
+$fixtureSummary=[ordered]@{CanonicalizedPaths=$fixtureAliasCount;Members=$plan.Members.Count;Missing=$plan.MissingCount;Covered=$plan.CoveredCount;Conflicts=$plan.ConflictCount;UnknownIds=@($plan.UnknownIds);Rows=@($plan.Members|ForEach-Object {[ordered]@{Name=$_.Name;State=$_.State;FileIdentityAvailable=[bool]$_.FileId;PIDs=@($_.Processes.Id)}})}|ConvertTo-Json -Depth 5 -Compress
+Check ($plan.Members.Count -eq 4 -and $plan.MissingCount -eq 2 -and $plan.CoveredCount -eq 1 -and $plan.ConflictCount -eq 1) ('Preview classifies verified root, descendants, coverage and conflicting dedicated routes; fixture='+$fixtureSummary)
 Check ($plan.Members.Path -notcontains $outside -and $plan.Members.Path -notcontains $unrelated) 'Unrelated same-directory executable and external same-name child are excluded'
 Check ((Get-RuleMaintenanceSnapshot '').Fingerprint -ceq $initial) 'Preview is read-only across engine, launches, shortcuts and profiles'
 Check (@($plan.Members|Where-Object {-not $_.FileId -or -not $_.Processes[0].StartTicks}).Count -eq 0) 'Every preview row includes verified physical file and creation-time evidence'
