@@ -22,6 +22,7 @@ function Save-CleanFinalStatus {
     elseif($script:LaunchOutcome -eq 'not-started'){$phase='failed';$message=$(if($script:LaunchMessage){$script:LaunchMessage}else{'未取得启动证据，程序状态需检查。'})}
     elseif($script:LaunchOutcome -eq 'started'){$message='程序启动已发生；实际出口与登录结果仍需单独验证。'}
     if($script:RestoreOutcome -eq 'restored'){$message+=' 原系统代理已恢复并核验。'}
+    elseif($script:RestoreOutcome -eq 'direct-fallback'){$message+=' 原本地手动代理入口已停止，未重新启用失效入口；已保留原自动配置模式（如有），实际出口仍需验证。'}
     elseif($script:RestoreOutcome -eq 'external-change'){$phase='external-change';$message+=' 系统代理已由其他操作更改，保留外部设置。'}
     elseif($script:RestoreOutcome -eq 'failed'){$phase='recovery-failed';$message+=' 恢复尚未完成，快照已保留；可点击结束并恢复重试。'}
     Save-CleanStatus $phase $message
@@ -43,10 +44,28 @@ function Restore-CleanSession {
     if(-not $recovery.Before -or -not $recovery.Target -or $null -eq $recovery.Before.Flags -or $recovery.Target.Flags -ne 1 -or -not $recovery.Before.AutomaticConfigFingerprint -or -not $recovery.Target.AutomaticConfigFingerprint){throw '恢复快照不完整，未写入系统代理。'}
     $script:RestoreOutcome='pending'
     for($attempt=1;$attempt -le 3;$attempt++){
-        try{Assert-CleanSessionCurrent;$script:RestoreOutcome=Restore-CleanStartSnapshot $recovery.Before $recovery.Target;break}
+        try{
+            $script:RestoreOutcome=Use-ChangeLock {
+                # Ownership and completion must be checked under the same short lock
+                # as the settings CAS. The named Windows mutex is reentrant here.
+                Assert-CleanSessionCurrent
+                $resultPath=Join-Path $directory 'restore-result.json'
+                if([IO.File]::Exists($resultPath)){
+                    $finished=Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8|ConvertFrom-Json
+                    if($finished.SessionId -cne $SessionId -or $finished.Outcome -notin @('restored','direct-fallback','external-change') -or -not $finished.System){throw '恢复完成记录不可核验，未重复写入系统代理。'}
+                    if(Test-CleanStartSnapshot (Get-CleanStartSystemSnapshot) $finished.System){return [string]$finished.Outcome}
+                    return 'external-change'
+                }
+                $outcome=Restore-CleanStartSnapshot $recovery.Before $recovery.Target
+                if($outcome -notin @('restored','direct-fallback','external-change')){throw '恢复结果尚未完成，保留恢复登记。'}
+                Write-LocalJson $resultPath ([pscustomobject]@{SessionId=$SessionId;Outcome=$outcome;System=(Get-CleanStartSystemSnapshot)})
+                return $outcome
+            }
+            break
+        }
         catch{$script:RestoreOutcome='failed';if($attempt -lt 3){Start-Sleep -Milliseconds (250*$attempt)}}
     }
-    if($script:RestoreOutcome -in @('restored','external-change')){try{Remove-CleanStartRecovery $recovery.Registration}catch{}}
+    if($script:RestoreOutcome -in @('restored','direct-fallback','external-change')){try{Remove-CleanStartRecovery $recovery.Registration}catch{}}
 }
 $shell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $baseArguments='-NoProfile -ExecutionPolicy Bypass -File '+(ConvertTo-ProgramArgument $PSCommandPath)+' -DataDirectory '+(ConvertTo-ProgramArgument $script:DataRoot)+' -SessionId '+$SessionId

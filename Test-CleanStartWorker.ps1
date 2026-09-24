@@ -15,6 +15,7 @@ $script:Root=$PSScriptRoot
 function Get-CleanStartRecoveryRoot {Join-Path $script:DataRoot 'r'}
 function Get-SystemSnapshot {Get-Content -LiteralPath (Join-Path $script:DataRoot 'system.json') -Raw -Encoding UTF8|ConvertFrom-Json}
 function Get-CleanStartSystemSnapshot {Get-SystemSnapshot}
+function Get-CleanStartRestoreEndpointState([string]$Endpoint){if([IO.File]::Exists((Join-Path $script:DataRoot 'endpoint-dead'))){return 'dead'};return 'live'}
 function Set-SystemSnapshot($Snapshot){
     if(-not $script:FixtureLock){throw 'Fixture Windows write outside change lock'}
     Write-LocalJson (Join-Path $script:DataRoot 'system.json') $Snapshot
@@ -34,7 +35,10 @@ function Register-CleanStartRecovery($Registration){
 }
 function Remove-CleanStartRecovery($Registration){if([IO.File]::Exists((Join-Path $script:DataRoot 'runonce.json'))){[IO.File]::Delete((Join-Path $script:DataRoot 'runonce.json'))}}
 function Start-Sleep {param($Milliseconds,$Seconds)
-    if($Mode -eq 'Monitor' -and [IO.File]::Exists((Join-Path $script:DataRoot 'hang')) -and $Milliseconds -eq 400){[IO.File]::WriteAllText((Join-Path $script:DataRoot 'hung'),'hung');[Threading.Thread]::Sleep(30000);return}
+    if($Mode -eq 'Monitor' -and [IO.File]::Exists((Join-Path $script:DataRoot 'hang')) -and $Milliseconds -eq 400){
+        [IO.File]::WriteAllText((Join-Path $script:DataRoot 'hung'),'hung');$limit=[DateTime]::UtcNow.AddSeconds(30)
+        while(-not [IO.File]::Exists((Join-Path $script:DataRoot 'release-monitor')) -and [DateTime]::UtcNow -lt $limit){[Threading.Thread]::Sleep(25)};return
+    }
     if($Seconds){[Threading.Thread]::Sleep([int]($Seconds*1000))}else{[Threading.Thread]::Sleep([int]$Milliseconds)}
 }
 $script:OriginalFixtureWriter=${function:Write-LocalJson}
@@ -59,9 +63,9 @@ public static class CleanWorkerFixture {
 Add-Type -TypeDefinition $source -OutputAssembly $fixture -OutputType WindowsApplication
 $shell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 function Wait-Condition([scriptblock]$Condition,[string]$Message,[int]$Seconds=20){$until=[DateTime]::UtcNow.AddSeconds($Seconds);do{if(& $Condition){return};Start-Sleep -Milliseconds 80}while([DateTime]::UtcNow -lt $until);throw $Message}
-function New-FixtureSession([string]$Name,[int]$Duration=4){
+function New-FixtureSession([string]$Name,[int]$Duration=4,[int]$BeforeFlags=3){
     $data=Join-Path $qa $Name;[void][IO.Directory]::CreateDirectory($data)
-    $before=[pscustomobject]@{Flags=3;Server='127.0.0.1:19001';Bypass='fixture';AutomaticConfigFingerprint='fixture-pac'}
+    $before=[pscustomobject]@{Flags=$BeforeFlags;Server='127.0.0.1:19001';Bypass='fixture';AutomaticConfigFingerprint='fixture-pac'}
     Write-LocalJson (Join-Path $data 'system.json') $before
     $prior=$script:DataRoot;$script:DataRoot=$data
     try{
@@ -78,7 +82,20 @@ function Start-FixtureMonitor($Session){
     $Session.Process=Start-Process -FilePath $shell -WindowStyle Hidden -ArgumentList $arguments -PassThru
     $Session
 }
-function Read-FixtureStatus($Session){$path=Join-Path $Session.Directory 'status.json';if([IO.File]::Exists($path)){Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json}}
+function Read-FixtureStatus($Session){
+    $path=Join-Path $Session.Directory 'status.json'
+    if(-not [IO.File]::Exists($path)){return}
+    for($attempt=0;$attempt -lt 6;$attempt++){
+        try{return (Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json)}
+        catch [IO.IOException]{
+            # Concurrent atomic status replacement can briefly deny the reader.
+            # Retry sharing/lock violations for at most 125 ms; all other failures
+            # and invalid JSON still fail the test. The 20-second wait stays unchanged.
+            if(($_.Exception.HResult -band 0xffff) -notin @(32,33) -or $attempt -eq 5){throw}
+            [Threading.Thread]::Sleep(25)
+        }
+    }
+}
 function Stop-OwnedMonitor($Session){if($Session.Process){try{if(-not $Session.Process.HasExited){$Session.Process.Kill();[void]$Session.Process.WaitForExit(5000)}}finally{$Session.Process.Dispose()}}}
 $sessions=@()
 try{
@@ -90,6 +107,29 @@ try{
     Check ([IO.File]::Exists((Join-Path $normal.Directory 'guard-ready.json')) -and -not [IO.File]::Exists((Join-Path $normal.Data 'runonce.json'))) 'Real guard became ready before direct mode and completed registration is removed'
     $recovery=Get-Content (Join-Path $normal.Directory 'recovery.json') -Raw|ConvertFrom-Json
     Check ($recovery.Registration.Command.Length -le 260 -and $recovery.Registration.Name.StartsWith('!')) 'Persistent recovery command fits Windows RunOnce bounds and defers deletion'
+
+    foreach($case in @(@{Name='dead-entry';Before=3;Expected=1},@{Name='dead-entry-auto';Before=7;Expected=5})){
+        $fallback=New-FixtureSession $case.Name 6 $case.Before
+        if($case.Before -eq 3){[IO.File]::WriteAllText((Join-Path $fallback.Data 'hang'),'hang')}
+        $fallback=Start-FixtureMonitor $fallback;$sessions+=@($fallback)
+        Wait-Condition {(Read-FixtureStatus $fallback).Phase -eq 'active'} 'Dead-entry fixture did not reach active comparison'
+        if($case.Before -eq 3){Wait-Condition {[IO.File]::Exists((Join-Path $fallback.Data 'hung'))} 'Fallback monitor did not pause for deadline recovery'}
+        [IO.File]::WriteAllText((Join-Path $fallback.Data 'endpoint-dead'),'dead')
+        Wait-Condition {[IO.File]::Exists((Join-Path $fallback.Directory 'recovery-done'))} 'Dead-entry fallback did not finish'
+        $status=Read-FixtureStatus $fallback
+        Check ($status.RestoreOutcome -eq 'direct-fallback' -and $status.LaunchOutcome -eq 'started' -and $status.Message -match '未重新启用' -and $status.Message -notmatch '原系统代理已恢复') 'Completed fallback accurately reports the stopped local entry instead of claiming the original proxy was restored'
+        $writes=@(Get-Content -LiteralPath (Join-Path $fallback.Data 'writes'))
+        Check ((Get-Content (Join-Path $fallback.Data 'system.json') -Raw|ConvertFrom-Json).Flags -eq $case.Expected -and @($writes|Where-Object {[int]$_ -eq $case.Before}).Count -eq 0) 'Dead manual proxy is never re-enabled; pre-existing automatic configuration flags are retained'
+        Check (-not [IO.File]::Exists((Join-Path $fallback.Data 'runonce.json'))) 'Successful dead-entry fallback removes its completed recovery registration'
+        if($case.Before -eq 3){
+            Check (-not $fallback.Process.HasExited -and [IO.File]::Exists((Join-Path $fallback.Directory 'restore-result.json'))) 'Guard records completed fallback while the original monitor is still alive'
+            [IO.File]::Delete((Join-Path $fallback.Data 'endpoint-dead'))
+            [IO.File]::WriteAllText((Join-Path $fallback.Data 'release-monitor'),'release')
+            Wait-Condition {$fallback.Process.HasExited} 'Old monitor did not finish after deadline guard restored'
+            $writes=@(Get-Content -LiteralPath (Join-Path $fallback.Data 'writes'))
+            Check ((Read-FixtureStatus $fallback).RestoreOutcome -eq 'direct-fallback' -and (Get-Content (Join-Path $fallback.Data 'system.json') -Raw|ConvertFrom-Json).Flags -eq 1 -and @($writes|Where-Object {[int]$_ -eq 3}).Count -eq 0) 'A recovered old endpoint cannot make a late monitor undo an already completed fallback'
+        }
+    }
 
     $dead=Start-FixtureMonitor (New-FixtureSession 'dead' 60);$sessions+=@($dead)
     Wait-Condition {(Read-FixtureStatus $dead).Phase -eq 'active'} 'Crash fixture did not reach active'

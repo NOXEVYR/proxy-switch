@@ -4,8 +4,8 @@
 
 - `Test-All.ps1`：完整静态与单元回归通过。首轮与并行测试争用全局 Windows 切换互斥锁后中断，串行重跑通过，未放宽生产锁。
 - `Test-ProgramFamilyRouting.ps1`：45 项通过，覆盖进程重用、文件变化、预览过期、冲突保留和并发启动记录不丢失。
-- `Test-ProgramCleanStart.ps1`：37 项通过，含真实临时父子进程环境继承、预览身份与 PAC 指纹、过期、重复提交、CAS 恢复和日志失败。
-- `Test-CleanStartWorker.ps1`：16 项通过；使用真实 Monitor/Child/Guard 和目标 EXE，验证到期、监护崩溃/挂起、锁住恢复标记、损坏启动日志，以及启动发生后的记录故障。Windows 与 RunOnce 写入仅使用临时桩，未改真实用户网络。
+- `Test-ProgramCleanStart.ps1`：52 项通过，含真实临时父子进程环境继承、预览身份与 PAC 指纹、过期、重复提交、CAS 恢复和日志失败。新增原入口停止/未知、检测期间外部修改、PAC 保留及 IPv4/IPv6 地址族边界。
+- `Test-CleanStartWorker.ps1`：24 项通过；使用真实 Monitor/Child/Guard 和目标 EXE，验证到期、监护崩溃/挂起、锁住恢复标记、损坏启动日志，以及启动发生后的记录故障。失效入口不会被重新启用，迟到的 Monitor 不能重复恢复已完成的会话。Windows 与 RunOnce 写入仅使用临时桩，未改真实用户网络。
 - `Test-ApplicationObservation.ps1` / `Test-ManagedObservation.ps1`：52 / 29 项通过，真实入口与直连出口分开，未知回环不猜测；TCP 证据不证明登录。
 - `Test-ManagedSwitchChain.ps1`：15 项真实内核、HTTP 和父子程序检查通过。`Test-ProgramIngressIntegration.cjs`：46 项通过，含 A/B/Direct、网站例外、备用恢复及最后的进程、监听和锁清理；进程自然退出码 0。清理完成前不再打印总体通过。
 - `Test-RoutingWorkbenchUI.ps1`：49 项真实 WinForms 控件检查；`Test-ObservationUI.ps1`：29 项。新菜单预览、拒绝未修复路径、确认/取消和最小窗口按钮边界通过。`Test-SwitchInteraction.ps1` 通过。
