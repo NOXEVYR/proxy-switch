@@ -2,6 +2,7 @@
 param([string]$Name='流向 FlowSwitch',[string]$LauncherPath='')
 $ErrorActionPreference='Stop'
 if(-not ('FlowSwitchDesktop' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'DesktopBranding.cs')}
+if(-not ('FlowSwitchShellShortcut' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'ShellShortcut.cs')}
 if($Name -match '[<>:"/\\|?*\x00-\x1f]' -or -not $Name.Trim()){throw '快捷方式名称无效。'}
 $entry=Join-Path $PSScriptRoot 'ProxySwitch.ps1'
 if(-not (Test-Path -LiteralPath $entry)){throw '请先解压完整程序包。'}
@@ -16,36 +17,27 @@ if(-not $env:PROXY_SWITCH_DATA_DIR){Initialize-ProxyDataDirectory $dataRoot (Joi
 $quotedDataDirectory='"'+[regex]::Replace($dataRoot,'(\\+)$','$1$1')+'"'
 $desktop=[Environment]::GetFolderPath('Desktop')
 $destination=Join-Path $desktop ($Name+'.lnk')
-$shell=New-Object -ComObject WScript.Shell
-$link=$null
-try{
-    if(Test-Path -LiteralPath $destination){
-        $previous=$shell.CreateShortcut($destination)
-        try{
-            $ownedExe=([IO.Path]::GetFileName($previous.TargetPath) -in @('FlowSwitch.exe','ProxySwitch.exe') -and ($previous.Description -like 'FlowSwitch *' -or $previous.Description -like 'ProxySwitch *'))
-            if($previous.Arguments -notlike '*ProxySwitch.ps1*' -and -not $ownedExe){throw '此名称已被其他快捷方式使用，请换一个名称。'}
-            $backupDir=Join-Path $dataRoot 'backups'
-            [void][IO.Directory]::CreateDirectory($backupDir)
-            Copy-Item -LiteralPath $destination -Destination (Join-Path $backupDir ('shortcut-'+(Get-Date -Format 'yyyyMMdd-HHmmss-fff')+'.lnk'))
-        }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($previous)}
-    }
-    $link=$shell.CreateShortcut($destination)
-    $link.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $link.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$entry+'" -DataDirectory '+$quotedDataDirectory
-    $link.WorkingDirectory=$PSScriptRoot;$link.WindowStyle=7
-    if($LauncherPath){
-        $link.TargetPath=$LauncherPath;$link.Arguments='--data-directory '+$quotedDataDirectory
-        $link.WorkingDirectory=[IO.Path]::GetDirectoryName($LauncherPath)
-    }
-    $versionText=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Preferences.ps1'))
-    $version=[regex]::Match($versionText,"ProductVersion='([0-9.]+)'").Groups[1].Value
-    $link.Description='FlowSwitch '+$version+' · 流向：关闭窗口驻留托盘；通过托盘停止服务。'
-    $icon=Join-Path $PSScriptRoot 'assets\FlowSwitch.ico'
-    if(Test-Path -LiteralPath $icon){$link.IconLocation=$icon+',0'}
-    $link.Save()
-    # WScript creates the link, but cannot persist its taskbar AppUserModelID.
-    # Release it first so a later COM save cannot overwrite the added properties.
-    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link);$link=$null
-    [FlowSwitchDesktop]::ConfigureShortcut($destination)
-    Write-Output ('Desktop shortcut ready: '+$destination)
-}finally{if($link){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)};[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+if(Test-Path -LiteralPath $destination){
+    $previous=[FlowSwitchShellShortcut]::Read($destination)
+    $ownedExe=([IO.Path]::GetFileName($previous.TargetPath) -in @('FlowSwitch.exe','ProxySwitch.exe') -and ($previous.Description -like 'FlowSwitch *' -or $previous.Description -like 'ProxySwitch *'))
+    if($previous.Arguments -notlike '*ProxySwitch.ps1*' -and -not $ownedExe){throw '此名称已被其他快捷方式使用，请换一个名称。'}
+    $backupDir=Join-Path $dataRoot 'backups'
+    [void][IO.Directory]::CreateDirectory($backupDir)
+    Copy-Item -LiteralPath $destination -Destination (Join-Path $backupDir ('shortcut-'+(Get-Date -Format 'yyyyMMdd-HHmmss-fff')+'.lnk'))
+}
+$link=New-Object FlowSwitchShortcutInfo
+$link.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$link.Arguments='-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$entry+'" -DataDirectory '+$quotedDataDirectory
+$link.WorkingDirectory=$PSScriptRoot;$link.WindowStyle=7
+if($LauncherPath){
+    $link.TargetPath=$LauncherPath;$link.Arguments='--data-directory '+$quotedDataDirectory
+    $link.WorkingDirectory=[IO.Path]::GetDirectoryName($LauncherPath)
+}
+$versionText=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Preferences.ps1'))
+$version=[regex]::Match($versionText,"ProductVersion='([0-9.]+)'").Groups[1].Value
+$link.Description='FlowSwitch '+$version+' · 流向：关闭窗口驻留托盘；通过托盘停止服务。'
+$icon=Join-Path $PSScriptRoot 'assets\FlowSwitch.ico'
+if(Test-Path -LiteralPath $icon){$link.IconLocation=$icon+',0'}
+[FlowSwitchShellShortcut]::Write($destination,$link)
+[FlowSwitchDesktop]::ConfigureShortcut($destination)
+Write-Output ('Desktop shortcut ready: '+$destination)

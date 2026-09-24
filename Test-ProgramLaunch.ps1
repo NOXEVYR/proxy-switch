@@ -47,8 +47,9 @@ Throws {Get-ProgramLaunchPlan $exe 'socks'} 'HTTP'
 $script:Profiles.Profiles[0].AppPath=$exe
 Throws {Get-ProgramLaunchPlan $exe 'upstream'} '代理程序自身'
 $script:Profiles.Profiles[0].AppPath=''
-$shell=New-Object -ComObject WScript.Shell;$shortcut=Join-Path $desktop 'FixtureApp.lnk'
-try{$link=$shell.CreateShortcut($shortcut);$link.TargetPath=$exe;$link.WorkingDirectory=$directory;$link.IconLocation=$exe+',0';$link.Save();[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+Initialize-ProgramShortcutSupport
+$shortcut=Join-Path $desktop 'FixtureApp.lnk'
+[FlowSwitchShellShortcut]::Write($shortcut,$exe,'',$directory,($exe+',0'),'',1)
 $originalHash=(Get-FileHash -LiteralPath $shortcut).Hash
 $realShortcut=${function:Install-ProgramProxyShortcut}
 function Install-ProgramProxyShortcut($Executable){& $realShortcut $Executable $desktop}
@@ -58,8 +59,8 @@ $record=Get-ProgramShortcutRecords|Select-Object -First 1
 Check ($result.Message.Contains($shortcut) -and $result.Message -notmatch '原图标|原入口已备份') 'Route result identifies the actual managed entry without promising every original launcher was replaced'
 Check (@(Get-VerifiedProgramShortcuts $exe).Count -eq 1) 'Verified entry reads the shortcut target and arguments'
 Check ($record.shortcut -eq $shortcut -and (Get-FileHash -LiteralPath $record.originalBackup).Hash -eq $originalHash) 'Original desktop shortcut is backed up byte for byte'
-$shell=New-Object -ComObject WScript.Shell
-try{$link=$shell.CreateShortcut($shortcut);Check ($link.Arguments -match '-LaunchProgram' -and $link.IconLocation -eq ($exe+',0') -and $link.WorkingDirectory -eq $directory) 'Managed shortcut preserves the program icon and working directory';[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+$link=[FlowSwitchShellShortcut]::Read($shortcut)
+Check ($link.Arguments -match '-LaunchProgram' -and $link.IconLocation -eq ($exe+',0') -and $link.WorkingDirectory -eq $directory) 'Managed shortcut preserves the program icon and working directory'
 $recorded=Get-RoutingSnapshot;$unified=Get-UnifiedPlan 'upstream' $recorded
 Check ($unified.ClearedRules -eq 1 -and $unified.Routing.launchEntries[0].route -eq 'Follow') 'Unified switch clears native app exceptions and keeps working launchers'
 Set-RoutingSnapshot $unified.Routing
@@ -125,8 +126,7 @@ $newResult=Set-ProgramLaunchRoute $newExe 'upstream'
 $newShortcut=Join-Path $desktop 'StoreApp（指定代理）.lnk'
 Check ($newResult.Shortcuts -contains $newShortcut -and $newResult.Message.Contains($newShortcut)) 'App without a matching desktop entry explicitly reports the separately created proxy launcher'
 Check (@(Get-VerifiedProgramShortcuts $newExe).Count -eq 1) 'New separate launcher is verified'
-$shell=New-Object -ComObject WScript.Shell
-try{$link=$shell.CreateShortcut($newShortcut);$link.Arguments='-NoProfile';$link.Save();[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+$link=[FlowSwitchShellShortcut]::Read($newShortcut);$link.Arguments='-NoProfile';[FlowSwitchShellShortcut]::Write($newShortcut,$link)
 Check (@(Get-VerifiedProgramShortcuts $newExe).Count -eq 0) 'Independently edited entry is not recommended as a working proxy launcher'
 Set-ProgramLaunchEntries @()
 Check (Test-Path -LiteralPath $newShortcut) 'Removing the rule preserves a user-modified shortcut'

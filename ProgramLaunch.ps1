@@ -60,26 +60,22 @@ function Get-ProgramShortcutRecords {
     if(Test-Path -LiteralPath $path){@((Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json).entries)}else{@()}
 }
 function Get-ProgramProxyShortcutHealth([string]$Executable) {
-    $shell=New-Object -ComObject WScript.Shell
-    try{
-        foreach($record in @(Get-ProgramShortcutRecords|Where-Object {$_.program -ieq $Executable})){
-            $state='missing-shortcut';$owned=$false;$backend='';$ready=$false
-            if(Test-Path -LiteralPath $record.shortcut -PathType Leaf){
-                $link=$shell.CreateShortcut($record.shortcut)
-                try{
-                    $owned=$link.TargetPath -ieq $record.managedTarget -and $link.Arguments -ceq $record.managedArguments
-                    if(-not $owned){$state='externally-modified'}else{
-                        $match=[regex]::Match($link.Arguments,'(?i)(?:^|\s)-File\s+(?:"([^"]+)"|(\S+))')
-                        if($match.Success){$backend=$match.Groups[1].Value;if(-not $backend){$backend=$match.Groups[2].Value}}
-                        if(-not $backend -or -not [IO.File]::Exists($backend) -or -not [IO.File]::Exists($link.TargetPath)){$state='missing-backend'}
-                        elseif($backend -ine (Join-Path $script:Root 'ProxySwitch.ps1')){$state='old-backend'}
-                        else{$state='ready';$ready=$true}
-                    }
-                }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}
+    foreach($record in @(Get-ProgramShortcutRecords|Where-Object {$_.program -ieq $Executable})){
+        $state='missing-shortcut';$owned=$false;$backend='';$ready=$false
+        if(Test-Path -LiteralPath $record.shortcut -PathType Leaf){
+            Initialize-ProgramShortcutSupport
+            $link=[FlowSwitchShellShortcut]::Read($record.shortcut)
+            $owned=$link.TargetPath -ieq $record.managedTarget -and $link.Arguments -ceq $record.managedArguments
+            if(-not $owned){$state='externally-modified'}else{
+                $match=[regex]::Match($link.Arguments,'(?i)(?:^|\s)-File\s+(?:"([^"]+)"|(\S+))')
+                if($match.Success){$backend=$match.Groups[1].Value;if(-not $backend){$backend=$match.Groups[2].Value}}
+                if(-not $backend -or -not [IO.File]::Exists($backend) -or -not [IO.File]::Exists($link.TargetPath)){$state='missing-backend'}
+                elseif($backend -ine (Join-Path $script:Root 'ProxySwitch.ps1')){$state='old-backend'}
+                else{$state='ready';$ready=$true}
             }
-            [pscustomobject]@{Shortcut=$record.shortcut;Owned=$owned;State=$state;Ready=$ready;Backend=$backend;CanRefresh=($owned -and $state -in @('missing-backend','old-backend'))}
         }
-    }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+        [pscustomobject]@{Shortcut=$record.shortcut;Owned=$owned;State=$state;Ready=$ready;Backend=$backend;CanRefresh=($owned -and $state -in @('missing-backend','old-backend'))}
+    }
 }
 function Get-VerifiedProgramShortcuts([string]$Executable) {
     @(Get-ProgramProxyShortcutHealth $Executable|Where-Object Ready|ForEach-Object Shortcut)
@@ -98,35 +94,33 @@ function Repair-ProgramProxyEntry([string]$Executable) {
     }
 }
 function Restore-ProgramProxyShortcuts([string]$Executable) {
-    $records=@(Get-ProgramShortcutRecords);$keep=@();$shell=New-Object -ComObject WScript.Shell
-    try{
-        foreach($record in $records){
-            if($record.program -ine $Executable){$keep+=@($record);continue}
-            if(-not (Test-Path -LiteralPath $record.shortcut -PathType Leaf)){continue}
-            $link=$shell.CreateShortcut($record.shortcut)
-            try{$owned=($link.TargetPath -ieq $record.managedTarget -and $link.Arguments -ceq $record.managedArguments)}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}
-            if(-not $owned){continue} # User edits win; never restore over an independently changed shortcut.
-            if($record.originalBackup -and (Test-Path -LiteralPath $record.originalBackup -PathType Leaf)){Copy-Item -LiteralPath $record.originalBackup -Destination $record.shortcut -Force}
-            elseif(-not $record.originalBackup){Remove-Item -LiteralPath $record.shortcut -Force}
-            else{throw '原始快捷方式备份缺失，未覆盖当前入口。'}
-        }
-        if(@($records|Where-Object {$_.program -ieq $Executable}).Count){Write-LocalJson (Join-Path $script:DataRoot 'program-shortcuts.json') ([pscustomobject]@{version=1;entries=$keep})}
-    }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+    $records=@(Get-ProgramShortcutRecords);$keep=@()
+    foreach($record in $records){
+        if($record.program -ine $Executable){$keep+=@($record);continue}
+        if(-not (Test-Path -LiteralPath $record.shortcut -PathType Leaf)){continue}
+        Initialize-ProgramShortcutSupport
+        $link=[FlowSwitchShellShortcut]::Read($record.shortcut)
+        $owned=($link.TargetPath -ieq $record.managedTarget -and $link.Arguments -ceq $record.managedArguments)
+        if(-not $owned){continue} # User edits win; never restore over an independently changed shortcut.
+        if($record.originalBackup -and (Test-Path -LiteralPath $record.originalBackup -PathType Leaf)){Copy-Item -LiteralPath $record.originalBackup -Destination $record.shortcut -Force}
+        elseif(-not $record.originalBackup){Remove-Item -LiteralPath $record.shortcut -Force}
+        else{throw '原始快捷方式备份缺失，未覆盖当前入口。'}
+    }
+    if(@($records|Where-Object {$_.program -ieq $Executable}).Count){Write-LocalJson (Join-Path $script:DataRoot 'program-shortcuts.json') ([pscustomobject]@{version=1;entries=$keep})}
 }
 function Install-ProgramProxyShortcut([string]$Executable,[string]$DesktopDirectory='') {
     if(-not $DesktopDirectory){$DesktopDirectory=[Environment]::GetFolderPath('Desktop')}
     $records=@(Get-ProgramShortcutRecords);$existing=@($records|Where-Object {$_.program -ieq $Executable})
-    $shell=New-Object -ComObject WScript.Shell;$updates=@();$written=@()
+    Initialize-ProgramShortcutSupport
+    $updates=@();$written=@()
     try{
         foreach($file in @(Get-ChildItem -LiteralPath $DesktopDirectory -Filter '*.lnk')){
-            $link=$shell.CreateShortcut($file.FullName)
-            try{
-                $record=$existing|Where-Object {$_.shortcut -ieq $file.FullName}|Select-Object -First 1
-                if($link.TargetPath -ine $Executable -and -not ($record -and $link.TargetPath -ieq $record.managedTarget -and $link.Arguments -ceq $record.managedArguments)){continue}
-                # Preserve arbitrary user launch arguments; they need explicit adapter support.
-                if(-not $record -and $link.Arguments){continue}
-                $updates+=@([pscustomobject]@{Path=$file.FullName;Existing=$record;Icon=$link.IconLocation;Description=$link.Description})
-            }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}
+            $link=[FlowSwitchShellShortcut]::Read($file.FullName)
+            $record=$existing|Where-Object {$_.shortcut -ieq $file.FullName}|Select-Object -First 1
+            if($link.TargetPath -ine $Executable -and -not ($record -and $link.TargetPath -ieq $record.managedTarget -and $link.Arguments -ceq $record.managedArguments)){continue}
+            # Preserve arbitrary user launch arguments; they need explicit adapter support.
+            if(-not $record -and $link.Arguments){continue}
+            $updates+=@([pscustomobject]@{Path=$file.FullName;Existing=$record;Icon=$link.IconLocation;Description=$link.Description})
         }
         if(-not $updates.Count){
             $destination=Join-Path $DesktopDirectory ([IO.Path]::GetFileNameWithoutExtension($Executable)+'（指定代理）.lnk')
@@ -141,13 +135,9 @@ function Install-ProgramProxyShortcut([string]$Executable,[string]$DesktopDirect
                 $backup=Join-Path $directory ([Guid]::NewGuid().ToString('N')+'.lnk');Copy-Item -LiteralPath $update.Path -Destination $backup
             }
             $written+=@([pscustomobject]@{Path=$update.Path;Backup=$backup})
-            $link=$shell.CreateShortcut($update.Path)
-            try{
-                $link.TargetPath=$binary;$link.Arguments=$arguments;$link.WorkingDirectory=[IO.Path]::GetDirectoryName($Executable)
-                $link.IconLocation=$update.Icon;$link.Description='按 ProxySwitch 为该程序指定的线路启动（包含子进程）';$link.WindowStyle=7;$link.Save()
-            }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}
-            $verify=$shell.CreateShortcut($update.Path)
-            try{if($verify.TargetPath -ine $binary -or $verify.Arguments -cne $arguments){throw '快捷方式写入核对失败。'}}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($verify)}
+            [FlowSwitchShellShortcut]::Write($update.Path,$binary,$arguments,[IO.Path]::GetDirectoryName($Executable),$update.Icon,'按 ProxySwitch 为该程序指定的线路启动（包含子进程）',7)
+            $verify=[FlowSwitchShellShortcut]::Read($update.Path)
+            if($verify.TargetPath -ine $binary -or $verify.Arguments -cne $arguments){throw '快捷方式写入核对失败。'}
             $original=$backup;if($update.Existing){$original=$update.Existing.originalBackup}
             $records=@($records|Where-Object {$_.shortcut -ine $update.Path})+@([pscustomobject]@{program=$Executable;shortcut=$update.Path;originalBackup=$original;managedTarget=$binary;managedArguments=$arguments})
         }
@@ -156,7 +146,7 @@ function Install-ProgramProxyShortcut([string]$Executable,[string]$DesktopDirect
     }catch{
         foreach($item in $written){if($item.Backup){Copy-Item -LiteralPath $item.Backup -Destination $item.Path -Force}else{Remove-Item -LiteralPath $item.Path -Force -ErrorAction SilentlyContinue}}
         throw
-    }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+    }
 }
 function Set-ProgramLaunchRoute([string]$Executable,[string]$Route) {
     Use-ChangeLock {

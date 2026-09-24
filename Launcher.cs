@@ -34,7 +34,7 @@ internal static class Launcher
     {
         string[] required = {
             "ProxySwitch.ps1", "ProxyWindow.ps1", "ProxyBackend.ps1", "Preferences.ps1",
-            "Storage.ps1", "RuntimeSupport.ps1", "DesktopBranding.cs", "FlowTheme.cs", "ProgramLaunch.ps1", "ProcessInventory.ps1", "ProxyDiscovery.ps1",
+            "Storage.ps1", "RuntimeSupport.ps1", "DesktopBranding.cs", "ShellShortcut.cs", "FlowTheme.cs", "ProgramLaunch.ps1", "ProcessInventory.ps1", "ProxyDiscovery.ps1",
             "ProgramIdentity.ps1", "ProgramFamilyTracking.ps1", "ManagedRouting.ps1", "ApplicationObservation.ps1", "RuleMaintenance.ps1", "RoutePolicy.cjs", "GatewayPortOwnership.ps1",
             "AppRouting.ps1", "AppRouter.cjs", "IndependentRouter.cjs", "IndependentGateway.ps1", "NetworkDiagnostics.ps1", "GatewayWatchdog.ps1", "GatewayLock.ps1", "config.defaults.json", "Install-Shortcut.ps1",
             "assets/FlowSwitch.ico", "vendor/js-yaml/dist/js-yaml.cjs.js",

@@ -40,8 +40,8 @@ function Invoke-AppRouter($Request){
     $text=$state|ConvertTo-Json -Depth 16;[IO.File]::WriteAllText($file.Path,$text,(New-Object Text.UTF8Encoding($false)))
     [pscustomobject]@{ok=$true;stateHash=(Get-RuleMaintenanceHash ([Text.Encoding]::UTF8.GetBytes($text)))}
 }
-function Set-TestShortcutArguments([string]$Path,[string]$Arguments){$shell=New-Object -ComObject WScript.Shell;try{$link=$shell.CreateShortcut($Path);try{$link.Arguments=$Arguments;$link.Save()}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}}
-function Read-TestShortcut([string]$Path){$shell=New-Object -ComObject WScript.Shell;try{$link=$shell.CreateShortcut($Path);try{[pscustomobject]@{Target=$link.TargetPath;Arguments=$link.Arguments;WorkingDirectory=$link.WorkingDirectory;Icon=$link.IconLocation}}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}}
+function Set-TestShortcutArguments([string]$Path,[string]$Arguments){Initialize-ProgramShortcutSupport;$link=[FlowSwitchShellShortcut]::Read($Path);$link.Arguments=$Arguments;[FlowSwitchShellShortcut]::Write($Path,$link)}
+function Read-TestShortcut([string]$Path){Initialize-ProgramShortcutSupport;$link=[FlowSwitchShellShortcut]::Read($Path);[pscustomobject]@{Target=$link.TargetPath;Arguments=$link.Arguments;WorkingDirectory=$link.WorkingDirectory;Icon=$link.IconLocation}}
 function New-TestCase([string]$Name,[switch]$Engine,[switch]$Mixed,[switch]$SeparateShortcut){
     $root=Join-Path $qa $Name;$script:DataRoot=Join-Path $root 'data';$script:ConfigPath=Join-Path $script:DataRoot 'config.json';$script:Desktop=Join-Path $root 'desktop';$script:Shortcut=Join-Path $script:Desktop 'client.lnk'
     [void][IO.Directory]::CreateDirectory($script:DataRoot);[void][IO.Directory]::CreateDirectory($script:Desktop)
@@ -50,7 +50,8 @@ function New-TestCase([string]$Name,[switch]$Engine,[switch]$Mixed,[switch]$Sepa
     if(-not $Engine -or $Mixed){
         Write-LocalJson (Join-Path $script:DataRoot 'program-proxies.json') ([pscustomobject]@{version=1;note='preserve-launch-metadata';entries=@([pscustomobject]@{path=$oldExe;route='upstream';adapter='chromium';note='preserve-entry'})})
         if(-not $SeparateShortcut){
-            $shell=New-Object -ComObject WScript.Shell;try{$link=$shell.CreateShortcut($script:Shortcut);try{$link.TargetPath=$oldExe;$link.IconLocation=$oldExe+',0';$link.Save()}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+            Initialize-ProgramShortcutSupport
+            [FlowSwitchShellShortcut]::Write($script:Shortcut,$oldExe,'','',($oldExe+',0'),'',1)
         }
         $links=@(Install-ProgramProxyShortcut $oldExe $script:Desktop);$script:Shortcut=$links[0]
     }

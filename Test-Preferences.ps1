@@ -37,8 +37,8 @@ try{
     Check ((Get-Content -LiteralPath $file -Raw|ConvertFrom-Json).Profiles.Count -eq 3) 'Atomic settings replacement'
     $exe=Join-Path $testDir '例子.exe';[IO.File]::WriteAllText($exe,'fixture')
     Check ((Resolve-ProgramTarget $exe) -eq $exe) 'Unicode EXE resolution'
-    $shell=New-Object -ComObject WScript.Shell;$lnk=Join-Path $testDir '例子.lnk';$link=$shell.CreateShortcut($lnk);$link.TargetPath=$exe;$link.Save()
-    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link);[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+    Initialize-ProgramShortcutSupport
+    $lnk=Join-Path $testDir '例子.lnk';[FlowSwitchShellShortcut]::Write($lnk,$exe,'','','','',1)
     Check ((Resolve-ProgramTarget $lnk) -eq $exe) 'Shortcut target resolved without execution'
     Throws {Resolve-ProgramTarget $file}
     $script:StatePath=Join-Path $testDir 'selection.json';$script:DataRoot=$testDir
