@@ -100,54 +100,49 @@ function Get-RuleMaintenanceArguments([string]$Executable){
     '-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File '+(ConvertTo-ProgramArgument (Join-Path $script:Root 'ProxySwitch.ps1'))+' -DataDirectory '+(ConvertTo-ProgramArgument $script:DataRoot)+' -LaunchProgram '+(ConvertTo-ProgramArgument $Executable)
 }
 function New-RuleMaintenanceShortcutChanges($Snapshot,[string]$SavedPath,[string]$CurrentPath,$Backup,[switch]$Remove){
-    $changes=@();$records=@();$preserved=0;$restoredUpdated=0;$shell=New-Object -ComObject WScript.Shell
-    try{
-        foreach($entry in @($Snapshot.Shortcuts.entries)){
-            if($entry.program -ine $SavedPath){$records+=@($entry);continue}
-            $image=$Snapshot.Links[[string]$entry.shortcut];$owned=$false
-            if($image.Exists){
-                $link=$shell.CreateShortcut($entry.shortcut)
-                try{$owned=$link.TargetPath -ieq $entry.managedTarget -and $link.Arguments -ceq $entry.managedArguments}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}
-            }
-            $next=$entry|ConvertTo-Json -Depth 12|ConvertFrom-Json
-            if(-not $Remove){$next.program=$CurrentPath;$next|Add-Member NoteProperty previousProgramPaths (@(@(Get-ProgramIdentityValue $entry 'previousProgramPaths' @())+@($SavedPath))|Select-Object -Unique) -Force}
-            if($owned){
-                if($Remove){
-                    if($entry.originalBackup){
-                        $original=Read-RuleMaintenanceFile ([string]$entry.originalBackup);if(-not $original.Exists){throw '原快捷方式备份已缺失，保留现有入口；请先检查备份。'}
-                        $restoredBytes=$original.Bytes
-                        # Keep the original backup immutable. A previously confirmed repair also records
-                        # its old program path, so removing the proxy need not restore a dead versioned launcher.
-                        if(@(Get-ProgramIdentityValue $entry 'previousProgramPaths' @()).Count -and [IO.File]::Exists($SavedPath)){
-                            $stage=Join-Path $Backup.Directory ([Guid]::NewGuid().ToString('N')+'.lnk');[IO.File]::WriteAllBytes($stage,$original.Bytes)
-                            $restored=$shell.CreateShortcut($stage)
-                            try{
-                                $oldTarget=[string]$restored.TargetPath
-                                if($oldTarget -in @(Get-ProgramIdentityValue $entry 'previousProgramPaths' @()) -and -not [IO.File]::Exists($oldTarget)){
-                                    $restored.TargetPath=$SavedPath
-                                    if($restored.WorkingDirectory -ieq [IO.Path]::GetDirectoryName($oldTarget)){$restored.WorkingDirectory=[IO.Path]::GetDirectoryName($SavedPath)}
-                                    if($restored.IconLocation.StartsWith($oldTarget+',',[StringComparison]::OrdinalIgnoreCase)){$restored.IconLocation=$SavedPath+$restored.IconLocation.Substring($oldTarget.Length)}
-                                    $restored.Save();$restoredBytes=[IO.File]::ReadAllBytes($stage);$restoredUpdated++
-                                }
-                            }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($restored)}
-                        }
-                        $changes+=@([pscustomobject]@{Before=$image;Bytes=$restoredBytes;Remove=$false})
-                    }else{$changes+=@([pscustomobject]@{Before=$image;Bytes=[byte[]]@();Remove=$true})}
-                }else{
-                    $stage=Join-Path $Backup.Directory ([Guid]::NewGuid().ToString('N')+'.lnk');[IO.File]::WriteAllBytes($stage,$image.Bytes)
-                    $link=$shell.CreateShortcut($stage)
-                    try{
-                        $next.managedTarget=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe';$next.managedArguments=Get-RuleMaintenanceArguments $CurrentPath
-                        $link.TargetPath=$next.managedTarget;$link.Arguments=$next.managedArguments;$link.WorkingDirectory=[IO.Path]::GetDirectoryName($CurrentPath)
-                        if($link.IconLocation.StartsWith($SavedPath+',',[StringComparison]::OrdinalIgnoreCase)){$link.IconLocation=$CurrentPath+$link.IconLocation.Substring($SavedPath.Length)}
-                        $link.Save()
-                    }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}
-                    $changes+=@([pscustomobject]@{Before=$image;Bytes=[IO.File]::ReadAllBytes($stage);Remove=$false})
-                }
-            }elseif($image.Exists){$preserved++}
-            if(-not $Remove){$records+=@($next)}
+    $changes=@();$records=@();$preserved=0;$restoredUpdated=0
+    foreach($entry in @($Snapshot.Shortcuts.entries)){
+        if($entry.program -ine $SavedPath){$records+=@($entry);continue}
+        $image=$Snapshot.Links[[string]$entry.shortcut];$owned=$false
+        if($image.Exists){
+            Initialize-ProgramShortcutSupport
+            $link=[FlowSwitchShellShortcut]::Read($entry.shortcut)
+            $owned=$link.TargetPath -ieq $entry.managedTarget -and $link.Arguments -ceq $entry.managedArguments
         }
-    }finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+        $next=$entry|ConvertTo-Json -Depth 12|ConvertFrom-Json
+        if(-not $Remove){$next.program=$CurrentPath;$next|Add-Member NoteProperty previousProgramPaths (@(@(Get-ProgramIdentityValue $entry 'previousProgramPaths' @())+@($SavedPath))|Select-Object -Unique) -Force}
+        if($owned){
+            if($Remove){
+                if($entry.originalBackup){
+                    $original=Read-RuleMaintenanceFile ([string]$entry.originalBackup);if(-not $original.Exists){throw '原快捷方式备份已缺失，保留现有入口；请先检查备份。'}
+                    $restoredBytes=$original.Bytes
+                    # Keep the original backup immutable. A previously confirmed repair also records
+                    # its old program path, so removing the proxy need not restore a dead versioned launcher.
+                    if(@(Get-ProgramIdentityValue $entry 'previousProgramPaths' @()).Count -and [IO.File]::Exists($SavedPath)){
+                        $stage=Join-Path $Backup.Directory ([Guid]::NewGuid().ToString('N')+'.lnk');[IO.File]::WriteAllBytes($stage,$original.Bytes)
+                        $restored=[FlowSwitchShellShortcut]::Read($stage)
+                        $oldTarget=[string]$restored.TargetPath
+                        if($oldTarget -in @(Get-ProgramIdentityValue $entry 'previousProgramPaths' @()) -and -not [IO.File]::Exists($oldTarget)){
+                            $restored.TargetPath=$SavedPath
+                            if($restored.WorkingDirectory -ieq [IO.Path]::GetDirectoryName($oldTarget)){$restored.WorkingDirectory=[IO.Path]::GetDirectoryName($SavedPath)}
+                            if($restored.IconLocation.StartsWith($oldTarget+',',[StringComparison]::OrdinalIgnoreCase)){$restored.IconLocation=$SavedPath+$restored.IconLocation.Substring($oldTarget.Length)}
+                            [FlowSwitchShellShortcut]::Write($stage,$restored);$restoredBytes=[IO.File]::ReadAllBytes($stage);$restoredUpdated++
+                        }
+                    }
+                    $changes+=@([pscustomobject]@{Before=$image;Bytes=$restoredBytes;Remove=$false})
+                }else{$changes+=@([pscustomobject]@{Before=$image;Bytes=[byte[]]@();Remove=$true})}
+            }else{
+                $stage=Join-Path $Backup.Directory ([Guid]::NewGuid().ToString('N')+'.lnk');[IO.File]::WriteAllBytes($stage,$image.Bytes)
+                $link=[FlowSwitchShellShortcut]::Read($stage)
+                $next.managedTarget=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe';$next.managedArguments=Get-RuleMaintenanceArguments $CurrentPath
+                $link.TargetPath=$next.managedTarget;$link.Arguments=$next.managedArguments;$link.WorkingDirectory=[IO.Path]::GetDirectoryName($CurrentPath)
+                if($link.IconLocation.StartsWith($SavedPath+',',[StringComparison]::OrdinalIgnoreCase)){$link.IconLocation=$CurrentPath+$link.IconLocation.Substring($SavedPath.Length)}
+                [FlowSwitchShellShortcut]::Write($stage,$link)
+                $changes+=@([pscustomobject]@{Before=$image;Bytes=[IO.File]::ReadAllBytes($stage);Remove=$false})
+            }
+        }elseif($image.Exists){$preserved++}
+        if(-not $Remove){$records+=@($next)}
+    }
     [pscustomobject]@{Changes=$changes;Records=$records;Preserved=$preserved;RestoredUpdated=$restoredUpdated}
 }
 function Set-RuleMaintenanceFile($Before,[byte[]]$Bytes,[bool]$Remove=$false){[LocalProxySwitch.RuleFileExchange]::Apply($Before.Path,$Before.Hash,$Bytes,$Remove)}

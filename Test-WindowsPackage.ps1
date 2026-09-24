@@ -73,14 +73,11 @@ $isolated=$original.Replace($needle,('$desktop='''+$desktop.Replace("'","''")+''
 [IO.File]::WriteAllText($installer,$isolated,(New-Object Text.UTF8Encoding($true)))
 $installed=Invoke-Fixture ('--install-shortcut --quiet --data-directory '+$quotedData)
 Check ($installed.Code -eq 0) ('EXE shortcut installer failed: '+$installed.Error)
-$shell=New-Object -ComObject WScript.Shell
-try{
-    $shortcut=Get-ChildItem -LiteralPath $desktop -Filter '*.lnk'|Select-Object -First 1
-    $link=$shell.CreateShortcut($shortcut.FullName)
-    Check ($link.TargetPath -ieq $exe -and $link.WorkingDirectory -ieq $relocated -and $link.Arguments -match 'isolated settings') 'Desktop shortcut does not target the relocated EXE and selected data directory.'
-    Check ([FlowSwitchDesktop]::ReadShortcutProperty($shortcut.FullName,5) -ceq [FlowSwitchDesktop]::AppId) 'Packaged shortcut identity differs from its native window identity.'
-    $fromShortcut=Invoke-Fixture ($link.Arguments+' --smoke-test')
-    Check ($fromShortcut.Code -eq 0 -and $fromShortcut.Out -match 'PASS: UI') ('Saved shortcut arguments did not reopen the UI: '+$fromShortcut.Error)
-    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)
-}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+Add-Type -Path (Join-Path $relocated 'app\ShellShortcut.cs')
+$shortcut=Get-ChildItem -LiteralPath $desktop -Filter '*.lnk'|Select-Object -First 1
+$link=[FlowSwitchShellShortcut]::Read($shortcut.FullName)
+Check ($link.TargetPath -ieq $exe -and $link.WorkingDirectory -ieq $relocated -and $link.Arguments -match 'isolated settings') 'Desktop shortcut does not target the relocated EXE and selected data directory.'
+Check ([FlowSwitchDesktop]::ReadShortcutProperty($shortcut.FullName,5) -ceq [FlowSwitchDesktop]::AppId) 'Packaged shortcut identity differs from its native window identity.'
+$fromShortcut=Invoke-Fixture ($link.Arguments+' --smoke-test')
+Check ($fromShortcut.Code -eq 0 -and $fromShortcut.Out -match 'PASS: UI') ('Saved shortcut arguments did not reopen the UI: '+$fromShortcut.Error)
 Write-Output ('PASS: '+$script:Pass+' Windows package checks; compiled EXE, relocated Unicode/space path, real UI smoke test, explicit settings, missing-file rejection and isolated desktop shortcut. No real network writes.')

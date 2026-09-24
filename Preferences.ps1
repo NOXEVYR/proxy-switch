@@ -102,13 +102,15 @@ function Get-RouteName([string]$Key) {
 function Get-EndpointAddress($Profile) {
     $h=$Profile.Host;if($h.Contains(':')){$h='['+$h+']'};return $h+':'+$Profile.Port
 }
+function Initialize-ProgramShortcutSupport {
+    if(-not ('FlowSwitchShellShortcut' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'ShellShortcut.cs')}
+}
 function Resolve-ProgramTarget([string]$Path) {
     if(-not (Test-Path -LiteralPath $Path -PathType Leaf)){throw '找不到所选文件。'}
     $target=[IO.Path]::GetFullPath($Path)
     if([IO.Path]::GetExtension($target) -ieq '.lnk'){
-        $shell=New-Object -ComObject WScript.Shell
-        try{$link=$shell.CreateShortcut($target);$target=[Environment]::ExpandEnvironmentVariables([string]$link.TargetPath)}
-        finally{if($link){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)};[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+        Initialize-ProgramShortcutSupport
+        $link=[FlowSwitchShellShortcut]::Read($target);$target=[Environment]::ExpandEnvironmentVariables([string]$link.TargetPath)
     }
     if(-not [IO.Path]::IsPathRooted($target) -or $target -notmatch '(?i)\.exe$' -or $target -match '[,\r\n\x00]' -or -not (Test-Path -LiteralPath $target -PathType Leaf)){throw '请选择指向 EXE 程序的快捷方式或 EXE 文件。网页、商店应用入口和脚本快捷方式暂不支持。'}
     if([IO.Path]::GetFileName($target) -match '^(?i:cmd|powershell|pwsh|wscript|cscript|explorer|rundll32)\.exe$'){throw '这个快捷方式由系统宿主启动，请从运行列表选择实际联网的程序。'}

@@ -10,7 +10,8 @@
 - `Test-ManagedSwitchChain.ps1`：15 项真实内核、HTTP 和父子程序检查通过。`Test-ProgramIngressIntegration.cjs`：46 项通过，含 A/B/Direct、网站例外、备用恢复及最后的进程、监听和锁清理；进程自然退出码 0。清理完成前不再打印总体通过。
 - `Test-RoutingWorkbenchUI.ps1`：49 项真实 WinForms 控件检查；`Test-ObservationUI.ps1`：29 项。新菜单预览、拒绝未修复路径、确认/取消和最小窗口按钮边界通过。`Test-SwitchInteraction.ps1` 通过。
 - `Test-VisualTheme.ps1`：100%、125%、150% 布局模拟通过，未改变系统 DPI。
-- 从最终 ZIP 解压后，`Test-WindowsPackage.ps1` 16 项、`Test-DesktopBranding.ps1` 25 项通过，覆盖文件清单、Unicode/空格换目录、实际 EXE 窗口冒烟、隔离桌面快捷方式、EXE/窗口图标和稳定 AppUserModelID。最终附件附带 SHA256SUMS 和构建来源。
+- 快捷方式改用独立 Unicode Shell 接口，`Test-Preferences.ps1` 25、`Test-ProgramLaunch.ps1` 31、`Test-RuleMaintenance.ps1` 35 项原回归通过。`Test-DesktopBranding.ps1` 源码检查 30 项通过，包含中文与非 BMP 名称、参数和图标路径读回、环境变量目标展开、既有 AppID 保留及第三方入口不误加品牌。英文 Windows 云端重验用于确认跨系统编码兼容性。
+- 从 ZIP 解压的程序包执行 `Test-WindowsPackage.ps1`，覆盖文件清单、Unicode/空格换目录、实际 EXE 窗口冒烟和隔离桌面快捷方式；成品品牌检查另核对 EXE/窗口图标和稳定 AppUserModelID。最终附件附带 SHA256SUMS 和构建来源，云端发布要求这些检查通过。
 
 本机正常退出旧版后通过更新的桌面入口启动，窗口版本核对为 3.9.0；系统代理保持原样，用户已确认实际任务栏显示新图标。真实游戏大厅、新版长期使用、外部软件持续改写代理和实际 UAC 仍需在目标电脑验收。所有公开截图使用演示数据；私人配置、真实连接记录、恢复快照没有进入发布清单。旧版不删除，运行依赖版本未变。
 

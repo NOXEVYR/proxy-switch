@@ -6,6 +6,7 @@
 - 对照恢复只被动核验原简单本地入口；已停止时撤销失效手动代理并保留原自动模式，未知状态不得当作已停止。入口检查之后须再做快照 CAS，重复恢复须幂等。
 - 清理仅限子进程环境块。启动成功后的记录失败不得报告为未启动；启动结果与恢复结果分开。新界面动作与拒绝路径须由真实控件测试覆盖。
 - 品牌标识集中于 DesktopBranding.cs，EXE、窗口、快捷方式必须一致。仅刷新本工具快捷方式，不清空系统缓存或重启 Explorer。
+- 快捷方式文件通过 ShellShortcut.cs 的 IShellLinkW/IPersistFile 读写，避免依赖系统旧代码页；只在快捷方式操作时加载独立类型，不调用 Resolve 或执行目标。编辑既有入口保留额外 Shell 属性；程序代理入口不自动写入流向品牌 AppID。
 - 新验证：Test-ProgramFamilyRouting、Test-ProgramCleanStart、Test-CleanStartWorker、Test-DesktopBranding 纳入 Test-All；新模块同步加入测试夹具及两个打包白名单。不得发布 clean-start 会话、真实用户进程或网络记录。
 
 # 3.8.2 网络修复约定

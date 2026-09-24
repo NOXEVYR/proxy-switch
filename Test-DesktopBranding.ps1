@@ -3,6 +3,7 @@ param([string]$PackageDirectory='')
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 if(-not ('FlowSwitchDesktop' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'DesktopBranding.cs')}
+if(-not ('FlowSwitchShellShortcut' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'ShellShortcut.cs')}
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing @'
 using System;using System.Runtime.InteropServices;using System.Runtime.InteropServices.ComTypes;using System.Windows.Forms;
 public class BrandTestForm:Form { public void RecreateForTest(){RecreateHandle();} }
@@ -34,7 +35,7 @@ $temporaryRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $qaRoot=Join-Path $temporaryRoot ('FlowSwitch-brand-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qaRoot)
 $previousData=$env:PROXY_SWITCH_DATA_DIR
-$form=$null;$formIcon=$null;$shell=$null
+$form=$null;$formIcon=$null
 try{
     [FlowSwitchDesktop]::Initialize()
     Check ([BrandNativeTest]::ProcessId() -ceq [FlowSwitchDesktop]::AppId) 'Process taskbar identity differs from the shared brand identity.'
@@ -59,18 +60,17 @@ try{
     }
     $form.Close();$form.Dispose();$form=$null
     # The installer runs against a complete temporary source copy and a fake desktop.
-    $app=Join-Path $qaRoot 'app';$desktop=Join-Path $qaRoot 'Desktop';$data=Join-Path $qaRoot 'settings'
+    $unicodeName='流向 '+[char]::ConvertFromUtf32(0x1F680)
+    $app=Join-Path $qaRoot 'app';$desktop=Join-Path $qaRoot ($unicodeName+' Desktop');$data=Join-Path $qaRoot 'settings'
     [void][IO.Directory]::CreateDirectory($app);[void][IO.Directory]::CreateDirectory($desktop);[void][IO.Directory]::CreateDirectory((Join-Path $app 'assets'))
-    foreach($name in @('ProxySwitch.ps1','Storage.ps1','Preferences.ps1','DesktopBranding.cs','Install-Shortcut.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $app $name)}
+    foreach($name in @('ProxySwitch.ps1','Storage.ps1','Preferences.ps1','DesktopBranding.cs','ShellShortcut.cs','Install-Shortcut.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $app $name)}
     Copy-Item -LiteralPath $iconPath -Destination (Join-Path $app 'assets\FlowSwitch.ico')
     $installer=Join-Path $app 'Install-Shortcut.ps1';$original=[IO.File]::ReadAllText($installer);$needle='$desktop=[Environment]::GetFolderPath(''Desktop'')'
     Check ($original.Contains($needle)) 'Installer isolation hook is missing; refusing to access the real desktop.'
     [IO.File]::WriteAllText($installer,$original.Replace($needle,('$desktop='''+$desktop.Replace("'","''")+'''')),(New-Object Text.UTF8Encoding($true)))
     $env:PROXY_SWITCH_DATA_DIR=$data
-    $shell=New-Object -ComObject WScript.Shell
     $destination=Join-Path $desktop '流向 FlowSwitch.lnk'
-    $legacy=$shell.CreateShortcut($destination);$legacy.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe';$legacy.Arguments='-File "C:\old\ProxySwitch.ps1"';$legacy.Description='FlowSwitch old brand';$legacy.Save()
-    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($legacy)
+    [FlowSwitchShellShortcut]::Write($destination,(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),'-File "C:\old\ProxySwitch.ps1"','','','FlowSwitch old brand',1)
     [BrandNativeTest]::LegacyShortcut($destination)
     $oldHash=(Get-FileHash -LiteralPath $destination).Hash
     & $installer|Out-Null
@@ -78,12 +78,33 @@ try{
     $backup=@(Get-ChildItem -LiteralPath (Join-Path $data 'backups') -Filter '*.lnk')
     Check ($backup.Count -eq 1 -and (Get-FileHash -LiteralPath $backup[0].FullName).Hash -ceq $oldHash) 'Existing shortcut was not backed up byte-for-byte.'
     Check ([FlowSwitchDesktop]::ReadShortcutProperty($backup[0].FullName,5) -ceq 'FlowSwitch.Desktop') 'Backup no longer preserves the old identity for rollback.'
-    $saved=$shell.CreateShortcut($destination)
-    try{Check ($saved.IconLocation -ieq ((Join-Path $app 'assets\FlowSwitch.ico')+',0') -and $saved.Arguments.Contains($data)) 'Shortcut lost its current icon or selected data directory.'}finally{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($saved)}
-    $foreign=Join-Path $desktop 'Other.lnk';$link=$shell.CreateShortcut($foreign);$link.TargetPath=Join-Path $env:SystemRoot 'System32\notepad.exe';$link.Save();[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)
+    $saved=[FlowSwitchShellShortcut]::Read($destination)
+    Check ($saved.IconLocation -ieq ((Join-Path $app 'assets\FlowSwitch.ico')+',0') -and $saved.Arguments.Contains($data)) 'Shortcut lost its current icon or selected data directory.'
+    $foreign=Join-Path $desktop 'Other.lnk';[FlowSwitchShellShortcut]::Write($foreign,(Join-Path $env:SystemRoot 'System32\notepad.exe'),'','','','',1)
     $foreignHash=(Get-FileHash -LiteralPath $foreign).Hash;$rejected=$false
     try{& $installer -Name 'Other'|Out-Null}catch{$rejected=$true}
     Check ($rejected -and (Get-FileHash -LiteralPath $foreign).Hash -ceq $foreignHash) 'Installer overwrote a shortcut belonging to another application.'
+    # Construct non-BMP text at runtime: this coverage must not depend on source ACP.
+    $unicodeTarget=Join-Path $desktop ($unicodeName+'.exe');Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\notepad.exe') -Destination $unicodeTarget
+    $unicodeIcon=Join-Path $desktop ($unicodeName+',icon.ico');Copy-Item -LiteralPath $iconPath -Destination $unicodeIcon
+    $unicodeLink=Join-Path $desktop ($unicodeName+'.lnk')
+    $unicodeArgs='--test "'+$unicodeName+'"';$unicodeDescription='Unicode '+$unicodeName
+    [FlowSwitchShellShortcut]::Write($unicodeLink,$unicodeTarget,$unicodeArgs,$desktop,($unicodeIcon+',-1'),$unicodeDescription,7)
+    Check ([IO.File]::Exists($unicodeLink) -and [IO.Path]::GetFileName((Get-Item -LiteralPath $unicodeLink).FullName) -ceq ($unicodeName+'.lnk')) 'Native shortcut filename changed its Unicode characters.'
+    $unicodeSaved=[FlowSwitchShellShortcut]::Read($unicodeLink)
+    Check ($unicodeSaved.TargetPath -ceq $unicodeTarget -and $unicodeSaved.WorkingDirectory -ceq $desktop) 'Native shortcut target or working directory lost Unicode characters.'
+    Check ($unicodeSaved.Arguments -ceq $unicodeArgs -and $unicodeSaved.Description -ceq $unicodeDescription -and $unicodeSaved.WindowStyle -eq 7) 'Native shortcut strings or window style failed to round trip.'
+    Check ($unicodeSaved.IconLocation -ceq ($unicodeIcon+',-1')) 'Native shortcut lost its Unicode icon path, embedded comma or negative index.'
+    Check ([string]::IsNullOrEmpty([FlowSwitchDesktop]::ReadShortcutProperty($unicodeLink,5))) 'Generic shortcut writer assigned FlowSwitch branding to a foreign shortcut.'
+    [BrandNativeTest]::LegacyShortcut($unicodeLink);$unicodeSaved.Arguments+=' --updated'
+    [FlowSwitchShellShortcut]::Write($unicodeLink,$unicodeSaved)
+    Check ([FlowSwitchDesktop]::ReadShortcutProperty($unicodeLink,5) -ceq 'FlowSwitch.Desktop' -and [FlowSwitchShellShortcut]::Read($unicodeLink).Arguments -ceq ($unicodeArgs+' --updated')) 'Updating a Unicode shortcut lost unrelated Shell properties or arguments.'
+    $environmentLink=Join-Path $desktop 'environment-target.lnk'
+    [FlowSwitchShellShortcut]::Write($environmentLink,'%WINDIR%\System32\notepad.exe','','','','',1)
+    Check ([FlowSwitchShellShortcut]::Read($environmentLink).TargetPath -ieq (Join-Path $env:WINDIR 'System32\notepad.exe')) 'Environment target differs from the expanded WScript.TargetPath value used by existing shortcut matching.'
+    & $installer -Name ($unicodeName+' installed')|Out-Null
+    $unicodeInstalled=Join-Path $desktop ($unicodeName+' installed.lnk')
+    Check ([IO.File]::Exists($unicodeInstalled) -and [FlowSwitchDesktop]::ReadShortcutProperty($unicodeInstalled,5) -ceq [FlowSwitchDesktop]::AppId) 'Installer failed to preserve its Unicode shortcut name and identity.'
     if($PackageDirectory){
         $package=[IO.Path]::GetFullPath($PackageDirectory);$exe=Join-Path $package 'FlowSwitch.exe';$packageIcon=Join-Path $package 'app\assets\FlowSwitch.ico'
         [IntPtr[]]$large=@([IntPtr]::Zero);[IntPtr[]]$small=@([IntPtr]::Zero)
@@ -96,7 +117,7 @@ try{
     }
     Write-Output ('PASS: '+$script:BrandPass+' desktop branding checks; native icons, recreated window, relaunch data and isolated shortcut identity migration. No real shortcuts, taskbar pins, Explorer caches or network settings were changed.')
 }finally{
-    if($form){$form.Dispose()};if($formIcon){$formIcon.Dispose()};if($shell){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+    if($form){$form.Dispose()};if($formIcon){$formIcon.Dispose()}
     $env:PROXY_SWITCH_DATA_DIR=$previousData
     $resolved=[IO.Path]::GetFullPath($qaRoot)
     if($resolved.StartsWith($temporaryRoot,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^FlowSwitch-brand-[a-f0-9]{32}$'){Remove-Item -LiteralPath $resolved -Recurse -Force}
