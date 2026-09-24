@@ -1,0 +1,77 @@
+name: Publish verified Windows 3.9.0 source
+on:
+  push:
+    branches: ['release/publish-windows-3.9.0']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-release-3.9.0
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    env:
+      SOURCE_COMMIT: eb5c763f372d449acad2d41b291d225c0990f6f8
+      VERIFIED_RUN: '36007227380'
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: eb5c763f372d449acad2d41b291d225c0990f6f8
+      - name: Verify prior checks and exact immutable source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if((& git rev-parse HEAD).Trim() -cne $env:SOURCE_COMMIT){throw 'Source checkout mismatch'}
+          $run=(& gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:VERIFIED_RUN")|ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or $run.head_sha -cne $env:SOURCE_COMMIT -or $run.status -ne 'completed'){throw 'Prior run identity mismatch'}
+          $jobs=(& gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:VERIFIED_RUN/jobs")|ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or @($jobs.jobs).Count -ne 1){throw 'Prior test job unavailable'}
+          foreach($name in @('Verify requested version and run isolated tests','Prepare official locked runtime','Test real isolated request routing','Build and verify packages')){
+            $step=@($jobs.jobs[0].steps|Where-Object name -ceq $name)
+            if($step.Count -ne 1 -or $step[0].conclusion -ne 'success'){throw ('Prior check not verified: '+$name)}
+          }
+          $fixtureTemp=Join-Path $env:RUNNER_TEMP 'flowswitch-test-temp'
+          [void][IO.Directory]::CreateDirectory($fixtureTemp)
+          @("TEMP=$fixtureTemp","TMP=$fixtureTemp") | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output 'Verified immutable source and every required prior test stage.'
+      - name: Rebuild and verify final packages from the verified source
+        run: |
+          $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+          & .\Prepare-Runtime.ps1 -Destination "$env:RUNNER_TEMP\flowswitch-runtime"
+          $windows=& .\Build-WindowsPackage.ps1 -Destination "$env:RUNNER_TEMP\windows-package" -RuntimeDirectory "$env:RUNNER_TEMP\flowswitch-runtime"
+          $source=& .\Build-Release.ps1 -Destination "$env:RUNNER_TEMP\source-package"
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-WindowsPackage.ps1 -PackageDirectory $windows.Directory
+          if($LASTEXITCODE -ne 0){throw 'Final Windows package verification failed'}
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-DesktopBranding.ps1 -PackageDirectory $windows.Directory
+          if($LASTEXITCODE -ne 0){throw 'Final brand verification failed'}
+          [void][IO.Directory]::CreateDirectory('release-files')
+          Copy-Item -LiteralPath $windows.Archive,$source.Archive -Destination release-files
+          $checksums=@(Get-ChildItem release-files -Filter '*.zip'|ForEach-Object {(Get-FileHash $_.FullName).Hash.ToLowerInvariant()+'  '+$_.Name})
+          [IO.File]::WriteAllText((Join-Path $PWD 'release-files\SHA256SUMS.txt'),($checksums -join "`n")+"`n",(New-Object Text.UTF8Encoding($false)))
+          [IO.File]::WriteAllText((Join-Path $PWD 'release-files\BUILD.txt'),("Source commit: "+$env:SOURCE_COMMIT+"`nValidated run: "+$env:VERIFIED_RUN+"`nWindows PowerShell 5.1; locked runtime; all prior test stages passed; rebuilt packages rechecked.`n"),(New-Object Text.UTF8Encoding($false)))
+          Copy-Item -LiteralPath (Join-Path $windows.Directory 'manifest.json') -Destination release-files\Windows-manifest.json
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+          $notes=Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/.github/release-notes-3.9.0.md" -OutFile $notes
+          $assets=@(Get-ChildItem release-files -File|ForEach-Object FullName)
+          & gh release create v3.9.0 @assets --repo $env:GITHUB_REPOSITORY --target $env:SOURCE_COMMIT --title 'FlowSwitch 3.9.0' --notes-file $notes --latest
+          if($LASTEXITCODE -ne 0){throw 'Release publishing failed; existing releases and assets are preserved'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FlowSwitch-Windows-3.9.0-published
+          path: release-files/*
+          if-no-files-found: ignore

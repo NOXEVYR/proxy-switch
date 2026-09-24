@@ -60,16 +60,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          $notes=@'
-          游戏登录排查改进：区分真实入口与出口，预览并补齐已验证的整组程序规则，提供干净环境启动和最长五分钟的直连登录对照。直连对照需要明确确认并影响当前用户系统代理，恢复保留外部修改。
-
-          修复 EXE、窗口与快捷方式的品牌标识一致性。旧窗口须正常退出后打开新版；旧固定入口可重新固定。真实游戏登录与实际任务栏显示仍需在用户电脑验收。
-
-          附带 Windows x64 程序包、源码包、校验文件、运行文件清单及构建来源。运行依赖版本未变，macOS 未更新。完整解压后运行 FlowSwitch.exe，保留 app 文件夹。
-          '@
-          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-notes.md'),$notes,(New-Object Text.UTF8Encoding($false)))
           $assets=@(Get-ChildItem release-files -File|ForEach-Object FullName)
-          & gh release create v3.9.0 @assets --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title '流向 FlowSwitch 3.9.0' --notes-file "$env:RUNNER_TEMP\release-notes.md" --latest
+          & gh release create v3.9.0 @assets --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'FlowSwitch 3.9.0' --notes-file .github/release-notes-3.9.0.md --latest
           if($LASTEXITCODE -ne 0){throw 'Release creation failed; existing releases and assets are preserved'}
       - uses: actions/upload-artifact@v4
         if: always()
