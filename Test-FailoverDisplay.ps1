@@ -1,5 +1,6 @@
 ﻿$ErrorActionPreference='Stop'
-Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Add-Type -Path (Join-Path $PSScriptRoot 'FlowTheme.cs') -ReferencedAssemblies System.Windows.Forms,System.Drawing
 . (Join-Path $PSScriptRoot 'ApplicationObservation.ps1')
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'ProxyWindow.ps1'),[ref]$tokens,[ref]$errors)
@@ -13,7 +14,7 @@ function Get-GatewayKey {'gateway'}
 function Get-ProfileKeys {@('a','b','gateway')}
 function Select-ApplicationRows {param($Rows,$Search,$Saved);@()}
 function Write-Activity($Message){$script:Log+=@($Message)}
-$liveList=New-Object Windows.Forms.ListView;$searchBox=New-Object Windows.Forms.TextBox;$savedOnly=New-Object Windows.Forms.CheckBox
+$liveList=New-Object FlowSwitch.UI.DataList;$liveList.View='Details';$searchBox=New-Object Windows.Forms.TextBox;$savedOnly=New-Object Windows.Forms.CheckBox
 $controls=@($liveList,$searchBox,$savedOnly)
 foreach($name in @('emptyLabel','countLabel','ruleValue','ruleMeta','programHint','noticeLabel')){$control=New-Object Windows.Forms.Label;Set-Variable -Name $name -Value $control;$controls+=@($control)}
 $ink=[Drawing.Color]::White;$muted=[Drawing.Color]::Gray

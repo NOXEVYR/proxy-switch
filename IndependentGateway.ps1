@@ -26,14 +26,24 @@ function New-ExitRecoveryPlan($Session,$CurrentSystem,$CurrentEnv) {
     $system=$CurrentSystem
     if(Test-SameSnapshot $CurrentSystem $Session.TargetSystem){
         $system=$Session.BeforeSystem
-        if(($system.Flags -band 2) -and ((Test-SameRecoveryEndpoint $system.Server $Session.TargetSystem.Server) -or -not (Test-RecoveryEndpoint $system.Server))){$system=[pscustomobject]@{Flags=1;Server='';Bypass=$system.Bypass}}
+        if($system.Flags -band 2){
+            $retiring=Test-SameRecoveryEndpoint $system.Server $Session.TargetSystem.Server
+            $state=if($retiring){'dead'}else{Get-RecoveryEndpointState $system.Server}
+            if($state -eq 'unknown'){throw '原本地代理入口状态未知，恢复记录与内核保留，请重试或先排查网络。'}
+            if($state -eq 'dead'){$system=[pscustomobject]@{Flags=(($system.Flags -band (-bnot 2)) -bor 1);Server='';Bypass=$system.Bypass}}
+        }
     }
     $values=[ordered]@{}
     foreach($name in $script:ProxyNames){
         $values[$name]=$CurrentEnv.$name
         if([string]$CurrentEnv.$name -ceq [string]$Session.TargetEnv.$name){
             $values[$name]=$Session.BeforeEnv.$name
-            if($name -ne 'NO_PROXY' -and $values[$name] -and ((Test-SameRecoveryEndpoint $values[$name] $Session.TargetSystem.Server) -or -not (Test-RecoveryEndpoint $values[$name]))){$values[$name]=$null}
+            if($name -ne 'NO_PROXY' -and $values[$name]){
+                $retiring=Test-SameRecoveryEndpoint $values[$name] $Session.TargetSystem.Server
+                $state=if($retiring){'dead'}else{Get-RecoveryEndpointState $values[$name]}
+                if($state -eq 'unknown'){throw '原本地代理变量入口状态未知，恢复记录与内核保留，请重试或先排查网络。'}
+                if($state -eq 'dead'){$values[$name]=$null}
+            }
         }
     }
     [pscustomobject]@{System=$system;Environment=[pscustomobject]$values}

@@ -76,6 +76,37 @@ $checks=@'
         $script:PendingAction=$null
         $appMenu.Show($liveList,(New-Object Drawing.Point(1,1)));[Windows.Forms.Application]::DoEvents();$websiteProgramItem.PerformClick();$appMenu.Close()
         Check-UI ($script:Requested.Kind -eq 'WebsiteRules' -and $script:Requested.Key -eq $script:AppTarget.Path) 'Program menu passes precise executable scope'
+
+        function Get-ProgramDesktopState {param($Executable);[pscustomobject]@{Mode='InApp';Revision='fixture-desktop-revision';External=0}}
+        foreach($mode in @('InApp','Separate','Bound','Cancel')){
+            $script:DesktopMode=$mode;$script:DesktopDialogSeen=$false;$script:DesktopDialogError='';$script:PendingAction=$null
+            $timerDesktop=New-Object Windows.Forms.Timer;$timerDesktop.Interval=50
+            $timerDesktop.Add_Tick({
+                $candidate=@([Windows.Forms.Application]::OpenForms|Where-Object {$_.Text -eq '启动方式与桌面绑定'})|Select-Object -First 1
+                if(-not $candidate){return};$timerDesktop.Stop()
+                try{
+                    if($candidate.FormBorderStyle -ne 'FixedDialog' -or @($candidate.Controls|Where-Object {$_.Right -gt $candidate.ClientSize.Width -or $_.Bottom -gt $candidate.ClientSize.Height}).Count){throw 'Desktop preference dialog is clipped'}
+                    $radios=@($candidate.Controls|Where-Object {$_ -is [Windows.Forms.RadioButton]})
+                    if($radios.Count -ne 3){throw 'Three explicit choices are required'}
+                    $script:DesktopDialogSeen=$true
+                    if($script:DesktopMode -eq 'Cancel'){$candidate.CancelButton.PerformClick()}else{
+                        $radio=$radios|Where-Object Tag -eq $script:DesktopMode;$radio.Checked=$true
+                        if($script:DesktopMode -eq 'Bound'){$bitmap=New-Object Drawing.Bitmap($candidate.Width,$candidate.Height);try{$candidate.DrawToBitmap($bitmap,(New-Object Drawing.Rectangle(0,0,$candidate.Width,$candidate.Height)));$bitmap.Save((Join-Path ([IO.Path]::GetDirectoryName($PreviewPath)) 'desktop-launch-settings.png'))}finally{$bitmap.Dispose()}}
+                        $candidate.AcceptButton.PerformClick()
+                    }
+                }catch{$script:DesktopDialogError=$_.Exception.Message;$candidate.Close()}
+            })
+            try{$timerDesktop.Start();Show-ProgramLaunchSettings $script:AppTarget}finally{$timerDesktop.Stop();$timerDesktop.Dispose()}
+            Check-UI ($script:DesktopDialogSeen -and -not $script:DesktopDialogError -and -not $script:DialogOpen) ('Actual desktop preference dialog opens with usable controls: '+$script:DesktopDialogError)
+            if($mode -eq 'Cancel'){Check-UI ($null -eq $script:PendingAction) 'Cancel cannot queue shortcut writes'}else{$payload=$script:PendingAction.Key|ConvertFrom-Json;Check-UI ($script:PendingAction.Kind -eq 'AppDesktopMode' -and $payload.Mode -ceq $mode -and $payload.Path -ceq $script:AppTarget.Path -and $payload.Revision -ceq 'fixture-desktop-revision') 'Explicit choice dispatches exact executable and revision'}
+        }
+        $script:AppTarget.RequiresRepair=$true;$script:PendingAction=$null
+        Show-ProgramLaunchSettings $script:AppTarget
+        Check-UI ($null -eq $script:PendingAction -and -not $script:DialogOpen) 'Stale executable cannot edit desktop integration'
+        $script:AppTarget.RequiresRepair=$false
+        foreach($width in @(1180,1400)){$form.Width=$width;[Windows.Forms.Application]::DoEvents();Check-UI ($launchSettingsButton.Left -ge $programHint.Right -and $launchSettingsButton.Right -lt $websiteButton.Left -and $routeButton.Right -le $bottom.Width) 'Launch settings remains visible without overlap'}
+        $script:PendingAction=$null
+
         $snapshot=[pscustomobject]@{Entries=@([pscustomobject]@{Id=('a'*32);Domain='initial.example';Match='exact';Route='Direct';Executable=''});Revision=('b'*64);Available=$true;Loaded=$true;Message='测试规则已加载';ContextExecutable='C:\Fixtures\editor.exe'}
         $editor=New-WebsiteRuleEditor $snapshot
         try{

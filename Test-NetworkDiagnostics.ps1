@@ -14,7 +14,7 @@ function Get-SystemSnapshot {$script:sys}
 function Get-UserProxyEnv {$script:envs}
 function Set-SystemSnapshot($Value){$script:writes++;$script:sys=$Value}
 function Set-UserProxyEnv($Value){$script:writes++;$script:envs=$Value}
-function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$script:available;Rows=@()}}
+function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$script:available;Rows=@($script:ready|ForEach-Object {[pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=$_;OwningProcess=$PID}})}}
 function Get-Listener {param($Profile,$TcpRows);if($Profile.Port -in $script:ready){[pscustomobject]@{PID=1}}}
 function Test-ProxyRoute {param($Key,[switch]$Fast);[pscustomobject]@{Usable=$script:usable}}
 function Test-RecoveryEndpoint($Endpoint){$Endpoint -match ':19001$'}

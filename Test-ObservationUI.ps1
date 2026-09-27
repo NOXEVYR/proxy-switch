@@ -83,6 +83,17 @@ $checks=@'
         Check-UI ($noticeLabel.Text -match '默认代理出口已暂停' -and $noticeLabel.Text -match '直连网站例外或其他程序线路' -and $noticeLabel.Text -notmatch '全部代理检测失败') 'Default-route pause does not imply website exceptions and every program are blocked'
         function Get-GatewayKey {''};$script:Profiles.Routing.Adapter='none';Show-ProxyCatalog
         Check-UI ($engineLabel.Text -match '统一切换.*建立入口' -and $engineLabel.Text -notmatch '仅能切换系统代理') 'Unconfigured gateway view explains the normal fixed-entry switching action'
+        # Exercise the actual timer completion handler after a failed network operation.
+        $script:ObservationStale=$false;Show-State (Get-DemoState);Show-Applications $apps
+        $autoRefresh.Checked=$false;$script:PendingAction=$null
+        $ps=[PowerShell]::Create();[void]$ps.AddScript('[pscustomobject]@{OK=$false;Error="fixture switch rejected"}')
+        $handle=$ps.BeginInvoke();[void]$handle.AsyncWaitHandle.WaitOne(3000)
+        $script:Worker=[pscustomobject]@{PowerShell=$ps;Handle=$handle;Kind='Switch';Progress=(New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]');Started=[DateTime]::Now;Cancellation=(New-Object Threading.CancellationTokenSource)}
+        [void]$timer.GetType().GetMethod('OnTick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($timer,@([EventArgs]::Empty))
+        Check-UI ($script:ObservationStale -and $liveList.Items[0].SubItems[2].Text -match '过期') 'Failed operation invalidates prior connection evidence through actual completion handler'
+        Check-UI ($entryValue.Text -match '待刷新' -and $portsLabel.Text -match '待刷新' -and $ruleMeta.Text -match '待刷新') 'Failed operation cannot leave healthy-looking current route or loaded-rule cards'
+        Show-Applications $apps
+        Check-UI ($ruleMeta.Text -match '待刷新' -and $noticeLabel.Text -match '过期') 'Filtering stale rows cannot reintroduce current-looking rule or failover summaries'
         Write-Output ('PASS: '+$script:Checks+' observation UI assertions; actual WinForms controls, isolated data and no network writes.')
 '@
 $path=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($path)

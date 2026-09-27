@@ -44,7 +44,20 @@ function Get-LocalEndpointObservation([string]$Value,$Tcp) {
     if($Value -notmatch '^(?:(?:http|https|socks5|socks5h)://)?(127\.0\.0\.1|localhost|\[::1\]):([0-9]{1,5})/?$'){return $null}
     $port=[int]$Matches[2];if($port -lt 1 -or $port -gt 65535){return $null}
     $profile=[pscustomobject]@{Host=$Matches[1].Trim('[',']');Port=$port;CorePath=''}
-    $ready=$null;if($Tcp.Available){$ready=$null -ne (Get-Listener $profile -TcpRows $Tcp.Rows)}
+    $ready=$null
+    if($Tcp.Available){
+        $listeners=@($Tcp.Rows|Where-Object {$_.State -eq 'Listen' -and $_.LocalPort -eq $port -and $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::','::1')})
+        $matching=$listeners;$ambiguous=$false
+        if($profile.Host -eq '127.0.0.1'){
+            $matching=@($listeners|Where-Object {$_.LocalAddress -in @('127.0.0.1','0.0.0.0')})
+            $ambiguous=(-not $matching.Count -and @($listeners|Where-Object LocalAddress -eq '::').Count -gt 0)
+        }elseif($profile.Host -eq '::1'){$matching=@($listeners|Where-Object {$_.LocalAddress -in @('::1','::')})}
+        if(-not $matching.Count -and -not $ambiguous){$ready=$false}
+        elseif($matching.Count){
+            # A listener with unreadable/exited ownership is not proof of a dead entry.
+            try{if(Get-Listener $profile -TcpRows $matching){$ready=$true}}catch{}
+        }
+    }
     [pscustomobject]@{Port=$port;Ready=$ready}
 }
 function Assert-NetworkRepairCurrent([string]$Revision) {
@@ -185,4 +198,16 @@ function Repair-NetworkDiagnosis([string]$Revision) {
     try{$after=Get-NetworkDiagnosis;$result.Message+="`r`n`r`n"+$after.Message;$result|Add-Member NoteProperty Diagnosis $after}
     catch{$result.Message+=' 修复后的诊断刷新失败，请重新点击排查网络；未把操作结果冒充完整联网验收。'}
     $result
+}
+
+# Shared passive, tri-state observation for all restoration paths.
+function Get-RecoveryEndpointState([string]$Endpoint) {
+    # Parsing first prevents TCP collection for remote, complex or credential-bearing values.
+    if(-not (Get-LocalEndpointObservation $Endpoint ([pscustomobject]@{Available=$false;Rows=@()}))){return 'not-local'}
+    try{
+        $observed=Get-LocalEndpointObservation $Endpoint (Get-TcpObservationSnapshot)
+        if($observed.Ready -eq $true){return 'live'}
+        if($observed.Ready -eq $false){return 'dead'}
+    }catch{}
+    return 'unknown'
 }

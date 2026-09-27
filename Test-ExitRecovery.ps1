@@ -5,7 +5,7 @@ function Use-ChangeLock([scriptblock]$Action){& $Action} # All writes in this fi
 $script:checks=0
 function Check($value,$message){if(-not $value){throw $message};$script:checks++}
 $script:Ready=@('127.0.0.1:19001','http://127.0.0.1:19001')
-function Test-RecoveryEndpoint([string]$value){$value -in $script:Ready}
+function Get-RecoveryEndpointState([string]$value){if($value -in $script:Ready){'live'}else{'dead'}}
 $direct=[pscustomobject]@{Flags=1;Server='';Bypass='localhost'}
 $prior=[pscustomobject]@{Flags=3;Server='127.0.0.1:19001';Bypass='localhost'}
 $target=[pscustomobject]@{Flags=3;Server='127.0.0.1:18790';Bypass='localhost'}

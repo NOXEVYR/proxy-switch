@@ -154,8 +154,8 @@ function Set-ProgramLaunchRoute([string]$Executable,[string]$Route) {
         $plan=Get-ProgramLaunchPlan $Executable $Route
         $before=@(Get-ProgramLaunchEntries);$next=@($before|Where-Object {$_.path -ine $Executable})+@([pscustomobject]@{path=$Executable;route=$Route;adapter='chromium';identity=(Get-ProgramIdentityDescriptor -Path $Executable -Context (New-ProgramIdentityContext))})
         $backup=Save-Backup ([pscustomobject]@{Version=3;Time=(Get-Date).ToString('o');System=(Get-SystemSnapshot);Environment=(Get-UserProxyEnv);Selection=(Get-Selection);Routing=(Get-RoutingSnapshot)})
-        try{Set-ProgramLaunchEntries $next;$shortcuts=@(Install-ProgramProxyShortcut $Executable)}catch{Set-ProgramLaunchEntries $before;throw}
-        [pscustomobject]@{Backup=$backup;Message=('已保存「'+[IO.Path]::GetFileNameWithoutExtension($Executable)+'」的目标「'+(Get-RouteName $Route)+'」，尚未验证生效。请保存任务并完整退出，再使用以下代理入口，或右键选择「按指定线路打开」：'+"`r`n"+($shortcuts -join "`r`n")+"`r`n"+'其他入口（开始菜单、任务栏、Listary 等）未接入此启动设置，重复从那些入口重开不会应用这里保存的代理。');Shortcuts=$shortcuts}
+        try{Set-ProgramLaunchEntries $next;$shortcuts=@(Get-VerifiedProgramShortcuts $Executable)}catch{Set-ProgramLaunchEntries $before;throw}
+        [pscustomobject]@{Backup=$backup;Message=('已保存「'+[IO.Path]::GetFileNameWithoutExtension($Executable)+'」的目标「'+(Get-RouteName $Route)+'」，尚未验证生效。请保存任务并完整退出，再右键选择「按指定线路打开」。保存线路不会改写桌面入口；可在「启动方式」中自行设置。已有代理入口：'+"`r`n"+($shortcuts -join "`r`n")+"`r`n"+'其他入口（开始菜单、任务栏、Listary 等）未接入此启动设置，重复从那些入口重开不会应用这里保存的代理。');Shortcuts=$shortcuts}
     }
 }
 function Start-ManagedProgram([string]$Executable) {
@@ -214,4 +214,78 @@ function Test-ManagedProgramSession([string]$Executable,$Processes,[string]$Rout
     if($record.route -ne $key){return $false}
     if($key -ne 'Direct' -and $record.endpoint -cne ('http://'+(Get-EndpointAddress (Get-Profile $key)))){return $false}
     return @($Processes|Where-Object {$_.Id -eq $record.pid -and $_.Path -ieq $Executable -and $_.StartTime.ToUniversalTime().Ticks.ToString() -eq $record.started}).Count -gt 0
+}
+
+
+# Desktop integration is an explicit preference, independent of route selection.
+function Get-ProgramDesktopState([string]$Executable) {
+    $records=@(Get-ProgramShortcutRecords|Where-Object {$_.program -ieq $Executable})
+    $health=@(Get-ProgramProxyShortcutHealth $Executable)
+    $owned=@($records|Where-Object {$path=$_.shortcut;@($health|Where-Object {$_.Shortcut -ieq $path -and $_.Owned}).Count})
+    $bound=@($owned|Where-Object originalBackup).Count
+    $separate=@($owned|Where-Object {-not $_.originalBackup}).Count
+    [pscustomobject]@{Mode=$(if($bound){'Bound'}elseif($separate){'Separate'}else{'InApp'});Bound=$bound;Separate=$separate;External=@($health|Where-Object {$_.State -eq 'externally-modified'}).Count;Revision=(Get-RuleMaintenanceSnapshot $Executable).Fingerprint}
+}
+function Set-ProgramDesktopMode([string]$Executable,[ValidateSet('InApp','Separate','Bound')][string]$Mode,[string]$ExpectedRevision,[string]$DesktopDirectory='') {
+    Use-ChangeLock {
+        $executable=ConvertTo-ProgramIdentityPath $Executable
+        if(-not $executable -or $executable -notmatch '(?i)\.exe$'){throw '请选择有效程序。'}
+        if(-not $DesktopDirectory){$DesktopDirectory=[Environment]::GetFolderPath('Desktop')}
+        $snapshot=Get-RuleMaintenanceSnapshot $executable
+        if(-not $ExpectedRevision -or $snapshot.Fingerprint -cne $ExpectedRevision){throw '程序设置已变化，请重新打开启动方式。'}
+        if($Mode -ne 'InApp'){
+            if((Get-ProgramProxyAdapter $executable) -ne 'chromium' -or -not @(@($snapshot.Launch.entries)+@($snapshot.Engine.programIngresses)|Where-Object {$_.path -ieq $executable}).Count){throw '请先为受支持的程序指定线路，再设置代理启动入口。'}
+        }
+        Initialize-ProgramShortcutSupport
+        $backup=New-RuleMaintenanceBackup $snapshot 'desktop-mode' $executable $executable
+        $restore=New-RuleMaintenanceShortcutChanges $snapshot $executable '' $backup -Remove
+        $changes=@{};foreach($change in $restore.Changes){$changes[$change.Before.Path]=$change}
+        $records=@($restore.Records);$targets=@()
+        if($Mode -eq 'Separate'){
+            $path=Join-Path $DesktopDirectory ([IO.Path]::GetFileNameWithoutExtension($executable)+'（指定代理）.lnk')
+            $before=Read-RuleMaintenanceFile $path
+            if($before.Exists -and (-not $changes.ContainsKey($path) -or -not $changes[$path].Remove)){throw '独立代理入口名称已被其他文件占用，未覆盖。'}
+            $targets+=@([pscustomobject]@{Path=$path;Before=$before;Original='';Bytes=[byte[]]@();Icon=($executable+',0')})
+        }elseif($Mode -eq 'Bound'){
+            foreach($file in @(Get-ChildItem -LiteralPath $DesktopDirectory -Filter '*.lnk')){
+                $path=$file.FullName;$before=Read-RuleMaintenanceFile $path
+                $bytes=$before.Bytes
+                if($changes.ContainsKey($path)){if($changes[$path].Remove){continue};$bytes=$changes[$path].Bytes}
+                $stage=Join-Path $backup.Directory ([Guid]::NewGuid().ToString('N')+'.lnk')
+                [IO.File]::WriteAllBytes($stage,$bytes);$link=[FlowSwitchShellShortcut]::Read($stage)
+                if($link.TargetPath -ine $executable -or $link.Arguments){continue}
+                $existing=$snapshot.Shortcuts.entries|Where-Object {$_.shortcut -ieq $path -and $_.program -ieq $executable}|Select-Object -First 1
+                $original=$stage;if($existing -and $existing.originalBackup){$original=$existing.originalBackup}
+                $targets+=@([pscustomobject]@{Path=$path;Before=$before;Original=$original;Bytes=$bytes;Icon=$link.IconLocation})
+            }
+            if(-not $targets.Count){throw '未找到可绑定的原桌面入口。带自定义参数或外部修改的入口保持原样；可选择创建独立代理入口。'}
+        }
+        foreach($target in $targets){
+            $stage=Join-Path $backup.Directory ([Guid]::NewGuid().ToString('N')+'.lnk')
+            if($target.Bytes.Length){[IO.File]::WriteAllBytes($stage,$target.Bytes)}
+            $binary=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe';$arguments=Get-RuleMaintenanceArguments $executable
+            [FlowSwitchShellShortcut]::Write($stage,$binary,$arguments,[IO.Path]::GetDirectoryName($executable),$target.Icon,'由流向按已保存线路打开；可在流向的启动方式中解除',7)
+            $verify=[FlowSwitchShellShortcut]::Read($stage)
+            if($verify.TargetPath -ine $binary -or $verify.Arguments -cne $arguments){throw '代理入口生成失败，未修改桌面。'}
+            $changes[$target.Path]=[pscustomobject]@{Before=$target.Before;Bytes=[IO.File]::ReadAllBytes($stage);Remove=$false}
+            $records+=@([pscustomobject]@{program=$executable;shortcut=$target.Path;originalBackup=$target.Original;managedTarget=$binary;managedArguments=$arguments})
+        }
+        $next=$snapshot.Shortcuts|ConvertTo-Json -Depth 16|ConvertFrom-Json;$next.entries=$records
+        $ordered=@($changes.Values)+@([pscustomobject]@{Before=$snapshot.Files['program-shortcuts.json'];Bytes=(ConvertTo-RuleMaintenanceBytes $next);Remove=$false})
+        if((Get-RuleMaintenanceSnapshot $executable).Fingerprint -cne $snapshot.Fingerprint){throw '准备期间程序记录或入口已变化，未修改。'}
+        $written=@()
+        try{
+            foreach($change in $ordered){
+                Set-RuleMaintenanceFile $change.Before $change.Bytes $change.Remove
+                $written+=@([pscustomobject]@{Before=$change.Before;AfterHash=$(if($change.Remove){'<missing>'}else{Get-RuleMaintenanceHash $change.Bytes})})
+            }
+            foreach($item in $written){if((Read-RuleMaintenanceFile $item.Before.Path).Hash -cne $item.AfterHash){throw '入口写入后发生外部更改。'}}
+        }catch{
+            $problems=0
+            for($i=$written.Count-1;$i -ge 0;$i--){$item=$written[$i];try{$current=Read-RuleMaintenanceFile $item.Before.Path;if($current.Hash -ceq $item.AfterHash){Set-RuleMaintenanceFile $current $item.Before.Bytes (-not $item.Before.Exists)}}catch{$problems++}}
+            throw ('启动方式未保存成功；已尽力恢复仍归本次修改的文件，外部修改保留。回退失败项：'+$problems+'。备份：'+$backup.Path)
+        }
+        $message=switch($Mode){'InApp'{'已解除桌面绑定，原入口恢复正常启动；需要代理时在流向中选择“按指定线路打开”。'}'Separate'{'已创建独立代理入口，原桌面入口保持正常启动。'}'Bound'{'已按你的选择绑定原桌面入口；以后双击会先由流向检查代理服务，可随时在启动方式中解除。'}}
+        [pscustomobject]@{Mode=$Mode;Backup=$backup.Path;Shortcuts=@($targets|ForEach-Object Path);Message=($message+' 保存的线路和网站规则未改变，正在运行的程序未重启。'+$(if($restore.Preserved){' 外部改动的入口保持原样。'}else{''}))}
+    }
 }

@@ -54,9 +54,11 @@ $originalHash=(Get-FileHash -LiteralPath $shortcut).Hash
 $realShortcut=${function:Install-ProgramProxyShortcut}
 function Install-ProgramProxyShortcut($Executable){& $realShortcut $Executable $desktop}
 $result=Set-ProgramLaunchRoute $exe 'upstream'
+Check ((Get-FileHash -LiteralPath $shortcut).Hash -eq $originalHash) 'Saving a route leaves the ordinary desktop shortcut unchanged'
+Install-ProgramProxyShortcut $exe|Out-Null
 Check (@(Get-ProgramLaunchEntries).Count -eq 1 -and (Get-ProgramLaunchEntries).route -eq 'upstream') 'Program route saves without any Clash engine or Windows proxy write'
 $record=Get-ProgramShortcutRecords|Select-Object -First 1
-Check ($result.Message.Contains($shortcut) -and $result.Message -notmatch '原图标|原入口已备份') 'Route result identifies the actual managed entry without promising every original launcher was replaced'
+Check ($result.Message -match '不会改写桌面入口') 'Route result identifies the actual managed entry without promising every original launcher was replaced'
 Check (@(Get-VerifiedProgramShortcuts $exe).Count -eq 1) 'Verified entry reads the shortcut target and arguments'
 Check ($record.shortcut -eq $shortcut -and (Get-FileHash -LiteralPath $record.originalBackup).Hash -eq $originalHash) 'Original desktop shortcut is backed up byte for byte'
 $link=[FlowSwitchShellShortcut]::Read($shortcut)
@@ -124,7 +126,9 @@ Check ((Get-FileHash -LiteralPath $shortcut).Hash -eq $originalHash) 'Removing a
 $newExe=Join-Path $directory 'StoreApp.exe';Copy-Item -LiteralPath $exe -Destination $newExe
 $newResult=Set-ProgramLaunchRoute $newExe 'upstream'
 $newShortcut=Join-Path $desktop 'StoreApp（指定代理）.lnk'
-Check ($newResult.Shortcuts -contains $newShortcut -and $newResult.Message.Contains($newShortcut)) 'App without a matching desktop entry explicitly reports the separately created proxy launcher'
+Check (-not [IO.File]::Exists($newShortcut)) 'New route does not create desktop integration implicitly'
+$newResult=Set-ProgramDesktopMode $newExe 'Separate' (Get-ProgramDesktopState $newExe).Revision $desktop
+Check ($newResult.Shortcuts -contains $newShortcut) 'App without a matching desktop entry explicitly reports the separately created proxy launcher'
 Check (@(Get-VerifiedProgramShortcuts $newExe).Count -eq 1) 'New separate launcher is verified'
 $link=[FlowSwitchShellShortcut]::Read($newShortcut);$link.Arguments='-NoProfile';[FlowSwitchShellShortcut]::Write($newShortcut,$link)
 Check (@(Get-VerifiedProgramShortcuts $newExe).Count -eq 0) 'Independently edited entry is not recommended as a working proxy launcher'

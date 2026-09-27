@@ -127,6 +127,47 @@ namespace FlowSwitch.UI
         private HeaderPainter header;
         private double[] weights;
         private bool sizing;
+        // Build snapshots before entering this method. Stable rows keep native scroll/focus state.
+        public void ApplyRows(ListViewItem[] rows)
+        {
+            if(rows==null)throw new ArgumentNullException("rows");
+            foreach(var row in rows)if(row==null || row.ListView!=null)throw new ArgumentException("Rows must be detached.","rows");
+            string top=TopItem==null?null:TopItem.Name, focus=FocusedItem==null?null:FocusedItem.Name;
+            int topIndex=TopItem==null?0:TopItem.Index;
+            var selected=new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach(ListViewItem item in SelectedItems)selected.Add(item.Name);
+            bool same=Items.Count==rows.Length;
+            for(int i=0;same && i<rows.Length;i++)same=!String.IsNullOrEmpty(rows[i].Name) && String.Equals(Items[i].Name,rows[i].Name,StringComparison.OrdinalIgnoreCase);
+            BeginUpdate();
+            try {
+                if(same) {
+                    for(int i=0;i<rows.Length;i++) {
+                        var item=Items[i];var next=rows[i];
+                        item.Tag=next.Tag;
+                        if(item.ToolTipText!=next.ToolTipText)item.ToolTipText=next.ToolTipText;
+                        if(item.ForeColor!=next.ForeColor)item.ForeColor=next.ForeColor;
+                        while(item.SubItems.Count>next.SubItems.Count)item.SubItems.RemoveAt(item.SubItems.Count-1);
+                        for(int c=0;c<next.SubItems.Count;c++) {
+                            if(c>=item.SubItems.Count)item.SubItems.Add(next.SubItems[c].Text);
+                            else if(item.SubItems[c].Text!=next.SubItems[c].Text)item.SubItems[c].Text=next.SubItems[c].Text;
+                        }
+                    }
+                } else {
+                    Items.Clear();Items.AddRange(rows);
+                    foreach(ListViewItem item in Items) {
+                        item.Selected=selected.Contains(item.Name);
+                        if(focus!=null && String.Equals(item.Name,focus,StringComparison.OrdinalIgnoreCase))item.Focused=true;
+                    }
+                }
+            } finally {EndUpdate();}
+            // EndUpdate commits delayed ListView inserts; only then is the complete scroll range valid.
+            if(!same && Items.Count>0) {
+                var anchor=top==null?null:Items[top];
+                TopItem=anchor??Items[Math.Min(topIndex,Items.Count-1)];
+            }
+            FitColumns();Invalidate();
+            if(Parent!=null && Parent.Parent is ScrollHost)((ScrollHost)Parent.Parent).RefreshScroll();
+        }
         public void SetColumnWeights(double[] values) { weights=values;FitColumns(); }
         private void FitColumns()
         {

@@ -151,28 +151,7 @@ function Stop-ProgramCleanSession {
     elseif(-not $notified){return [pscustomobject]@{Message='结束请求未能写入，监护仍在运行；独立守护会在对照期限到时恢复。请查看恢复结果。'}}
     [pscustomobject]@{Message='已请求结束对照并恢复仍属于本次操作的系统设置。请查看恢复结果；游戏不会被结束。'}
 }
-function Get-CleanStartRestoreEndpointState([string]$Endpoint) {
-    # Reuse the strict local-endpoint parser. Never probe remote/complex addresses.
-    $parsed=Get-LocalEndpointObservation $Endpoint ([pscustomobject]@{Available=$false;Rows=@()})
-    if(-not $parsed){return 'not-local'}
-    try{
-        $tcp=Get-TcpObservationSnapshot
-        if(-not $tcp.Available){return 'unknown'}
-        $listeners=@($tcp.Rows|Where-Object {$_.State -eq 'Listen' -and $_.LocalPort -eq $parsed.Port -and $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::','::1')})
-        $endpointHost=(($Endpoint -replace '^(?:http|https|socks5|socks5h)://','') -replace ':[0-9]+/?$','').Trim('[',']').ToLowerInvariant()
-        $matching=$listeners
-        if($endpointHost -eq '127.0.0.1'){
-            $matching=@($listeners|Where-Object {$_.LocalAddress -in @('127.0.0.1','0.0.0.0')})
-            # The TCP table cannot reveal whether an IPv6 wildcard is dual-stack.
-            if(-not $matching.Count -and @($listeners|Where-Object LocalAddress -eq '::').Count){return 'unknown'}
-        }elseif($endpointHost -eq '::1'){$matching=@($listeners|Where-Object {$_.LocalAddress -in @('::1','::')})}
-        if(-not $matching.Count){return 'dead'}
-        $observed=Get-LocalEndpointObservation $Endpoint ([pscustomobject]@{Available=$true;Rows=@($matching)})
-        if($observed.Ready -eq $true){return 'live'}
-        # A listener with unreadable/exited ownership is not proven dead.
-        return 'unknown'
-    }catch{return 'unknown'}
-}
+function Get-CleanStartRestoreEndpointState([string]$Endpoint) {Get-RecoveryEndpointState $Endpoint}
 function Restore-CleanStartSnapshot($Before,$Target) {
     Use-ChangeLock {
         $current=Get-CleanStartSystemSnapshot

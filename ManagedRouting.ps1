@@ -13,7 +13,10 @@ function Ensure-ManagedGateway([string]$InitialRoute='') {
     if($script:Profiles.Routing.Adapter -eq 'standalone' -and (Test-Path -LiteralPath (Get-IndependentSessionPath))){
         $session=Get-Content -LiteralPath (Get-IndependentSessionPath) -Raw -Encoding UTF8|ConvertFrom-Json
         $life=Get-GatewayLifecycle
-        if(-not (Test-SessionProcess $session.OwnerPID $session.OwnerStart) -or -not (Test-SessionProcess $session.SupervisorPID $session.SupervisorStart) -or ($life.phase -in @('failed','stopped'))){
+        $owner=Get-RecoveryOwnerState $session
+        $supervisor=Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$session.SupervisorPID;OwnerStart=$session.SupervisorStart})
+        if($owner -eq 'unknown' -or $supervisor -eq 'unknown'){throw '原代理会话身份未知，未恢复或替换正在使用的入口。请先在诊断中检查服务。'}
+        if($owner -eq 'stopped' -or $supervisor -eq 'stopped' -or ($life.phase -in @('failed','stopped'))){
             # Only an explicit user action retries a fully stopped/exhausted service.
             # Restore owned settings and stop the verified old child before reusing ports.
             Restore-IndependentSession -ExpectedSession $session.Started
@@ -27,8 +30,12 @@ function Ensure-ManagedGateway([string]$InitialRoute='') {
     do {
         $remaining=[int]($deadline-[DateTime]::UtcNow).TotalMilliseconds
         if($remaining -le 0){break}
-        $live=Invoke-AppRouter @{action='status'} -TimeoutMilliseconds ([Math]::Min(2500,$remaining))
-        if($live.available -and $live.rulesAvailable -and $live.defaultLoaded){return $live}
+        # Controller reads can fail while the supervisor is still restoring its child.
+        # Retry only observation, never duplicate a start or routing transaction.
+        try{
+            $live=Invoke-AppRouter @{action='status'} -TimeoutMilliseconds ([Math]::Min(2500,$remaining))
+            if($live.available -and $live.rulesAvailable -and $live.defaultLoaded){return $live}
+        }catch{}
         Start-Sleep -Milliseconds 200
     }while([DateTime]::UtcNow -lt $deadline)
     throw '流向入口尚未就绪，未启动目标程序。请打开流向查看服务状态，或停止服务后重新启动。'
@@ -101,7 +108,10 @@ function Set-ManagedApplicationRoute([string]$Path,[string]$Route) {
         }
         $backup=Invoke-ManagedRoutingChange $before $next $verify
         $shortcuts=@();$shortcutNotice=''
-        try{$shortcuts=@(Install-ProgramProxyShortcut $executable)}catch{$shortcutNotice=' 原桌面入口未接入；请使用流向的“按指定线路打开”。已有快捷方式和外部修改保持原样。'}
+        $shortcutObservationUnknown=$false
+        try{$shortcuts=@(Get-VerifiedProgramShortcuts $executable)}catch{$shortcutObservationUnknown=$true}
+        $shortcutNotice=' 保存线路不会绑定桌面入口；可在“启动方式”中设置或解除绑定。'
+        if($shortcutObservationUnknown){$shortcutNotice=' 线路已提交，但桌面入口状态读取失败，请在“启动方式”中检查；未改写任何桌面入口。'}
         $family=@();$managed=$false;$observationUnknown=$false
         try{
             $family=@(Get-ProgramFamily $executable @(Get-ProcessInventory))
@@ -118,7 +128,7 @@ function Set-ManagedApplicationRoute([string]$Path,[string]$Route) {
         elseif($family.Count -and -not $managed){$message+=' 当前进程未确认接入固定入口：请保存任务并完整退出，再从流向打开或使用已接入的桌面入口；旧进程记住的代理地址不能通过保存规则修改。'}
         elseif($family.Count){$message+=' 已接入程序及继承入口的后台进程无需重开；已有长连接保持原状，可预览后单独重连。'}
         else{$message+=' 请从流向或已接入的桌面入口打开程序。'}
-        [pscustomobject]@{Backup=$backup;Message=($message+$shortcutNotice);Shortcuts=$shortcuts;Managed=$true;IngressId=$entry.id;ObservationUnknown=$observationUnknown;NeedsRelaunch=($family.Count -gt 0 -and -not $managed -and -not $observationUnknown)}
+        [pscustomobject]@{Backup=$backup;Message=($message+$shortcutNotice);Shortcuts=$shortcuts;Managed=$true;IngressId=$entry.id;ShortcutObservationUnknown=$shortcutObservationUnknown;ObservationUnknown=$observationUnknown;NeedsRelaunch=($family.Count -gt 0 -and -not $managed -and -not $observationUnknown)}
     }
 }
 function Get-WebsiteRules {

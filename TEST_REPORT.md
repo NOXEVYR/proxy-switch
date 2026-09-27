@@ -1,3 +1,41 @@
+﻿# 3.9.3 Windows 整体维护候选 — 2026-09-27
+
+本轮以完整使用链审计，不新增代理运行依赖。候选包为 3.9.3，运行组件保持原版本。当前工作树继承 3.9.1 / 3.9.2 的未发布本地维护。
+
+## 已复现并修复
+
+| 严重程度 | 触发与旧行为 | 修复与证据 |
+| --- | --- | --- |
+| P1 | 停止服务时，旧手动代理已退出，恢复计划直接设 Flags=1，丢失原 PAC/自动检测模式 | 仅撤销手动位，保留其余模式与绕过设置；Test-RecoveryConsistency 在修复前失败 |
+| P1 | 无法读取原监听归属/监听表，被按端口死亡处理；诊断与恢复的标准不同 | 三条路径共用三态本地观察，未知不授权清理；包含 IPv4/IPv6 边界及未知时保留会话和内核 |
+| P1 | 程序线路已提交并实读通过，随后桌面入口读取异常仍向上抛出，表现为“切换失败” | 提交结果/备份与入口观察结果分离，安全提示单独未知；Test-ManagedRouting 故障注入在修复前失败 |
+| P1 | 守护进程把读取 UI / supervisor 身份失败当作进程退出，可能错误触发恢复 | 改为确认 stopped 才按退出处理；Test-Watchdog 在未知身份故障注入时先失败，修复后保留活动会话 |
+| P2 | 就绪循环第一次状态查询抛错就退出，无法覆盖内核恢复期间的短暂不可读 | 在既有 12 秒绝对期限内只重试状态读取；持续失败仍拒绝启动；未知会话身份不擅自替换 |
+| P2 | 切换失败后旧连接及出口/已加载卡片仍显示；筛选旧快照还会重建部分成功摘要 | 完成处理器统一标记观察过期，表格与汇总一致；真实控件定时回调测试在修复前失败 |
+
+上述是故障注入确认的软件缺陷，不代表已经证明它们是每次历史事故或 Gemini 发送失败的根因。
+
+## 本轮验证范围
+
+以下脚本本轮均运行通过（退出码 0）；全部静态/单元先通过，共享恢复判断补齐后再完整复测相关恢复、直连监护和后台结果用例；最后守护进程修复另复测 Watchdog、SupervisorRecovery、TrayLifecycle 与 LifecycleProtection。完成时间为北京时间 2026-09-28。所有破坏性故障仅针对临时数据、独立测试内核、父子夹具进程；Windows 系统代理/用户环境/RunOnce 写入使用桩。
+
+- 静态与单元：Test-All（新增恢复一致性、就绪等待；保留身份/路径更新、子进程、回滚、规则、发现、自入口排除、桌面绑定等原回归）。
+- 实际请求链：Test-ManagedSwitchChain、Test-SwitchChain、Test-OfflineMigration、Test-DeadEntryIntegration。
+- 实际内核/托盘：Test-SupervisorRecovery、Test-TrayLifecycle、Test-Lifecycle、Test-ProgramIngressIntegration、Test-IndependentIntegration。
+- UI 与后台组合：Test-ObservationUI、Test-ListRefreshUI、Test-RoutingWorkbenchUI、Test-SwitchInteraction、Test-LaunchDispatch、Test-DiscoveryUI、Test-AutomaticDiscoveryUI、Test-PassiveLifecycle。
+- 网页通用传输：Test-WebTransport.cjs <CorePath> 的 10 项通过。真实内核 + 本地 HTTPS 源站 + 两个 HTTP CONNECT 上游，验证含 Unicode / 8 KiB 的 POST 正文、流式分段、A→B、目标 403/429/500、取消后重试及清理。测试证书只由该测试 TLS 连接信任，不写系统/浏览器信任库，不关闭验证。
+- 成品：最终 Windows ZIP 解压后 Test-WindowsPackage 的 16 项通过；源码包按白名单生成，不包含本机配置、账号、真实连接或诊断报告。
+- 长期资源边界已检查：UI 日志裁切、生命周期日志轮换、接替事件数量上限、程序家族缓存上限仍保留。加速刷新及短时被动观察不等于连续数天验收。
+
+## 仍未完成的真实验收
+
+- Gemini（Chrome）发送对话仍需失败请求的状态码/错误类型。本轮浏览器连接桥读取原标签页失败；未读取 Cookie、令牌或请求正文，未清缓存、退出账号或禁用扩展。首页 HTTP 成功不代表发送成功。
+- Antigravity 之前经流向重新启动后的联网恢复已有使用者确认；此结果不自动算作本候选的重新验收。
+- 另一台电脑的实际 IDE OAuth、网站混合访问与长时间使用仍需分别验收。已运行程序缓存旧上游地址时，仅保存线路不能改写其环境；托管启动需先由使用者完整退出，工具不结束用户应用。
+- 本轮本地验收未替换活动服务；源码与程序包的公开发布状态以 GitHub 3.9.3 Release、BUILD.txt 和 SHA256SUMS.txt 为准，本机更新另行验收。
+
+---
+
 # Windows 3.9.0 游戏登录排查验收 · 2026-09-24
 
 本轮源码、隔离测试和程序包分层验证；没有把端口连接或合成测试当作真实游戏登录结果。
