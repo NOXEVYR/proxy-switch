@@ -11,7 +11,7 @@ function Set-SystemSnapshot {throw 'Must not change Windows'}
 function Set-UserProxyEnv {throw 'Must not change Windows'}
 function Ensure-ManagedGateway {Invoke-AppRouter @{action='status'}}
 function Test-ProxyRoute {param($Key,[switch]$Fast);[pscustomobject]@{Usable=(-not $script:RejectProbe)}}
-function Install-ProgramProxyShortcut {param($Executable);@()}
+function Install-ProgramProxyShortcut {throw 'A route edit must not bind desktop entries'}
 function Get-ProcessInventory {if($script:FailObservation){throw 'Synthetic observation unavailable'};@()}
 function Get-Listener {param($Profile,[switch]$ProbeRemote);[pscustomobject]@{PID=999}}
 $script:Profiles=ConvertTo-ValidProfileSettings ([pscustomobject]@{Version=3;Profiles=@(
@@ -74,6 +74,12 @@ $script:RejectProbe=$true;Throws {Set-ManagedApplicationRoute $exe 'b'} '检测�
 Check (Test-SameRouting $before (Get-RoutingSnapshot)) 'Unreachable upstream does not mutate routing'
 $script:FailObservation=$true;$committed=Set-ManagedApplicationRoute $exe 'b';$script:FailObservation=$false
 Check ($committed.ObservationUnknown -and $committed.Backup -and (Get-ManagedProgramIngress $exe).route -eq 'b') 'Post-commit observation failure preserves switch result and backup'
+$shortcutReader=${function:Get-VerifiedProgramShortcuts}
+function Get-VerifiedProgramShortcuts {throw 'PRIVATE_SHORTCUT_ERROR?token=DO_NOT_LEAK'}
+$committed=Set-ManagedApplicationRoute $exe 'a'
+Check ($committed.Backup -and $committed.ShortcutObservationUnknown -and (Get-ManagedProgramIngress $exe).route -eq 'a') 'Post-commit shortcut observation failure retains the verified route and rollback backup'
+Check ($committed.Message -match '桌面入口状态' -and ($committed|ConvertTo-Json -Depth 6) -notmatch 'PRIVATE_SHORTCUT|DO_NOT_LEAK') 'Shortcut observation failure is actionable without disclosing raw private errors'
+Set-Item Function:Get-VerifiedProgramShortcuts $shortcutReader
 $before=Get-RoutingSnapshot
 $changed=Copy-RoutingSnapshot $before;$changed.siteRules[0].route='a'
 Check (-not (Test-SameRouting $before $changed)) 'Routing ownership includes website policy'

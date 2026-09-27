@@ -9,6 +9,10 @@ if($LASTEXITCODE -ne 0){throw 'Fixture compile failed'}
 $body=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'GatewayWatchdog.ps1'))
 $body=$body.Substring($body.IndexOf('$path=Get-IndependentSessionPath'))
 $mock=@'
+$fixtureOwnerState=${function:Get-RecoveryOwnerState}
+$fixtureSessionProcess=${function:Test-SessionProcess}
+function Get-RecoveryOwnerState($Session){if(Test-Path (Join-Path $script:DataRoot 'owner-unknown')){return 'unknown'};& $fixtureOwnerState $Session}
+function Test-SessionProcess($ProcessId,$Ticks){if(Test-Path (Join-Path $script:DataRoot 'owner-unknown')){return $false};& $fixtureSessionProcess $ProcessId $Ticks}
 function Use-ChangeLock([scriptblock]$Action){& $Action}
 function Get-SystemSnapshot {Get-Content (Join-Path $script:DataRoot 'fake-system.json') -Raw|ConvertFrom-Json}
 function Get-UserProxyEnv {Get-Content (Join-Path $script:DataRoot 'fake-env.json') -Raw|ConvertFrom-Json}
@@ -20,7 +24,7 @@ function Test-RecoveryEndpoint([string]$value){if($value -eq '127.0.0.1:18790'){
 '@
 $shell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $checks=0
-foreach($case in @('owner-crash','core-crash','external-change','restore-failure')){
+foreach($case in @('owner-unknown','owner-crash','core-crash','external-change','restore-failure')){
     $data=Join-Path $qa $case;[void][IO.Directory]::CreateDirectory((Join-Path $data 'gateway'))
     $owner=Start-Process -FilePath $exe -WindowStyle Hidden -PassThru
     $watch=$null
@@ -35,12 +39,18 @@ foreach($case in @('owner-crash','core-crash','external-change','restore-failure
         [IO.File]::WriteAllText((Join-Path $data 'fake-env.json'),($targetEnv|ConvertTo-Json),$utf8)
         [IO.File]::WriteAllText((Join-Path $data 'listener-ready'),'ready')
         if($case -eq 'restore-failure'){[IO.File]::WriteAllText((Join-Path $data 'fail-restore'),'yes')}
+        if($case -eq 'owner-unknown'){[IO.File]::WriteAllText((Join-Path $data 'owner-unknown'),'unknown')}
         $fixture=Join-Path $data 'Watch.ps1'
         $prefix='$ErrorActionPreference=''Stop'''+"`r`n"+('. '''+(Join-Path $PSScriptRoot 'ProxyBackend.ps1').Replace("'","''")+''' -DataDirectory '''+$data.Replace("'","''")+'''')+"`r`n"
         [IO.File]::WriteAllText($fixture,($prefix+$mock+"`r`n"+$body),$utf8)
         $watch=Start-Process -FilePath $shell -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "'+$fixture+'"') -WindowStyle Hidden -PassThru
         $deadline=[DateTime]::Now.AddSeconds(10);while(-not (Test-Path (Join-Path $data 'gateway\watchdog-ready.json')) -and [DateTime]::Now -lt $deadline){Start-Sleep -Milliseconds 100}
         if(-not (Test-Path (Join-Path $data 'gateway\watchdog-ready.json'))){throw 'Watchdog did not become ready'}
+        if($case -eq 'owner-unknown'){
+            Start-Sleep -Milliseconds 2200
+            if($watch.HasExited -or -not (Test-Path (Join-Path $data 'gateway-session.json')) -or (Test-Path (Join-Path $data 'gateway/stop'))){throw 'Unknown owner identity was misclassified as an exited UI'}
+            [IO.File]::Delete((Join-Path $data 'owner-unknown'))
+        }
         if($case -eq 'core-crash'){[IO.File]::Delete((Join-Path $data 'listener-ready'))}else{$owner.Kill()}
         if(-not $watch.WaitForExit(10000)){throw ('Watchdog did not recover '+$case)}
         $after=Get-Content (Join-Path $data 'fake-system.json') -Raw|ConvertFrom-Json

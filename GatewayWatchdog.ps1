@@ -21,9 +21,10 @@ $misses=0;$restoreAttempts=0;$missingSince=$null
 while(Test-Path -LiteralPath $path){
     $current=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
     if($current.Started -ne $session.Started){return}
-    $alive=Test-SessionProcess $session.OwnerPID $session.OwnerStart
+    # Failure to read process identity is not proof that the UI has exited.
+    $alive=(Get-RecoveryOwnerState $session) -ne 'stopped'
     $listener=Test-RecoveryEndpoint $session.TargetSystem.Server
-    if($session.SupervisorPID -and -not (Test-SessionProcess $session.SupervisorPID $session.SupervisorStart)){$listener=$false}
+    if($session.SupervisorPID -and (Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$session.SupervisorPID;OwnerStart=$session.SupervisorStart})) -eq 'stopped'){$listener=$false}
     if(-not $listener){$misses++;if(-not $missingSince){$missingSince=[DateTime]::UtcNow}}else{$misses=0;$missingSince=$null}
     $grace=Test-GatewayRecoveryGrace $session $misses
     if($missingSince -and ([DateTime]::UtcNow-$missingSince).TotalSeconds -ge 45){$grace=$false}

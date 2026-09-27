@@ -1,6 +1,10 @@
+﻿> 3.9.3 整体维护：统一恢复判断、保留自动代理模式、区分线路提交与观察失败，并改善入口就绪等待。Gemini 真实对话发送与跨电脑长期使用仍需实测，详见验收记录。
+
+> 已包含 3.9.1 启动入口改进：程序选线不再自动绑定桌面入口。选中程序后点击“启动方式…”：可以只在流向内按指定线路打开、另建独立代理图标，或明确绑定原桌面入口；解除绑定保留线路和正在运行的程序。自动发现按当前配置排除自有网关及程序入口，保留已有忽略设置。3.9.3 同时包含列表滚动、选择与焦点保持修复。
+
 <img src="assets/FlowSwitch.png" alt="流向 FlowSwitch" width="144" />
 
-# 流向 FlowSwitch 3.9.0
+# 流向 FlowSwitch 3.9.3
 
 管理已有 HTTP / SOCKS5 代理，通过固定入口选择出口。代理退出或卸载导致系统入口失效时，可在「诊断与工具 → 排查网络 → 修复可处理问题」检测备用并恢复入口；没有可用备用时撤销确认失效的设置。它不提供 VPN 服务、订阅或节点。
 
@@ -8,7 +12,7 @@
 
 Windows x64 程序包与源码包在本仓库 Releases 发布；旧版下载档案继续保留在 portfolio。程序包自带锁定运行组件。请完整解压，并保留本机配置备份。自动化验证覆盖隔离核心和实际请求，不能代替真实 IDE 登录与长期使用验收。
 
-**[下载 Windows x64 · 3.9.0](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.0/FlowSwitch-v3.9.0-Windows-x64.zip)** · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.0/FlowSwitch-v3.9.0-Windows-Source.zip) · [SHA-256 校验](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.0/SHA256SUMS.txt)
+**[下载 Windows x64 · 3.9.3](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.3/FlowSwitch-v3.9.3-Windows-x64.zip)** · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.3/FlowSwitch-v3.9.3-Windows-Source.zip) · [SHA-256 校验](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.3/SHA256SUMS.txt)
 
 ## macOS 原生测试版
 
@@ -100,3 +104,5 @@ Windows 10 1809+ / Windows 11 x64，保留系统自带的 Windows PowerShell 5.1
 源码目录使用 `Prepare-Runtime.ps1 -Destination <新组件目录>` 从官方来源按 `runtime.lock.json` 准备并校验组件，然后用 `Build-WindowsPackage.ps1 -Destination <新包目录> -RuntimeDirectory <组件目录>` 构建。`Test-All.ps1` 执行静态及单元检查，`Test-WindowsPackage.ps1 -PackageDirectory <包目录>` 检查程序包。
 
 [第三方组件与许可证](THIRD_PARTY_NOTICES.md) · [MIT 许可](LICENSE) · [旧版使用参考](README-legacy-3.3.2.md)。历史安装包继续保留在 [原仓库下载目录](https://github.com/turnsolesama/portfolio/tree/35ecc7e17cb9053279ecc422c3a577f5dafa5104/proxy-switch/releases)。
+
+列表刷新隔离回归：`powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-ListRefreshUI.ps1`。使用演示数据执行 300 轮刷新与窗口生命周期组合检查，不修改本机代理。

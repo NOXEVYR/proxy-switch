@@ -15,7 +15,7 @@ function Get-SystemSnapshot {$script:sys}
 function Get-UserProxyEnv {$script:envs}
 function Set-SystemSnapshot($Value){$script:writes++;$script:sys=$Value}
 function Set-UserProxyEnv($Value){$script:writes++;$script:envs=$Value}
-function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$script:available;Rows=@()}}
+function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$script:available;Rows=@($script:ready|ForEach-Object {[pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=$_;OwningProcess=$PID}})}}
 function Get-Listener {param($Profile,$TcpRows);if($Profile.Port -in $script:ready){[pscustomobject]@{PID=1}}}
 function Get-ClientInterference {[pscustomobject]@{Running=$true;Tun=$false;Guard=$script:guard;SystemProxy=$true}}
 function Test-ProxyRoute {param($Key,[switch]$Fast);$script:probes+=@($Key);switch($script:race){'config'{$script:sys.Bypass='external'};'guard'{$script:guard=$true};'port'{$script:ready+=19001}};[pscustomobject]@{Usable=$script:usable}}

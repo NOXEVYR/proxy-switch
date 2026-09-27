@@ -1,0 +1,1 @@
+Disposable public test fixture only. This key has no production identity or credentials. The certificate is trusted only by the isolated test TLS socket, never installed in Windows or a browser. Test traffic is loopback-only.

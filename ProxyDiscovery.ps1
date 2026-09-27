@@ -4,6 +4,21 @@ function Get-LocalEndpointId([string]$Address,[int]$Port) {
     if($name -in @('localhost','127.0.0.1','::1')){$name='loopback'}
     return $name+':'+$Port
 }
+# Do not discover our own ingress as an upstream, even from cached/system candidates.
+function Test-DiscoveryOwnEndpoint($Endpoint,$Settings=$script:Profiles) {
+    $address=[string]$Endpoint.Host
+    if($address.Trim('[',']') -notin @('localhost','127.0.0.1','::1','0.0.0.0','::')){return $false}
+    $port=[int]$Endpoint.Port
+    if($Settings.Routing.Adapter -eq 'standalone' -and @($Settings.Profiles|Where-Object {$_.Id -eq $Settings.Routing.ProfileId -and $_.Port -eq $port}).Count){return $true}
+    $routingPath=Join-Path $script:DataRoot 'app-rules.json'
+    if([IO.File]::Exists($routingPath)){
+        try{$rules=Get-Content -LiteralPath $routingPath -Raw -Encoding UTF8|ConvertFrom-Json;if($rules.version -notin @(1,2,3)){throw 'version'}}catch{throw '程序入口记录无法读取，暂停代理发现，避免把流向入口加入上游。'}
+        if(@($rules.programIngresses|Where-Object {$_ -and [int]$_.port -eq $port}).Count){return $true}
+    }
+    $path=[string]$Endpoint.Path;if(-not $path){$path=[string]$Endpoint.CorePath}
+    if($path){try{$owned=[IO.Path]::GetFullPath((Join-Path $script:DataRoot 'gateway\runtime')).TrimEnd('\')+'\';if([IO.Path]::GetFullPath($path).StartsWith($owned,[StringComparison]::OrdinalIgnoreCase)){return $true}}catch{}}
+    return $false
+}
 function Get-LocalListenerInventory {
     $rows=@()
     try{$rows=@(Get-NetTCPConnection -State Listen -ErrorAction Stop)}catch{
@@ -37,6 +52,7 @@ function Get-ProxyDiscoveryListeners([switch]$Automatic,$Inventory=$null) {
     if($null -eq $Inventory){$Inventory=@(Get-LocalListenerInventory)}
     $result=@()
     foreach($endpoint in $Inventory){
+        if(Test-DiscoveryOwnEndpoint $endpoint){continue}
         $known=@($script:Profiles.Profiles | Where-Object {$_.Host -in @('localhost','127.0.0.1','::1') -and $_.Port -eq $endpoint.Port -and (-not $_.CorePath -or $_.CorePath -ieq $endpoint.Path)}).Count -gt 0
         $recognized=Test-RecognizedProxyOwner $endpoint
         if($recognized -or (-not $Automatic -and $known)){$result+=@($endpoint)}
@@ -83,6 +99,7 @@ function Find-LocalProxies($Endpoints=$null,$Cancellation=$null) {
     $items=@();$seen=@{};$watch=[Diagnostics.Stopwatch]::StartNew()
     if($null -eq $Endpoints){$Endpoints=@(Get-ProxyDiscoveryListeners)}
     foreach($endpoint in $Endpoints){
+        if(Test-DiscoveryOwnEndpoint $endpoint){continue}
         if($Cancellation -and $Cancellation.IsCancellationRequested){break}
         if($watch.ElapsedMilliseconds -gt 12000){break}
         $key=Get-LocalEndpointId $endpoint.Host $endpoint.Port
@@ -107,6 +124,7 @@ function Merge-DiscoveredProfiles($Settings,$Candidates) {
     $value=ConvertTo-ValidProfileSettings $Settings;$added=@();$keys=@{};$names=@{};$ids=@{}
     foreach($p in $value.Profiles){$keys[(Get-LocalEndpointId $p.Host $p.Port)]=$true;$names[$p.Name]=$true;$ids[$p.Id]=$true}
     foreach($p in $Candidates){
+        if(Test-DiscoveryOwnEndpoint $p $value){continue}
         $key=Get-LocalEndpointId $p.Host $p.Port
         if($keys.ContainsKey($key) -or $key -in $value.DiscoveryIgnored -or $value.Profiles.Count -ge 32){continue}
         $copy=$p | Select-Object Id,Name,Protocol,Host,Port,AppPath,CorePath,AutoPort
@@ -142,7 +160,7 @@ function Get-ConfiguredLocalProxies($Inventory) {
             $protocol=$(if($uri.Scheme -eq 'http'){'http'}elseif($uri.Scheme -in @('socks5','socks5h')){'socks5'}else{''});if(-not $protocol){continue}
             $key=Get-LocalEndpointId $address $uri.Port;if($seen.ContainsKey($key)){continue}
             $owner=$Inventory | Where-Object {(Get-LocalEndpointId $_.Host $_.Port) -eq $key} | Select-Object -First 1
-            if(-not $owner){continue};$seen[$key]=$true
+            if(-not $owner -or (Test-DiscoveryOwnEndpoint $owner)){continue};$seen[$key]=$true
             $sha=[Security.Cryptography.SHA256]::Create()
             try{$id='p'+([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)))).Replace('-','').Substring(0,12).ToLowerInvariant()}finally{$sha.Dispose()}
             $name=[string]$owner.Name;if($name.Length -gt 16){$name=$name.Substring(0,16)}
