@@ -33,6 +33,10 @@ function Test-SameRecoveryEndpoint([string]$First,[string]$Second) {
 }
 function Get-IndependentRetiringEndpoints($Session) {
     $endpoints=@([string]$Session.TargetSystem.Server)
+    if($Session.PreserveWindowsSettings -eq $true){
+        if([string]$Session.OwnGatewayEndpoint -notmatch '^127\.0\.0\.1:[0-9]{1,5}$'){throw '共存入口的停止归属记录不完整，保留后台服务。'}
+        $endpoints=@([string]$Session.OwnGatewayEndpoint)
+    }
     $rulesPath=Join-Path $script:DataRoot 'app-rules.json'
     if([IO.File]::Exists($rulesPath)){
         $rules=Get-Content -LiteralPath $rulesPath -Raw -Encoding UTF8|ConvertFrom-Json
@@ -59,6 +63,9 @@ function Assert-IndependentStopUnreferenced($System,$Environment,[string[]]$Endp
     if($remaining.Count){throw ((@($remaining|Select-Object -Unique) -join '、')+' 仍指向即将停止的流向入口。已保留外部设置和后台服务；请在检查与维护中核对这些设置，改为其他可用入口或直连后再停止。')}
 }
 function New-ExitRecoveryPlan($Session,$CurrentSystem,$CurrentEnv) {
+    # A program-only session never claimed any Windows setting. Its baseline can
+    # reference a third-party proxy and must not be treated as our retiring port.
+    if($Session.PreserveWindowsSettings -eq $true){return [pscustomobject]@{System=$CurrentSystem;Environment=$CurrentEnv}}
     $system=$CurrentSystem
     if(Test-SameSnapshot $CurrentSystem $Session.TargetSystem){
         $system=$Session.BeforeSystem
@@ -175,10 +182,11 @@ function Restore-IndependentSession([string]$ExpectedSession='',[switch]$Abandon
         throw
     }
 }
-function Start-IndependentProtection([int]$OwnerPID,$BeforeSystem,$BeforeEnv,$TargetSystem,$TargetEnv) {
+function Start-IndependentProtection([int]$OwnerPID,$BeforeSystem,$BeforeEnv,$TargetSystem,$TargetEnv,[switch]$PreserveWindowsSettings) {
     if($OwnerPID -le 0){$OwnerPID=$PID}
     $owned=Get-Content -LiteralPath (Join-Path $script:DataRoot 'gateway\process.json') -Raw -Encoding UTF8|ConvertFrom-Json
     $session=[pscustomobject]@{CorePID=$owned.core;CoreStart=(Get-ProcessStartTicks $owned.core);SupervisorPID=$owned.supervisor;SupervisorStart=(Get-ProcessStartTicks $owned.supervisor);Version=1;OwnerPID=$OwnerPID;OwnerStart=(Get-ProcessStartTicks $OwnerPID);BeforeSystem=$BeforeSystem;BeforeEnv=$BeforeEnv;TargetSystem=$TargetSystem;TargetEnv=$TargetEnv;Started=(Get-Date).ToString('o')}
+    if($PreserveWindowsSettings){$session|Add-Member NoteProperty PreserveWindowsSettings $true;$session|Add-Member NoteProperty OwnGatewayEndpoint (Get-EndpointAddress (Get-Profile (Get-GatewayKey)))}
     Write-LifecycleEvent 'session-start' 'entry-ready'
     Write-LocalJson (Join-Path $script:DataRoot 'gateway\recovery-status.json') ([pscustomobject]@{phase='protected';at=[DateTimeOffset]::UtcNow.ToString('o')})
     $path=Get-IndependentSessionPath
@@ -197,9 +205,10 @@ function Start-IndependentProtection([int]$OwnerPID,$BeforeSystem,$BeforeEnv,$Ta
     for($i=0;$i -lt 50;$i++){if(Test-Path -LiteralPath $ready){$r=Get-Content -LiteralPath $ready -Raw -Encoding UTF8 | ConvertFrom-Json;if($r.Session -eq $session.Started -and (Test-SessionProcess $r.PID $r.StartTicks)){return}};Start-Sleep -Milliseconds 100}
     throw '退出恢复保护未启动，尚未更改 Windows 代理。'
 }
-function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[switch]$UnifiedSwitch,[switch]$AllowMigration,[switch]$RepairEntry,[string]$RepairRevision='') {
+function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[switch]$UnifiedSwitch,[switch]$AllowMigration,[switch]$RepairEntry,[string]$RepairRevision='',[switch]$PreserveWindowsSettings) {
     Use-ChangeLock {
         $script:Profiles=Read-ProfileSettings
+        if($PreserveWindowsSettings -and ($UnifiedSwitch -or $RepairEntry -or $AllowMigration -or $script:Profiles.Routing.Adapter -ne 'standalone')){throw '程序共存入口仅适用于已配置的流向独立内核；不会迁移外部引擎或统一切换系统入口。'}
         if($RepairEntry){Assert-NetworkRepairCurrent $RepairRevision;if(Test-Path (Get-IndependentSessionPath)){throw '会话已改变，请重新排查。'};if((Get-NetworkDiagnosis).RepairAction -ne 'repair-dead-entry'){throw '入口已恢复或无法确认失效，请重新排查。'}}
         if($UnifiedSwitch -and -not $AllowMigration -and $script:Profiles.Routing.Adapter -ne 'standalone'){throw '入口配置已经变化，请刷新后重试；未自动迁移其他引擎。'}
         if($script:Profiles.Routing.Adapter -eq 'standalone'){
@@ -219,14 +228,14 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
         $engine=$migration.Engine
         if(-not $engine.installed -and (@($engine.entries).Count -gt 0 -or @($engine.programIngresses|Where-Object {$_}).Count -gt 0 -or @($engine.siteRules|Where-Object {$_}).Count -gt 0 -or $engine.defaultRoute)){throw '程序规则状态不一致，请先从备份恢复规则文件。'}
         foreach($entry in @($migration.Launch.entries)){
-            if(-not [IO.Path]::IsPathRooted($entry.path) -or $entry.path -notmatch '(?i)\.exe$' -or $entry.path -match '["\r\n\x00]' -or $entry.adapter -ne 'chromium' -or $entry.route -notin (@('Direct','Follow')+(Get-ProfileKeys))){throw '程序启动代理配置无效，请从备份恢复。'}
+            if(-not [IO.Path]::IsPathRooted($entry.path) -or $entry.path -notmatch '(?i)\.exe$' -or $entry.path -match '["\r\n\x00]' -or $entry.adapter -notin @('chromium','qtwebengine') -or $entry.route -notin (@('Direct','Follow')+(Get-ProfileKeys))){throw '程序启动代理配置无效，请从备份恢复。'}
         }
         $rules=[pscustomobject]@{entries=@($engine.entries);defaultRoute=$engine.defaultRoute;installed=[bool]$engine.installed;programIngresses=@($engine.programIngresses|Where-Object {$_});siteRules=@($engine.siteRules|Where-Object {$_});launchEntries=@($migration.Launch.entries)}
         $originalConfig=$migration.Files['config.json'];$originalState=$migration.Files['app-rules.json'];$originalLaunch=$migration.Files['program-proxies.json']
         $statePath=$originalState.Path
         $before=Get-SystemSnapshot;$beforeEnv=Get-UserProxyEnv;$selection=Get-Selection
         $client=Get-ClientInterference
-        if($client.Tun -or $client.Guard){throw '启用独立入口前，请关闭其他客户端的 TUN 和代理守卫；保留上游代理服务运行。'}
+        if($client.Tun -or ($client.Guard -and -not $PreserveWindowsSettings)){throw '启用独立入口前，请关闭其他客户端的 TUN 和代理守卫；保留上游代理服务运行。'}
         $upstreams=@($old.Profiles | Where-Object {$_.Id -ne $old.Routing.ProfileId -or $old.Routing.Adapter -ne 'standalone'})
         if(-not $upstreams.Count){throw '请先添加至少一个上游代理入口。'}
         if($UnifiedSwitch -or $RepairEntry){
@@ -247,6 +256,10 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
         if($old.Routing.Adapter -eq 'standalone'){$new.Routing.Failover=$old.Routing.Failover}
         $new=ConvertTo-ValidProfileSettings $new
         $route=$rules.defaultRoute;if(-not $route){$route=Get-SystemKey $before};if($route -notin (@('Direct')+@($upstreams|ForEach-Object Id))){$route=$upstreams[0].Id}
+        if($PreserveWindowsSettings){
+            $retiring=@(Get-EndpointAddress $gateway)+@($rules.programIngresses|ForEach-Object {'127.0.0.1:'+ $_.port})
+            Assert-IndependentStopUnreferenced $before $beforeEnv $retiring
+        }
         $nextIngresses=@($rules.programIngresses|Where-Object {$_});$nextSites=@($rules.siteRules|Where-Object {$_});$nextEntries=@($rules.entries);$nextLaunch=@($rules.launchEntries)
         if($InitialRoute){$route=$InitialRoute}
         if($UnifiedSwitch){$nextIngresses=@($nextIngresses|ForEach-Object {$copy=$_|ConvertTo-Json -Depth 16|ConvertFrom-Json;$copy.route='Follow';$copy});$route=$InitialRoute;$nextEntries=@();$nextLaunch=@($rules.launchEntries|Where-Object {$_}|ForEach-Object {[pscustomobject]@{path=$_.path;route='Follow';adapter=$_.adapter;identity=$_.identity}})}
@@ -292,9 +305,17 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
                 $ownedLaunchHash=Set-MigrationJson $originalLaunch.Path $nextLaunchState $originalLaunch.TextHash}
             }
             $target=[pscustomobject]@{Flags=3;Server=(Get-EndpointAddress $gateway);Bypass=$before.Bypass};$targetEnv=New-EnvTarget $beforeEnv $gateway.Id
+            if($PreserveWindowsSettings){
+                if(-not (Test-SameSnapshot $before (Get-SystemSnapshot)) -or -not (Test-SameEnv $beforeEnv (Get-UserProxyEnv))){throw '启动期间全局入口发生变化，未认领或覆盖外部设置。'}
+                $target=$before;$targetEnv=$beforeEnv
+            }
             if($RepairEntry){$checkClient=Get-ClientInterference;if($checkClient.Guard -or $checkClient.Tun){throw '预检期间外部守护已开启，未接管系统入口。'}}
-            Start-IndependentProtection $OwnerPID $before $beforeEnv $target $targetEnv
+            Start-IndependentProtection $OwnerPID $before $beforeEnv $target $targetEnv -PreserveWindowsSettings:$PreserveWindowsSettings
             $switched=$true
+            if($PreserveWindowsSettings){
+                if(-not (Test-SameSnapshot $before (Get-SystemSnapshot)) -or -not (Test-SameEnv $beforeEnv (Get-UserProxyEnv))){throw '启动期间外部全局入口已变化，保留其修改，未确认共存启动。'}
+                return [pscustomobject]@{Backup=$stash;Message='程序独立入口已启动，系统代理、用户代理变量和统一线路选择保持原样。仅从流向打开的受支持网页组件使用该入口；其他联网组件仍需验证。'}
+            }
             $transactionBackup=Invoke-ProxyTransaction $target $targetEnv ([pscustomobject]@{Key=$gateway.Id;NetworkKey=$route;Unified=$true;ChangedAt=(Get-Date).ToString('o')}) $before $beforeEnv -BackupRouting $(if($UnifiedSwitch -or $RepairEntry){$rules}else{$null})
             if($RepairEntry){return [pscustomobject]@{Key=$route;Backup=$transactionBackup;Message=('失效系统入口已修复，默认新请求经流向固定入口转发到「'+(Get-RouteName $route)+'」，实际出口和请求均已核验。保留程序专用线路与网站例外；这些专用线路若仍指向失效上游，需要分别改线或启用其备用。已有程序缓存旧地址时请保存后完整重开。'+$(if($live.partialIngressFailure){' 另有程序固定入口未就绪，请分别修复；未将它们报告为已恢复。'}))}}
             if($UnifiedSwitch){return [pscustomobject]@{Key=$route;Backup=$transactionBackup;Message=('独立入口已启动，新连接的统一线路已核验为「'+(Get-RouteName $route)+'」。已有程序可能保留旧代理地址；首次接入的程序需从代理入口重新打开。'+$(if($live.partialIngressFailure){' 另有程序固定入口未就绪，请修复对应入口；这些程序尚未恢复。'})+$(if($client.SystemProxy){' 上游客户端仍开启系统代理，随后启动或退出它可能改写入口；建议关闭其系统代理开关并保留服务。'}))}}

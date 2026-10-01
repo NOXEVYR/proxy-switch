@@ -543,7 +543,27 @@ function Set-SelectedProxy([string]$Key) {
                 if($script:Profiles.Routing.Adapter -eq 'standalone' -and $live.effectiveDefaultRoute -ne $Key){throw ('实际出口没有到达所选线路，当前为「'+(Get-RouteName $live.effectiveDefaultRoute)+'」，不能确认切换成功。')}
             }
         }
-        $backup=Invoke-ProxyTransaction $target (New-EnvTarget $beforeEnv $plan.Entrance) $selection $before $beforeEnv $rules $beforeRules $verify
+        $targetEnv=New-EnvTarget $beforeEnv $plan.Entrance
+        $sessionImage=Read-RuleMaintenanceFile (Get-IndependentSessionPath)
+        $session=Read-RuleMaintenanceJson $sessionImage $null
+        if($session -and $session.PreserveWindowsSettings -eq $true){
+            # Explicit unified switching claims Windows settings only after the
+            # existing service identity and the new recovery journal are verified.
+            $accessSession=Get-ProgramRouteAccessSession
+            $claim=New-ProgramRouteAccessSession $accessSession.Session $before $beforeEnv $target $targetEnv
+            $claimBytes=ConvertTo-RuleMaintenanceBytes $claim;$claimHash=Get-RuleMaintenanceHash $claimBytes
+            $claimState=[pscustomobject]@{Written=$false}
+            $preWindows={Set-RuleMaintenanceFile $sessionImage $claimBytes $false;$claimState.Written=$true}
+            $postCommit={if((Read-RuleMaintenanceFile $sessionImage.Path).Hash -cne $claimHash){throw '统一切换期间服务恢复归属已变化，不能确认完成。'}}
+            try{$backup=Invoke-ProxyTransaction $target $targetEnv $selection $before $beforeEnv $rules $beforeRules $verify -PreWindowsAction $preWindows -PostCommitAction $postCommit}
+            catch{
+                if($claimState.Written -and (Test-SameSnapshot $before (Get-SystemSnapshot)) -and (Test-SameEnv $beforeEnv (Get-UserProxyEnv))){
+                    $currentSession=Read-RuleMaintenanceFile $sessionImage.Path
+                    if($currentSession.Hash -ceq $claimHash){Set-RuleMaintenanceFile $currentSession $sessionImage.Bytes $false}
+                }
+                throw
+            }
+        }else{$backup=Invoke-ProxyTransaction $target $targetEnv $selection $before $beforeEnv $rules $beforeRules $verify}
         [pscustomobject]@{Key=$Key;Backup=$backup;Test=$test;Message=('已将新连接的统一线路设为「'+(Get-RouteName $Key)+'」，撤销 '+$plan.ClearedRules+' 条程序专用规则。'+$(if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){'本地入口保持 '+$server+'；旧连接可在程序右键菜单中单独重连。'}else{'系统入口与命令行变量已同步，现有连接需刷新。'})+$(if($verifiedScope.Unavailable){' 另有 '+$verifiedScope.Unavailable+' 个程序固定入口未就绪，请修复对应入口；这些程序尚未恢复。'}))}
     }
 }
@@ -585,4 +605,5 @@ function Assert-RestorableEnvironment($Values) {
 . (Join-Path $PSScriptRoot 'ManagedRouting.ps1')
 . (Join-Path $PSScriptRoot 'ProgramFamilyRouting.ps1')
 . (Join-Path $PSScriptRoot 'ProgramRouteAccess.ps1')
+. (Join-Path $PSScriptRoot 'QtProgramAccess.ps1')
 . (Join-Path $PSScriptRoot 'ProgramCleanStart.ps1')

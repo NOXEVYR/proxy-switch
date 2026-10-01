@@ -10,6 +10,19 @@ function Get-RecoveryOwnerState($Session) {
     catch{return 'unknown'}
     finally{if($process){$process.Dispose()}}
 }
+function Get-IndependentStoppedServiceState($Session) {
+    $states=@(Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$Session.SupervisorPID;OwnerStart=$Session.SupervisorStart}))
+    $states+=Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$Session.CorePID;OwnerStart=$Session.CoreStart})
+    $trackedPath=Join-Path $script:DataRoot 'gateway\process.json'
+    try{
+        $tracked=Get-Content -LiteralPath $trackedPath -Raw -Encoding UTF8 -ErrorAction Stop|ConvertFrom-Json -ErrorAction Stop
+        if($tracked.supervisor -ne $Session.SupervisorPID -or [string]$tracked.supervisorStartTicks -cne [string]$Session.SupervisorStart){return 'unknown'}
+        $states+=Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$tracked.core;OwnerStart=$tracked.coreStartTicks})
+    }catch{return 'unknown'}
+    if($states -contains 'alive'){return 'alive'}
+    if($states -contains 'unknown'){return 'unknown'}
+    'stopped'
+}
 function Get-NetworkRepairRevision($System,$Environment) {
     $parts=@(($System|ConvertTo-Json -Compress),($Environment|ConvertTo-Json -Compress))
     foreach($path in @((Get-IndependentSessionPath),$script:ConfigPath,(Join-Path $script:DataRoot 'app-rules.json'),(Join-Path $script:DataRoot 'program-proxies.json'),(Join-Path $script:DataRoot 'selection.json'))){
@@ -184,14 +197,19 @@ function Get-NetworkDiagnosis([switch]$Probe) {
         try{
             $session=Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8|ConvertFrom-Json
             $owner=Get-RecoveryOwnerState $session;$sessionId=[string]$session.Started
-            if($owner -eq 'alive' -and $session.TargetSystem -and -not (Test-SameSnapshot $system $session.TargetSystem)){$issues+=[pscustomobject]@{Code='system-entry-overridden';Message='系统入口已偏离流向托管入口；使用系统代理的新请求可能绕过流向。无法仅凭端口确认修改者。请处理外部守护，再明确重新应用线路。'}}
+            if($owner -eq 'alive' -and $session.PreserveWindowsSettings -ne $true -and $session.TargetSystem -and -not (Test-SameSnapshot $system $session.TargetSystem)){$issues+=[pscustomobject]@{Code='system-entry-overridden';Message='系统入口已偏离流向托管入口；使用系统代理的新请求可能绕过流向。无法仅凭端口确认修改者。请处理外部守护，再明确重新应用线路。'}}
             if($owner -eq 'stopped' -and $sessionId){
                 $issues+=[pscustomobject]@{Code='abandoned-session';Message='发现上次运行遗留的会话，原宿主已退出。旧保护记录不代表当前网关可用。'}
                 $action='recover-session';$repairText='恢复仍属于旧会话的系统代理与用户变量，核验后停止旧会话内核并归档。保留其他工具或你后来改过的设置。'
             }elseif($owner -eq 'unknown'){$issues+=[pscustomobject]@{Code='session-unknown';Message='会话身份无法核实。保留记录，暂不停止进程或自动恢复。'}}
             elseif($owner -eq 'alive'){
                 $gateway=$endpoints|Where-Object Key -eq (Get-GatewayKey)|Select-Object -First 1
-                if($gateway -and $gateway.Ready -eq $false){$issues+=[pscustomobject]@{Code='gateway-down';Message='流向宿主仍在运行，但固定入口未监听。等待恢复；若持续失败，请停止服务后重新启用独立分流。'}}
+                $service=Get-IndependentStoppedServiceState $session
+                if($sessionId -and $service -eq 'stopped'){
+                    $issues+=[pscustomobject]@{Code='stopped-service-session';Message='流向界面仍在，但该会话的监督器及已记录内核均已停止。旧就绪记录不能证明入口可用。'}
+                    $action='recover-stopped-service';$repairText='恢复仍属于此会话的代理设置并归档残留记录；保留其他工具后来设置的入口。不结束应用，已有应用可能需要正常重开。'
+                }
+                elseif($gateway -and $gateway.Ready -eq $false){$issues+=[pscustomobject]@{Code='gateway-down';Message='流向宿主仍在运行，但固定入口未监听。等待恢复；若持续失败，请停止服务后重新启用独立分流。'}}
                 elseif($gateway -and $gateway.Ready -eq $true){
                     try{
                         $live=Invoke-AppRouter @{action='status'} -TimeoutMilliseconds 2500
@@ -239,6 +257,13 @@ function Repair-NetworkDiagnosis([string]$Revision) {
                 Restore-IndependentSession -ExpectedSession $plan.ExpectedSession -AbandonedOnly
                 if(Test-Path -LiteralPath (Get-IndependentSessionPath)){throw '旧会话恢复尚未完成，请重新排查。'}
                 [pscustomobject]@{Message='旧会话已恢复并归档。';Backup=''}
+            }
+            'recover-stopped-service'{
+                $session=Get-Content -LiteralPath (Get-IndependentSessionPath) -Raw -Encoding UTF8|ConvertFrom-Json
+                if((Get-IndependentStoppedServiceState $session) -ne 'stopped'){throw '服务进程已恢复或身份未知，保留会话，请重新排查。'}
+                Restore-IndependentSession -ExpectedSession $plan.ExpectedSession -GracefulOnly
+                if(Test-Path -LiteralPath (Get-IndependentSessionPath)){throw '停止服务的会话恢复尚未完成，保留记录，请重新排查。'}
+                [pscustomobject]@{Message='已恢复仍归属此会话的设置并归档停止服务的记录；其他软件当前入口保持原样。';Backup=''}
             }
             'align-environment'{
                 Assert-NetworkRepairCurrent $Revision

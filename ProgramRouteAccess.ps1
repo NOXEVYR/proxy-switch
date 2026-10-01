@@ -24,7 +24,9 @@ function Get-ProgramRouteAccessReadiness([string]$GatewayKey,[switch]$AllowBlock
     $owned=Read-RuleMaintenanceJson (Read-RuleMaintenanceFile (Join-Path $script:DataRoot 'gateway\process.json')) $null
     $listener=Get-Listener $profile -TcpRows $tcp.Rows
     if(-not $owned -or -not $owned.coreStartTicks -or $owned.supervisor -ne $session.Session.SupervisorPID -or [string]$owned.supervisorStartTicks -cne [string]$session.Session.SupervisorStart -or -not $listener -or $listener.PID -ne $owned.core -or -not (Test-SessionProcess $owned.core $owned.coreStartTicks)){throw '入口不是当前会话的已核验内核，未接回入口。'}
-    if(-not (Test-SameRecoveryEndpoint $session.Session.TargetSystem.Server (Get-EndpointAddress $profile))){throw '当前恢复记录与流向入口不一致，未接回入口。'}
+    $ownedEndpoint=$session.Session.TargetSystem.Server
+    if($session.Session.PreserveWindowsSettings -eq $true){$ownedEndpoint=$session.Session.OwnGatewayEndpoint}
+    if(-not (Test-SameRecoveryEndpoint $ownedEndpoint (Get-EndpointAddress $profile))){throw '当前恢复记录与流向入口不一致，未接回入口。'}
     if(-not (Test-GatewayRecoveryGrace $session.Session 0)){throw '流向服务心跳过期或未就绪，未接回入口。'}
     $life=Get-GatewayLifecycle
     if($life.phase -notin @('ready','degraded')){throw '流向服务正在恢复或停止，未接回入口。'}
@@ -129,6 +131,7 @@ function New-ProgramRouteAccessSession($Session,$BeforeSystem,$BeforeEnv,$Target
         $values[$name]=$(if($owned){$Session.BeforeEnv.$name}else{$BeforeEnv.$name})
     }
     $next.BeforeEnv=[pscustomobject]$values;$next.TargetSystem=Copy-RoutingSnapshot $TargetSystem;$next.TargetEnv=Copy-RoutingSnapshot $TargetEnv
+    if($Session.PreserveWindowsSettings -eq $true){$next.PreserveWindowsSettings=$false;$next.BeforeSystem=Copy-RoutingSnapshot $BeforeSystem;$next.BeforeEnv=Copy-RoutingSnapshot $BeforeEnv}
     $next
 }
 function Set-ProgramRouteAccess($Plan,[switch]$Confirmed) {

@@ -86,8 +86,9 @@ function Read-FixtureStatus($Session){
     $path=Join-Path $Session.Directory 'status.json'
     if(-not [IO.File]::Exists($path)){return}
     for($attempt=0;$attempt -lt 6;$attempt++){
-        try{return (Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json)}
+        try{return ([IO.File]::ReadAllText($path,[Text.Encoding]::UTF8)|ConvertFrom-Json)}
         catch [IO.IOException]{
+            if(($_.Exception.HResult -band 0xffff) -eq 2){return}
             # Concurrent atomic status replacement can briefly deny the reader.
             # Retry sharing/lock violations for at most 125 ms; all other failures
             # and invalid JSON still fail the test. The 20-second wait stays unchanged.
@@ -138,7 +139,7 @@ try{
     Check ((Get-Content (Join-Path $dead.Data 'system.json') -Raw|ConvertFrom-Json).Flags -eq 3) 'Real guard detects exact monitor death and restores without waiting for another Windows login'
     Check ((Read-FixtureStatus $dead).LaunchOutcome -eq 'started') 'Crash recovery preserves successful launch evidence independently from restoration'
 
-    $hung=New-FixtureSession 'hung' 4;[IO.File]::WriteAllText((Join-Path $hung.Data 'hang'),'hang');$hung=Start-FixtureMonitor $hung;$sessions+=@($hung)
+    $hung=New-FixtureSession 'hung' 8;[IO.File]::WriteAllText((Join-Path $hung.Data 'hang'),'hang');$hung=Start-FixtureMonitor $hung;$sessions+=@($hung)
     Wait-Condition {[IO.File]::Exists((Join-Path $hung.Data 'hung'))} 'Hanging monitor fixture did not pause'
     Wait-Condition {(Read-FixtureStatus $hung).RestoreOutcome -eq 'restored'} 'Guard could not restore while the monitor remained alive'
     Check (-not $hung.Process.HasExited -and (Get-Content (Join-Path $hung.Data 'system.json') -Raw|ConvertFrom-Json).Flags -eq 3) 'Deadline guard restores even when the live monitor is stalled, without killing it or taking its long-lived mutex'
