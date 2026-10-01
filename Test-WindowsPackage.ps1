@@ -52,7 +52,13 @@ Check ($value.Listeners.Count -eq 1 -and $value.Listeners[0].Key -eq 'qa') 'EXE 
 $diagnosed=Invoke-Fixture ('--network-diagnostic --data-directory '+$quotedData)
 Check ($diagnosed.Code -eq 0) ('Packaged network diagnosis failed: '+$diagnosed.Error)
 $diagnosis=$diagnosed.Out|ConvertFrom-Json
-Check ($diagnosis.Version -ceq $productVersion -and $diagnosis.Endpoints.Count -eq 1 -and $diagnosis.Endpoints[0].Key -eq 'qa') 'Packaged diagnosis uses the explicit isolated settings directory and current version.'
+# Diagnosis also observes real user environment endpoints without writing them.
+# Those observations must not be mistaken for profiles loaded from another directory.
+$configuredDiagnosis=@($diagnosis.Endpoints|Where-Object {$_.Key -notlike 'environment:*'})
+$environmentDiagnosis=@($diagnosis.Endpoints|Where-Object {$_.Key -like 'environment:*'})
+$invalidEnvironment=@($environmentDiagnosis|Where-Object {$_.Key -cnotin @('environment:HTTP_PROXY','environment:HTTPS_PROXY','environment:ALL_PROXY')})
+Check ($diagnosis.Version -ceq $productVersion -and $configuredDiagnosis.Count -eq 1 -and $configuredDiagnosis[0].Key -ceq 'qa' -and $configuredDiagnosis[0].Port -eq 18123) ('Packaged diagnosis uses the explicit isolated settings directory and current version. Product='+$productVersion+'; diagnosis='+$diagnosis.Version+'; profile keys='+(@($configuredDiagnosis|ForEach-Object Key)-join ','))
+Check ($invalidEnvironment.Count -eq 0 -and @($environmentDiagnosis.Key|Select-Object -Unique).Count -eq $environmentDiagnosis.Count) 'Diagnosis contains unknown or duplicate user environment endpoint observations.'
 Check (-not (Test-Path -LiteralPath (Join-Path $qaRoot 'wrong environment\config.json'))) 'Package wrote to the inherited environment directory.'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -Path (Join-Path $relocated 'app\DesktopBranding.cs')

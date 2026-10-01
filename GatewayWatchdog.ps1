@@ -2,8 +2,27 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'ProxyBackend.ps1') -DataDirectory $DataDirectory
 $path=Get-IndependentSessionPath
-if(-not (Test-Path -LiteralPath $path)){return}
-$session=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+function Read-WatchdogSession([string]$Path) {
+    # An exclusive journal claim is a temporary unknown, never proof of exit.
+    for($readAttempt=0;$readAttempt -lt 3;$readAttempt++){
+        try{
+            $value=[IO.File]::ReadAllText($Path,[Text.Encoding]::UTF8) | ConvertFrom-Json
+            if(-not $value.Started -or -not $value.OwnerPID -or -not $value.OwnerStart -or -not $value.TargetSystem){throw 'Incomplete session'}
+            return [pscustomobject]@{State='Ready';Session=$value}
+        }catch [IO.FileNotFoundException]{return [pscustomobject]@{State='Missing';Session=$null}}
+        catch [IO.DirectoryNotFoundException]{return [pscustomobject]@{State='Missing';Session=$null}}
+        catch{if($readAttempt -lt 2){Start-Sleep -Milliseconds 150}}
+    }
+    [pscustomobject]@{State='Unknown';Session=$null}
+}
+$readWarning=$false
+while($true){
+    $reading=Read-WatchdogSession $path
+    if($reading.State -eq 'Missing'){return}
+    if($reading.State -eq 'Ready'){$session=$reading.Session;break}
+    if(-not $readWarning){Write-LifecycleEvent 'watchdog-session-pending' 'journal-unavailable-unknown';$readWarning=$true}
+    Start-Sleep -Milliseconds 500
+}
 if($RecoverOnly){
     # A delayed next-logon recovery must not terminate a fresh, live UI session.
     for($attempt=1;$attempt -le 3;$attempt++){
@@ -18,9 +37,16 @@ if($RecoverOnly){
 }
 Write-LocalJson (Join-Path $script:DataRoot 'gateway\watchdog-ready.json') ([pscustomobject]@{PID=$PID;StartTicks=(Get-ProcessStartTicks $PID);Session=$session.Started})
 $misses=0;$restoreAttempts=0;$missingSince=$null
-while(Test-Path -LiteralPath $path){
-    $current=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+while($true){
+    $reading=Read-WatchdogSession $path
+    if($reading.State -eq 'Missing'){return}
+    if($reading.State -eq 'Unknown'){
+        if(-not $readWarning){Write-LifecycleEvent 'watchdog-session-pending' 'journal-unavailable-unknown';$readWarning=$true}
+        Start-Sleep -Milliseconds 500;continue
+    }
+    $current=$reading.Session
     if($current.Started -ne $session.Started){return}
+    $session=$current;$readWarning=$false
     # Failure to read process identity is not proof that the UI has exited.
     $alive=(Get-RecoveryOwnerState $session) -ne 'stopped'
     $listener=Test-RecoveryEndpoint $session.TargetSystem.Server

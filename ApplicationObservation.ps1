@@ -30,6 +30,47 @@ function Test-ObservationLoopback([string]$Address) {
     if($ip.IsIPv4MappedToIPv6){$ip=$ip.MapToIPv4()}
     [Net.IPAddress]::IsLoopback($ip)
 }
+# Configured system ingress is separate from observed program traffic. A PAC,
+# mixed manual list or unavailable read cannot establish whether a request enters
+# the engine. This helper never probes a port or changes Windows settings.
+function Get-ProgramEntryObservation($SystemSnapshot,$GatewayProfile,[bool]$Available=$true) {
+    $state='Unknown';$reason='entry-observation-unavailable';$port=$null
+    if($GatewayProfile -and $GatewayProfile.Port){$port=[int]$GatewayProfile.Port}
+    if($Available -and $SystemSnapshot -and $null -ne $SystemSnapshot.PSObject.Properties['Flags'] -and $GatewayProfile -and $port -ge 1 -and $port -le 65535){
+        $flags=[int]$SystemSnapshot.Flags
+        if($flags -band 12){$reason='automatic-proxy-unknown'}
+        elseif(-not ($flags -band 2)){$state='Bypassed';$reason='system-direct'}
+        else{
+            $server=[string]$SystemSnapshot.Server;$endpointMatches=@();$valid=$true;$protocols=@{}
+            $parts=@($server.Trim() -split '[;\s]+'|Where-Object {$_})
+            foreach($part in $parts){
+                $protocol='';$endpoint=$part
+                if($part -match '^([a-z]+)='){$protocol=$Matches[1].ToLowerInvariant();$endpoint=$part.Substring($Matches[0].Length)}
+                if($protocol -and $protocol -notin @('http','https','socks')){$valid=$false;break}
+                if($protocols.ContainsKey($protocol)){$valid=$false;break};$protocols[$protocol]=$true
+                if($endpoint -notmatch '^[a-z][a-z0-9+.-]*://'){$endpoint='http://'+$endpoint}
+                try{
+                    $uri=[uri]$endpoint
+                    if(-not $uri.IsAbsoluteUri -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -notin @('','/') -or $uri.Scheme -notin @('http','https','socks','socks4','socks5','socks5h') -or $uri.Port -lt 1 -or $uri.Port -gt 65535){$valid=$false;break}
+                    # Only explicit endpoint ports identify the current configured listener.
+                    if($endpoint -notmatch '://(?:\[[^\]]+\]|[^/:]+):[0-9]+/?$'){$valid=$false;break}
+                    $hostName=$uri.Host.Trim('[',']');$gatewayHost=[string]$GatewayProfile.Host
+                    $local=($hostName -ieq 'localhost' -or (Test-ObservationLoopback $hostName))
+                    $gatewayLocal=($gatewayHost -ieq 'localhost' -or (Test-ObservationLoopback $gatewayHost))
+                    $sameHost=($local -and $gatewayLocal) -or ($hostName -ieq $gatewayHost) -or (Test-SameIpAddress $hostName $gatewayHost)
+                    $endpointMatches+=($sameHost -and $uri.Port -eq $port)
+                }catch{$valid=$false;break}
+            }
+            $complete=($parts.Count -eq 1 -and $protocols.ContainsKey('')) -or ($protocols.ContainsKey('http') -and $protocols.ContainsKey('https') -and -not $protocols.ContainsKey(''))
+            if($valid -and $complete -and $endpointMatches.Count){
+                if(-not @($endpointMatches|Where-Object {-not $_}).Count){$state='Connected';$reason='system-points-to-engine'}
+                elseif(-not @($endpointMatches|Where-Object {$_}).Count){$state='Bypassed';$reason='system-points-elsewhere'}
+                else{$reason='mixed-system-ingress'}
+            }else{$reason='complex-system-ingress'}
+        }
+    }
+    [pscustomobject]@{SystemEntryState=$state;Available=($state -ne 'Unknown');GatewayPort=$port;ReasonCode=$reason;ObservedAt=[DateTimeOffset]::UtcNow.ToString('o')}
+}
 function Get-ObservationLocalPeer($Socket,$TcpRows,$FamilyIds,$ById,$VerifiedFamilyIds,$ManagedIngresses) {
     # Loopback is not itself proof of IPC: require the unique reversed four-tuple,
     # a current owner, and either one PID or a currently verified family relation.
@@ -59,7 +100,11 @@ function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[st
         $total++
         # Match each socket's own remote endpoint. LocalPort alone is not a unique socket key.
         $entry=Get-ConnectionProfile $c;$route=$null
-        $owned=@($ManagedIngresses|Where-Object {$_ -and [int]$_.port -eq [int]$c.RemotePort -and $c.RemoteAddress -in @('127.0.0.1','::1','::ffff:127.0.0.1')})
+        if(-not $entry -and (Test-ObservationLoopback $c.RemoteAddress)){
+            $localProfiles=@(Get-ProfileKeys|ForEach-Object {Get-Profile $_}|Where-Object {$_.Port -eq [int]$c.RemotePort -and ($_.Host -ieq 'localhost' -or (Test-ObservationLoopback $_.Host))})
+            if($localProfiles.Count -eq 1){$entry=[string]$localProfiles[0].Key}
+        }
+        $owned=@($ManagedIngresses|Where-Object {$_ -and [int]$_.port -eq [int]$c.RemotePort -and (Test-ObservationLoopback $c.RemoteAddress)})
         $ingress=$null;if($owned.Count -eq 1){$ingress=$owned[0]}
         $processPath='';if($ById.ContainsKey([int]$c.OwningProcess)){$processPath=[string]$ById[[int]$c.OwningProcess].Path}
         $kind='Outside';$entryName='入口外（接管未知）';$entryId=''
@@ -137,7 +182,7 @@ function Get-ApplicationConnectionEvidence($Family,$TcpRows,$CoreConnections,[st
     elseif($pending){$state='Connecting'}
     [pscustomobject]@{Counts=$counts;Outside=$outside;OutsidePending=$outsidePending;LocalUnknown=$localUnknown;LocalInternal=$localInternal;GatewayUnknown=$unknown;Pending=$pending;PendingEndpoints=$pendingEndpoints;ChildPending=$childPending;ChildProxyObserved=$childObserved;Total=$total;ManagedObserved=$managedObserved;ManagedPending=$managedPending;PolicyMismatch=$policyMismatch;PolicyUnknown=$policyUnknown;ObservedIngressIds=@($ingressIds.Keys);State=$state;Actual=($actual -join '，');Available=$TcpAvailable;Layer='TCP';ConnectionDetails=$details.ToArray();ObservedAt=$observedAt;AuthenticationVerified=$false}
 }
-function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launch,$Identity,[bool]$ProcessesAvailable=$true,$FamilySnapshot=$null) {
+function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launch,$Identity,[bool]$ProcessesAvailable=$true,$FamilySnapshot=$null,$EntryObservation=$null) {
     $ids=@($Family|ForEach-Object Id);$children=@(Get-ApplicationChildProcesses $Family $App.Path|ForEach-Object ProcessName|Select-Object -Unique)
     $policy='Follow';$mode='observe';$ruleLoaded=$false;$status='未设专用规则 · 仅观察实际 TCP 连接'
     if($Rule){$policy=$Rule.route;$mode='engine';if($Rule.managed){$mode='managed'};$ruleLoaded=$Rule.loaded -eq $true}
@@ -149,6 +194,20 @@ function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launc
     elseif(-not $ids.Count){
         if(-not $pathExists){$actual='程序路径已失效';$observation='Missing'}else{$actual='程序未运行';$observation='NotRunning'}
     }elseif(-not $actual){$actual='运行中 · 未观察到 TCP 连接';$observation='Idle'}
+    $controllerDetails=@($Evidence.ConnectionDetails|Where-Object {$_ -and $_.EvidenceSource -eq 'Controller' -and $_.State -eq 'Established' -and $_.ActualRoute -notin @('Unknown','Blocked','LocalInternal')})
+    $controllerCounts=@{};foreach($detail in $controllerDetails){if(-not $controllerCounts.ContainsKey($detail.ActualRoute)){$controllerCounts[$detail.ActualRoute]=0};$controllerCounts[$detail.ActualRoute]++}
+    $entryState='Unknown';if($EntryObservation -and $EntryObservation.Available -eq $true){$entryState=[string]$EntryObservation.SystemEntryState}
+    $programEntryState='Unknown';$needsEntryConnection=$false
+    if(-not $ProcessesAvailable -or -not $Evidence.Available){$programEntryState='Unknown'}
+    elseif(-not $ids.Count){$programEntryState='NotRunning'}
+    elseif($controllerDetails.Count){
+        $programEntryState='Observed'
+        if($Evidence.Outside -or $Evidence.LocalUnknown -or $Evidence.GatewayUnknown -or @($Evidence.ConnectionDetails|Where-Object {$_.IngressKind -eq 'Proxy'}).Count){$programEntryState='Partial'}
+    }
+    elseif(@($Evidence.ConnectionDetails|Where-Object {$_.IngressKind -in @('Gateway','Managed','Tun')}).Count){$programEntryState='WaitingConnection'}
+    elseif($Evidence.LocalUnknown -or $Evidence.Outside){$programEntryState='Unknown'}
+    elseif($mode -eq 'engine' -and $entryState -eq 'Bypassed'){$programEntryState='NeedsEntry';$needsEntryConnection=$true}
+    elseif($entryState -eq 'Connected'){$programEntryState='WaitingConnection'}
     if($mode -eq 'managed'){
         $currentIngressObserved=$Evidence.ManagedObserved -gt 0 -and -not @($Evidence.ObservedIngressIds|Where-Object {$_ -ne $Rule.id}).Count
         $session=$false;if(-not $repair){$session=Test-ManagedProgramSession $App.Path $Family $policy}
@@ -174,12 +233,17 @@ function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launc
             $status='规则已载入 · 等待实际连接'
             $wanted=$policy;if($Rule.effectiveRoute){$wanted=$Rule.effectiveRoute}
             if($Evidence.Outside -or $Evidence.LocalUnknown -or $Evidence.GatewayUnknown){$status='规则已载入 · 存在未确认接管的连接'}
+            elseif(@($Evidence.ConnectionDetails|Where-Object {$_.IngressKind -eq 'Proxy'}).Count){$status='规则已保存 · 存在绕过分流引擎的代理连接'}
             elseif($Evidence.Pending){$status='规则已载入 · TCP 正在建立连接'}
             elseif(@($Evidence.Counts.Keys|Where-Object {$_ -ne $wanted}).Count){$status='规则已载入 · 仍有旧线路连接，可预览重连'}
-            elseif($Evidence.Counts.ContainsKey($wanted)){$loaded=$true;$status='已观察到指定线路连接';if($wanted -ne $policy){$status='已自动接替到 '+(Get-RouteName $wanted)}}
+            elseif($controllerCounts.ContainsKey($wanted)){$loaded=$true;$status='已观察到指定线路连接';if($wanted -ne $policy){$status='已自动接替到 '+(Get-RouteName $wanted)}}
         }
         if(-not (Test-ObservationFlag $Core 'connectionsAvailable' ([bool]$Core.available)) -and $ruleLoaded){$loaded=$false;$status='规则已载入 · 引擎连接读取失败，出口未知'}
         if(-not (Test-ObservationFlag $Core 'proxiesAvailable' $true) -and $ruleLoaded){$loaded=$false;$status='规则已载入 · 当前出口读取失败，出口未知'}
+        if($needsEntryConnection -and $ruleLoaded -and (Test-ObservationFlag $Core 'rulesAvailable' ([bool]$Core.available))){
+            $loaded=$false;$status='线路已保存，但系统请求未接入分流入口 · 请接入流向后完整退出并重开程序'
+            $needsRelaunch=$ids.Count -gt 0
+        }
     }elseif($mode -eq 'launch'){
         $status='启动代理已保存 · 下次从代理入口打开生效'
         if($ids.Count){$status='未确认使用代理启动入口 · 实际连接见左栏'}
@@ -216,5 +280,5 @@ function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launc
     $policyName=Get-RouteName $policy;if($mode -eq 'observe'){$policyName='未单独指定'}
     $reason='';if($Identity){$reason=[string]$Identity.Reason}
     $canRepair=$repair -and [bool]$Identity.CanRepair -and -not $App.Conflict
-    [pscustomobject]@{Name=$App.Name;Path=$App.Path;SavedPath=$App.SavedPath;RowKey=$App.RowKey;Policy=$policy;PolicyName=$policyName;Mode=$mode;Managed=($mode -eq 'managed');NeedsRelaunch=$needsRelaunch;FamilyRetained=($familyRetained.Count -gt 0);FamilyUnknownIds=$familyUnknown;Loaded=$loaded;RuleLoaded=$ruleLoaded;Actual=$actual;Status=$status;PIDs=($ids -join ',');ChildNames=($children -join '、');OutsidePending=$Evidence.OutsidePending;Pending=$Evidence.Pending;ChildPending=$Evidence.ChildPending;LocalInternal=$Evidence.LocalInternal;ConnectionDetails=@($Evidence.ConnectionDetails|Where-Object {$_});ObservedAt=$Evidence.ObservedAt;ObservationState=$observation;IdentityReason=$reason;RequiresRepair=$repair;CanRepair=$canRepair;Identity=$Identity.Identity;CanLaunch=($mode -in @('launch','managed') -and -not $repair);HasSavedRule=($mode -ne 'observe');AuthenticationVerified=$false;Coverage='TCP Established/SynSent；连接证据不代表代理握手、目标网站可达或账号登录成功。入口外 TCP 的接管状态未知，不自动认定为直接出站。短时连接、UDP/QUIC 与独立隧道可能不在此快照中'}
+    [pscustomobject]@{Name=$App.Name;Path=$App.Path;SavedPath=$App.SavedPath;RowKey=$App.RowKey;Policy=$policy;PolicyName=$policyName;Mode=$mode;ProgramEntryState=$programEntryState;NeedsEntryConnection=$needsEntryConnection;EntryObservation=$EntryObservation;ControllerObservedCount=$controllerDetails.Count;Managed=($mode -eq 'managed');NeedsRelaunch=$needsRelaunch;FamilyRetained=($familyRetained.Count -gt 0);FamilyUnknownIds=$familyUnknown;Loaded=$loaded;RuleLoaded=$ruleLoaded;Actual=$actual;Status=$status;PIDs=($ids -join ',');ChildNames=($children -join '、');OutsidePending=$Evidence.OutsidePending;Pending=$Evidence.Pending;ChildPending=$Evidence.ChildPending;LocalInternal=$Evidence.LocalInternal;ConnectionDetails=@($Evidence.ConnectionDetails|Where-Object {$_});ObservedAt=$Evidence.ObservedAt;ObservationState=$observation;IdentityReason=$reason;RequiresRepair=$repair;CanRepair=$canRepair;Identity=$Identity.Identity;CanLaunch=($mode -in @('launch','managed') -and -not $repair);HasSavedRule=($mode -ne 'observe');AuthenticationVerified=$false;Coverage='TCP Established/SynSent；连接证据不代表代理握手、目标网站可达或账号登录成功。入口外 TCP 的接管状态未知，不自动认定为直接出站。短时连接、UDP/QUIC 与独立隧道可能不在此快照中'}
 }
