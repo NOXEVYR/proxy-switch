@@ -9,13 +9,13 @@ $config=[pscustomobject]@{Version=3;Profiles=@(@{Id='up';Name='Up';Host='127.0.0
 Write-LocalJson $script:ConfigPath $config
 $script:sys=[pscustomobject]@{Flags=3;Server='127.0.0.1:19001';Bypass='localhost'}
 $script:envs=[pscustomobject]@{HTTP_PROXY='http://127.0.0.1:18790';HTTPS_PROXY='http://127.0.0.1:18790';ALL_PROXY='http://127.0.0.1:18790';NO_PROXY='custom.local'}
-$script:ready=@(19001);$script:available=$true;$script:writes=0;$script:usable=$true;$script:probes=0
+$script:ready=@(19001);$script:unreadable=@();$script:available=$true;$script:writes=0;$script:usable=$true;$script:probes=0
 function Get-SystemSnapshot {$script:sys}
 function Get-UserProxyEnv {$script:envs}
 function Set-SystemSnapshot($Value){$script:writes++;$script:sys=$Value}
 function Set-UserProxyEnv($Value){$script:writes++;$script:envs=$Value}
 function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$script:available;Rows=@($script:ready|ForEach-Object {[pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=$_;OwningProcess=$PID}})}}
-function Get-Listener {param($Profile,$TcpRows);if($Profile.Port -in $script:ready){[pscustomobject]@{PID=1}}}
+function Get-Listener {param($Profile,$TcpRows);if($Profile.Port -in $script:ready -and $Profile.Port -notin $script:unreadable){[pscustomobject]@{PID=1}}}
 function Test-ProxyRoute {param($Key,[switch]$Fast);[pscustomobject]@{Usable=$script:usable}}
 function Test-RecoveryEndpoint($Endpoint){$Endpoint -match ':19001$'}
 function Get-ItemPropertyValue {param($LiteralPath,$Name,$ErrorAction);throw 'No isolated RunOnce registration'}
@@ -44,6 +44,18 @@ Check (Test-Path $fixed.Backup) 'repair creates a recoverable local backup'
 Check ($fixed.Diagnosis.Issues.Count -eq 0 -and -not $fixed.Diagnosis.RepairAction) 'post-repair report clears resolved local findings'
 Check ($script:sys.Server -eq '127.0.0.1:19001') 'alignment preserves the system endpoint'
 Check (-not (Test-Path $script:StatePath)) 'environment-only repair does not invent a selection record on a new installation'
+$script:unreadable=@(19001);$d=Get-NetworkDiagnosis
+Check ($null -eq ($d.Endpoints|Where-Object Key -eq 'up').Ready -and $d.Issues.Code -contains 'system-entry-unknown' -and $d.Issues.Code -notcontains 'system-entry-down' -and $d.Issues.Code -notcontains 'environment-entry-down' -and -not $d.RepairAction) 'a present listener with unreadable ownership stays unknown in configured and environment diagnosis'
+$script:unreadable=@()
+foreach($bypass in @('*','custom.local, *,localhost','0.0.0.0/0','::/0')){
+ $script:envs.NO_PROXY=$bypass;$d=Get-NetworkDiagnosis
+ Check ($d.Issues.Code -contains 'environment-bypass-all' -and $d.Message -match 'Go' -and $d.Message -match 'curl' -and $script:envs.NO_PROXY -ceq $bypass) 'broad bypass warns about client parsing differences without changing its value'
+ $newTarget=New-EnvTarget $script:envs 'up'
+ Check (Test-BroadProxyBypass $newTarget.NO_PROXY) 'ordinary proxy selection preserves the broad user bypass rather than silently deleting it'
+}
+$script:envs.NO_PROXY='*.example.invalid,localhost'
+Check ((Get-NetworkDiagnosis).Issues.Code -notcontains 'environment-bypass-all') 'a domain wildcard is not misreported as global bypass'
+$script:envs.NO_PROXY='changed,localhost,127.0.0.1,::1'
 $savedEnv=$script:envs|ConvertTo-Json|ConvertFrom-Json
 $targetEnv=New-EnvTarget $savedEnv 'up'
 $beforeSystem=$script:sys|ConvertTo-Json|ConvertFrom-Json

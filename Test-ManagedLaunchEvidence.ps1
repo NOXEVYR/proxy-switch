@@ -6,10 +6,13 @@ function Check($Value,[string]$Message){if(-not $Value){throw $Message};$script:
 function Use-ChangeLock([scriptblock]$Action){& $Action}
 function Set-SystemSnapshot {throw 'Real Windows writes forbidden'}
 function Set-UserProxyEnv {throw 'Real environment writes forbidden'}
-function Invoke-AppRouter {throw 'No real engine is needed for launch evidence'}
+function Invoke-AppRouter {Ensure-ManagedGateway}
+function Invoke-ManagedIngressTransportProbe {$true}
+$realWait=${function:Wait-ManagedProgramIngressReady}
+function Wait-ManagedProgramIngressReady($Ingress,$Cancellation){& $realWait $Ingress -TimeoutMilliseconds 150 -Cancellation $Cancellation}
 function Get-ProcessInventory {$script:InventoryCalls++;if($script:InventoryCalls -gt 1){throw 'Global process inventory is unavailable after launch'};@()}
 function Get-ManagedProgramIngress([string]$Executable){if($Executable -in $script:FixtureRoots){[pscustomobject]@{id=('a'*32);path=$Executable;port=19998;route='Direct'}}}
-function Ensure-ManagedGateway {[pscustomobject]@{available=$true;programIngresses=@([pscustomobject]@{id=('a'*32);ready=$script:Ready;loaded=$script:Ready;effectiveRoute=$script:EffectiveRoute});siteRules=@($script:SiteRules);siteRulesLoaded=$script:SiteRulesLoaded}}
+function Ensure-ManagedGateway {[pscustomobject]@{available=$true;rulesAvailable=$true;programIngresses=@([pscustomobject]@{id=('a'*32);ready=$script:Ready;loaded=$script:Ready;effectiveRoute=$script:EffectiveRoute});siteRules=@($script:SiteRules);siteRulesLoaded=$script:SiteRulesLoaded}}
 $baseWriter=${function:Write-LocalJson}
 function Write-LocalJson($Path,$Value){if($script:FailRecord -and [IO.Path]::GetFileName($Path) -eq 'program-launches.json'){throw 'Fixture launch evidence disk write failure'};& $baseWriter $Path $Value}
 $script:Profiles=ConvertTo-ValidProfileSettings ([pscustomobject]@{Version=3;Profiles=@();Routing=@{Adapter='none';ProfileId=''}})
@@ -55,20 +58,20 @@ try{
     Check ($message -match '尚未就绪' -and -not (Test-Path -LiteralPath (Join-Path $directories[2] 'root-starts.txt'))) 'Gateway readiness failure occurs before Process.Start and leaves target unopened'
     $script:Ready=$true;$script:EffectiveRoute='Blocked'
     foreach($scenario in @(@{Index=3;Scope=('a'*32)},@{Index=4;Scope='global'})){
-        $script:InventoryCalls=0;$script:SiteRules=@([pscustomobject]@{scope=$scenario.Scope;route='Direct';loaded=$true})
+        $script:InventoryCalls=0;$script:SiteRules=@([pscustomobject]@{scope=$scenario.Scope;domain='example.com';type='suffix';route='Direct';loaded=$true})
         $result=Start-ManagedProgram $script:FixtureRoots[$scenario.Index];Wait-FixtureWorker $directories[$scenario.Index]
         Check ($result.PID -gt 0 -and $result.LimitedDirect -and $result.Message -match '默认代理出口已暂停' -and $result.Message -match '仅匹配直连网站例外' -and [IO.File]::ReadAllLines((Join-Path $directories[$scenario.Index] 'root-starts.txt')).Count -eq 1) ('Blocked default permits one real launch with applicable '+$scenario.Scope+' Direct rule and explicit limited-access notice')
     }
-    $script:InventoryCalls=0;$script:SiteRules=@([pscustomobject]@{scope=('b'*32);route='Direct';loaded=$true});$message=''
+    $script:InventoryCalls=0;$script:SiteRules=@([pscustomobject]@{scope=('b'*32);domain='example.com';type='suffix';route='Direct';loaded=$true});$message=''
     try{Start-ManagedProgram $script:FixtureRoots[5]|Out-Null}catch{$message=$_.Exception.Message}
     Check ($message -match '没有适用于此程序' -and -not (Test-Path -LiteralPath (Join-Path $directories[5] 'root-starts.txt'))) 'Blocked default cannot borrow another program entrance Direct exception to launch'
-    $script:InventoryCalls=0;$script:EffectiveRoute='Unknown';$script:SiteRules=@([pscustomobject]@{scope='global';route='Direct';loaded=$true});$message=''
+    $script:InventoryCalls=0;$script:EffectiveRoute='Unknown';$script:SiteRules=@([pscustomobject]@{scope='global';domain='example.com';type='suffix';route='Direct';loaded=$true});$message=''
     try{Start-ManagedProgram $script:FixtureRoots[6]|Out-Null}catch{$message=$_.Exception.Message}
     Check ($message -match '尚未就绪' -and -not (Test-Path -LiteralPath (Join-Path $directories[6] 'root-starts.txt'))) 'Unknown route remains a launch refusal even with loaded global Direct exception'
     $script:InventoryCalls=0;$script:EffectiveRoute='Blocked';$script:SiteRulesLoaded=$false;$message=''
     try{Start-ManagedProgram $script:FixtureRoots[7]|Out-Null}catch{$message=$_.Exception.Message}
     Check ($message -match '没有适用于此程序' -and -not (Test-Path -LiteralPath (Join-Path $directories[7] 'root-starts.txt'))) 'An unloaded overall website policy cannot authorize limited Direct launch'
-    $script:InventoryCalls=0;$script:SiteRulesLoaded=$true;$script:SiteRules=@([pscustomobject]@{scope='global';route='Direct';loaded=$false});$message=''
+    $script:InventoryCalls=0;$script:SiteRulesLoaded=$true;$script:SiteRules=@([pscustomobject]@{scope='global';domain='example.com';type='suffix';route='Direct';loaded=$false});$message=''
     try{Start-ManagedProgram $script:FixtureRoots[8]|Out-Null}catch{$message=$_.Exception.Message}
     Check ($message -match '没有适用于此程序' -and -not (Test-Path -LiteralPath (Join-Path $directories[8] 'root-starts.txt'))) 'An unloaded Direct rule row cannot authorize limited launch'
 }finally{

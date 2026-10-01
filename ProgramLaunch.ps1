@@ -158,25 +158,28 @@ function Set-ProgramLaunchRoute([string]$Executable,[string]$Route) {
         [pscustomobject]@{Backup=$backup;Message=('已保存「'+[IO.Path]::GetFileNameWithoutExtension($Executable)+'」的目标「'+(Get-RouteName $Route)+'」，尚未验证生效。请保存任务并完整退出，再右键选择「按指定线路打开」。保存线路不会改写桌面入口；可在「启动方式」中自行设置。已有代理入口：'+"`r`n"+($shortcuts -join "`r`n")+"`r`n"+'其他入口（开始菜单、任务栏、Listary 等）未接入此启动设置，重复从那些入口重开不会应用这里保存的代理。');Shortcuts=$shortcuts}
     }
 }
-function Start-ManagedProgram([string]$Executable) {
+function Start-ManagedProgram([string]$Executable,$Cancellation=$null) {
     Use-ChangeLock {
     $ingress=Get-ManagedProgramIngress $Executable
     $entry=$ingress;if(-not $entry){$entry=Get-ProgramLaunchEntries|Where-Object {$_.path -ieq $Executable}|Select-Object -First 1}
     if(-not $entry){throw '此程序尚未配置启动代理，请先在管理器中指定线路。'}
     if(@(Get-ProgramFamily $Executable @(Get-ProcessInventory)).Count){throw '该程序仍在运行。请先保存任务并完整退出，再从这个入口打开，才能让界面和联网子进程同时使用新线路。没有结束现有进程。'}
+    if(Test-ManagedLaunchCancelled $Cancellation){throw '启动检查已取消，未启动程序。'}
     $limitedDirect=$false;$launchNotice=''
     if($ingress){
-        $live=Ensure-ManagedGateway
-        $ready=$live.programIngresses|Where-Object {$_.id -ceq $ingress.id}|Select-Object -First 1
-        if(-not $ready.loaded -or -not $ready.ready -or -not $ready.effectiveRoute -or $ready.effectiveRoute -eq 'Unknown'){throw '程序固定入口或出口尚未就绪，未启动程序。请打开流向切换到可用线路。'}
-        if($ready.effectiveRoute -eq 'Blocked'){
-            $directSites=@($live.siteRules|Where-Object {$_.loaded -eq $true -and $_.route -ceq 'Direct' -and ($_.scope -ceq 'global' -or $_.scope -ceq $ingress.id)})
-            if($live.siteRulesLoaded -ne $true -or -not $directSites.Count){throw '程序默认代理当前不可用，且没有适用于此程序的已加载直连网站例外；未启动程序。请先切换到可用线路。'}
+        Ensure-ManagedGateway|Out-Null
+        $ready=Wait-ManagedProgramIngressReady $ingress -Cancellation $Cancellation
+        if($ready.LimitedDirect){
             $limitedDirect=$true;$launchNotice=' 默认代理出口已暂停，仅匹配直连网站例外的请求可用；其他请求仍会失败，请切换到可用代理后重试。'
         }
     }else{
         $readyKey=$entry.route;if($readyKey -eq 'Follow'){$readyKey=Get-SystemKey (Get-SystemSnapshot)}
         Wait-ManagedProxyReady $readyKey
+    }
+    if(Test-ManagedLaunchCancelled $Cancellation){throw '启动检查已取消，未启动程序。'}
+    if($ingress){
+        $current=Get-ManagedProgramIngress $Executable
+        if(-not $current -or $current.id -cne $ingress.id -or $current.port -ne $ingress.port -or $current.route -cne $ingress.route){throw '启动检查期间程序线路或固定入口已改变，未启动程序。请刷新后重试。'}
     }
     $plan=Get-ProgramLaunchPlan $Executable $entry.route
     $psi=New-Object Diagnostics.ProcessStartInfo;$psi.FileName=$Executable;$psi.WorkingDirectory=[IO.Path]::GetDirectoryName($Executable)

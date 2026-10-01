@@ -29,6 +29,18 @@ function Get-DemoApps {
 '@
 $source=$source.Replace('if($Demo){Set-DemoCatalog}',$fixture)
 $checks=@'
+        function Assert-VisibleVisualControl($Control){
+            $scrollAncestors=@(for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){if($ancestor -is [Windows.Forms.ScrollableControl] -and $ancestor.AutoScroll){$ancestor}})
+            [array]::Reverse($scrollAncestors)
+            # An inner scroll can move the target within its outer viewport; settle both before checking visibility.
+            for($pass=0;$pass -lt 2;$pass++){foreach($ancestor in $scrollAncestors){$ancestor.ScrollControlIntoView($Control);$ancestor.PerformLayout();[Windows.Forms.Application]::DoEvents()}}
+            if(-not $Control.Visible -or $Control.Width -le 0 -or $Control.Height -le 0){throw ('Network action is not visible: '+$Control.Text)}
+            $screenRect=$Control.Parent.RectangleToScreen($Control.Bounds)
+            for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){
+                $visibleRect=$ancestor.RectangleToScreen($ancestor.ClientRectangle)
+                if(-not $visibleRect.Contains($screenRect)){throw ('Network action clipped by '+$ancestor.GetType().Name+': '+$Control.Text+' control '+$screenRect+' ancestor '+$visibleRect)}
+            }
+        }
         if($env:FLOW_VISUAL_SCALE){$factor=[single]::Parse($env:FLOW_VISUAL_SCALE,[Globalization.CultureInfo]::InvariantCulture);$form.Scale((New-Object Drawing.SizeF($factor,$factor)));$form.PerformLayout();[Windows.Forms.Application]::DoEvents()}
         if($liveList.Items.Count -ne 120){throw 'Large-list fixture missing.'}
         foreach($index in @(3,1,2,0)){
@@ -40,7 +52,14 @@ $checks=@'
         foreach($dimensions in @(@($visualMinimum.Width,$visualMinimum.Height),@([Math]::Max($visualDefault.Width,1420*$Scale),[Math]::Max($visualDefault.Height,900*$Scale)),@($visualDefault.Width,$visualDefault.Height))){
             $form.Size=New-Object Drawing.Size($dimensions[0],$dimensions[1]);$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
             $navigation[3].PerformClick();[Windows.Forms.Application]::DoEvents()
-            if($liveList.Columns[0].Width -lt 140 -or $undo.Right -gt $undo.Parent.ClientSize.Width -or $unify.Left -le $networkChoice.Right){throw 'Controls overlap or escape the resized window.'}
+            if($liveList.Columns[0].Width -lt 140){throw 'Application column is narrower than the readable minimum.'}
+            foreach($control in @($networkChoice,$unify,$undo)){Assert-VisibleVisualControl $control}
+            # Compare current rectangles in one screen coordinate system, including controls in different parents.
+            $choiceRect=$networkChoice.Parent.RectangleToScreen($networkChoice.Bounds)
+            $unifyRect=$unify.Parent.RectangleToScreen($unify.Bounds)
+            $undoRect=$undo.Parent.RectangleToScreen($undo.Bounds)
+            if($choiceRect.IntersectsWith($unifyRect) -or $choiceRect.IntersectsWith($undoRect) -or $unifyRect.IntersectsWith($undoRect)){throw 'Network choice and actions overlap.'}
+            if($choiceRect.Bottom -gt $unifyRect.Top -or $choiceRect.Bottom -gt $undoRect.Top -or $unifyRect.Top -ne $undoRect.Top -or $unifyRect.Bottom -ne $undoRect.Bottom -or $unifyRect.Right -gt $undoRect.Left -or $choiceRect.Left -ne $unifyRect.Left -or $choiceRect.Right -le $undoRect.Left){throw 'Network choice must span the first row above the two action buttons.'}
             if($liveList.Items.Count -ne 120){throw 'Resizing lost application rows.'}
             foreach($panel in $panels){if($panel.Bottom -gt $cards.ClientSize.Height){throw 'Summary card clipped'};foreach($label in $panel.Controls){if($label.Right -gt $panel.ClientSize.Width -or $label.Bottom -gt $panel.ClientSize.Height){throw 'Summary label clipped'}}}
             $navigation[0].PerformClick();[Windows.Forms.Application]::DoEvents()

@@ -6,8 +6,14 @@
 - 嵌套布局使用 Dock/TableLayout，避免 Scale 中临时窄宽度永久压缩按钮；透明绘制寻找非透明祖先背景。Test-UsabilityUI / VisualTheme / RoutingWorkbenchUI 覆盖实际窗口、菜单、帮助、1/1.25/1.5模拟缩放和小尺寸。
 - 代理编辑保存传入 Expected 配置，在写锁内核验；不覆盖另一实例的备用策略或入口。自有入口编辑不转换外部引擎，不丢失 Failover。
 - 任务卡使用 TaskGrid 最小行高和纵向滚动，不依赖操作系统允许加大窗口；列布局宽使用实际 ClientSize，禁止横滚。缩放回归同时放大显式字体，按钮测量共享 TextBounds，逐项滚动后保留祖先可见边界断言。
+- 主页使用 ScrollablePage，显式同步 DockFill 根控件 MinimumSize.Height 到 AutoScrollMinSize，不能依赖 WinForms 自动识别 DockFill 的滚动范围。New-Grid 高度 0 表示 AutoSize；操作栏可换行，标题按真实宽度增高。云端固定 1024×728 工作区也要运行两种字体/三档缩放。
 
 # 3.9.4 更新维护
+
+- 托管启动使用 Wait-ManagedProgramIngressReady 的共享绝对期限；读取新鲜监督器健康结果、核验所选程序的有效出口和固定入口实际请求，再末次复核。默认出口故障不阻止正常专线；Direct 与明确直连网站例外分开提示，不能把有限可达称为整体恢复。
+- 环境变量读取/端口诊断保留三态。系统直连时仅清理已确认死亡的简单本地用户变量；NO_PROXY 广泛绕过只提示不删除。事务、恢复与回滚调用 Set-UserProxyEnv 时传 ExpectedBefore，每个字段写入前核验，外部修改保留。不能声称 Windows 跨第三方读写完全原子化。
+- 停止自有内核前按语义核验主入口及程序入口引用，支持 localhost/IPv4/IPv6 回环和协议列表分隔；仍被外部设置引用时保留后台并拒绝停止。对照完成与更新安装共同使用 Test-CleanStartSessionFinished 验证恢复记录，而非仅凭 phase 字符串。
+- Test-ManagedLaunchReadiness 纳入 Test-All 与源码包；Test-ManagedSwitchChain 覆盖冷启动离线拒绝、默认故障专线正常、备用、明确直连及关闭自动备用，均使用真实隔离固定入口请求。
 
 - 更新仅从 NOXEVYR/proxy-switch 稳定 Release 获取绑定清单；保持运行时和安装布局不变，Range 失败不得下载整包兜底。后台最多 50 MiB 差异；安装总须明确操作。
 - 安装器通过独立 ShellExecute 启动，避免继承启动器管道而互等退出。进程核验复用 ProcessInventory 的有限查询，未知阻止替换，不强杀。

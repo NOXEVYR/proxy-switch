@@ -22,7 +22,7 @@ function Get-ClientWarnings {}
 function Get-OverrideWarnings {}
 function Get-LiveConnections {}
 function Set-SystemSnapshot($Value){$script:Writes++;$script:System=$Value;if($script:InjectSystem){$script:System=$script:Outside;$script:InjectSystem=$false}}
-function Set-UserProxyEnv($Value){$script:Writes++;$script:Environment=$Value;if($script:InjectEnv){$script:Environment=$script:OutsideEnv;$script:InjectEnv=$false}}
+function Set-UserProxyEnv($Value,$ExpectedBefore){$script:Writes++;$script:Environment=$Value;if($script:InjectEnv){$script:Environment=$script:OutsideEnv;$script:InjectEnv=$false}}
 function Save-Selection($Value){$script:Selection=$Value}
 function Save-Backup {'in-memory-backup'}
 function Set-RoutingSnapshot($Value){$script:Rules=$Value}

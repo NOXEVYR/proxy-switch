@@ -240,11 +240,18 @@ namespace FlowSwitch.UI
             try {
                 // Use the real client and clipped viewport, including native DPI and scrollbar metrics.
                 int available=Math.Max(1,Math.Min(ClientSize.Width,Parent==null?ClientSize.Width:Parent.ClientSize.Width)-2),used=0;
+                int[] desired=new int[Columns.Count]; bool changed=false;
                 for(int i=0;i<Columns.Count;i++) {
                     int width=i==Columns.Count-1?available-used:(int)Math.Floor(available*weights[i]);
-                    if(Columns[i].Width!=width)Columns[i].Width=width;
+                    desired[i]=width;changed|=Columns[i].Width!=width;
                     used+=width;
                 }
+                if(!changed)return;
+                // Native column setters synchronously repaint each intermediate layout.
+                // Batch only actual changes: unconditional EndUpdate on WM_PAINT would repaint forever.
+                BeginUpdate();
+                try {for(int i=0;i<Columns.Count;i++)if(Columns[i].Width!=desired[i])Columns[i].Width=desired[i];}
+                finally {EndUpdate();}
             } finally {sizing=false;}
         }
         protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);FitColumns();}

@@ -112,12 +112,29 @@ function Get-CleanStartSession {
     if([IO.File]::Exists($resultPath)){$status=Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8|ConvertFrom-Json}
     [pscustomobject]@{Id=$record.Id;Directory=$directory;Status=$status}
 }
+function Test-CleanStartSessionFinished($Session) {
+    if(-not $Session){return $true}
+    try {
+        $status=$Session.Status
+        if(-not $status -or $status.Phase -notin @('complete','failed','external-change','launch-failed','launch-unknown','cancelled','restored','completed')){return $false}
+        $outcome=[string]$status.RestoreOutcome
+        if($outcome -notin @('','not-needed','restored','direct-fallback','external-change')){return $false}
+        if(-not $Session.Directory){return $false}
+        $recovery=Join-Path $Session.Directory 'recovery.json'
+        if(-not [IO.File]::Exists($recovery)){return ($outcome -in @('','not-needed'))}
+        # A terminal UI message alone cannot prove that a temporary system change was restored.
+        # The worker writes this completion record under the settings ownership lock.
+        if($outcome -eq 'not-needed'){return $false}
+        $finished=Get-Content -LiteralPath (Join-Path $Session.Directory 'restore-result.json') -Raw -Encoding UTF8|ConvertFrom-Json
+        return ($finished.SessionId -ceq $Session.Id -and $finished.Outcome -in @('restored','direct-fallback','external-change') -and $null -ne $finished.System)
+    }catch{return $false}
+}
 function Start-ProgramCleanSession($Plan,[switch]$Confirmed) {
     if(-not $Confirmed){throw '请先确认干净启动或直连对照的范围。'}
     Use-ChangeLock {
         Assert-CleanStartPlan $Plan
         $previous=Get-CleanStartSession
-        if($previous -and (-not $previous.Status -or $previous.Status.Phase -notin @('complete','failed','external-change','launch-failed','launch-unknown','cancelled') -or $previous.Status.RestoreOutcome -in @('pending','failed'))){throw '已有启动对照尚未结束；请先结束并恢复原设置。'}
+        if(-not (Test-CleanStartSessionFinished $previous)){throw '已有启动对照尚未结束；请先结束并恢复原设置。'}
         $id=[Guid]::NewGuid().ToString('N');$directory=Join-Path $script:DataRoot ('clean-start\'+$id)
         [void][IO.Directory]::CreateDirectory($directory)
         $request=[pscustomobject]@{Version=1;Id=$id;Plan=$Plan;UserSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;DataDirectory=$script:DataRoot;CreatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()}

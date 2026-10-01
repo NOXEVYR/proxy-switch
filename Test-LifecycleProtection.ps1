@@ -20,6 +20,8 @@ Check (-not (Test-GatewayRecoveryGrace $session 3)) 'PID reuse cannot extend res
 $warnings=@(Get-EntryLifecycleWarnings $system $environment @([pscustomobject]@{Key='gateway';Ready=$false}))
 Check (($warnings -join ' ') -match '未监听.*仍指向') 'dead entry still referenced by Windows and environment is diagnosed'
 Check (($warnings -join ' ') -match '缓存.*完整重开') 'cached application proxy receives an actionable relaunch instruction'
+$warnings=@(Get-EntryLifecycleWarnings $system $environment @([pscustomobject]@{Key='gateway';Ready=$null}))
+Check (($warnings -join ' ') -notmatch '未监听') 'unknown listener ownership is never labeled as a closed entry'
 $script:life.phase='ready';$script:listenerReads=0;$script:statusReads=0
 function Get-Listener {param($Profile,[switch]$ProbeRemote);$script:listenerReads++;if($script:listenerReads -ge 3){[pscustomobject]@{PID=999}}}
 function Invoke-AppRouter($InputObject){$script:statusReads++;[pscustomobject]@{available=$true;defaultLoaded=$true;effectiveDefaultRoute='upstream'}}
@@ -32,6 +34,8 @@ $script:life.phase='failed';$failed=$false;try{Wait-ManagedProxyReady gateway 25
 Check $failed 'exhausted core restart rejects managed launch'
 $diag=ConvertTo-LoginDiagnostic $false http 7 0 0
 Check ($diag.Stage -eq 'local-entry' -and -not $diag.AuthenticationVerified) 'connection refusal is local entry failure, not Google authentication'
+$diag=ConvertTo-LoginDiagnostic $null http -1 0 0
+Check ($diag.Stage -eq 'local-entry-unknown' -and $null -eq $diag.LocalReady -and -not $diag.HttpsReachable) 'unknown local observation stays unknown in login diagnostics'
 $diag=ConvertTo-LoginDiagnostic $true http 56 502 0
 Check ($diag.Stage -eq 'proxy-handshake' -and -not $diag.HandshakeReady) 'listening but bad HTTP CONNECT is handshake failure'
 $diag=ConvertTo-LoginDiagnostic $true http 60 200 0
@@ -42,6 +46,10 @@ $diag=ConvertTo-LoginDiagnostic $true socks5 0 0 401
 Check ($diag.HttpsReachable -and -not $diag.AuthenticationVerified) 'SOCKS HTTPS 401 is reachable but authentication unverified'
 $diag=ConvertTo-LoginDiagnostic $true http -1 0 0
 Check (-not $diag.HttpsReachable) 'missing probe tool cannot report healthy'
+function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$false;Rows=@()}}
+function Start-HttpEndpointProbe {throw 'unknown local entry must not trigger an HTTPS probe'}
+$diag=Test-LoginChain 'gateway'
+Check ($diag.Stage -eq 'local-entry-unknown' -and $null -eq $diag.LocalReady) 'unavailable TCP collection rejects login probing without reporting a dead listener'
 Write-LifecycleEvent 'diagnostic' 'token=https://private.invalid'
 $log=Get-Content -LiteralPath (Join-Path $script:DataRoot 'gateway\lifecycle-session.jsonl') -Raw
 Check ($log -notmatch 'private.invalid|token=') 'lifecycle logger refuses unstructured private data'
