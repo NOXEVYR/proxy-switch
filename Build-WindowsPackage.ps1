@@ -8,13 +8,18 @@ if(Test-Path -LiteralPath $destinationPath){throw '输出目录已存在，请�
 $compiler=Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if(-not (Test-Path -LiteralPath $compiler)){throw '构建需要 Windows x64 与 .NET Framework C# 编译器；程序不会下载依赖。'}
 $runtime=@(
-    'ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1',
+    'UiGuidance.ps1','Updates.ps1','UpdateInstall.ps1','UpdateEngine.cjs','ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1',
     'ProcessInventory.ps1','ProxyDiscovery.ps1','RuntimeSupport.ps1','AppRouting.ps1','AppRouter.cjs','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','GatewayLock.ps1','config.defaults.json','Install-Shortcut.ps1',
     'assets/FlowSwitch.ico','vendor/js-yaml/package.json','vendor/js-yaml/LICENSE','vendor/js-yaml/dist/js-yaml.cjs.js'
 )
 foreach($name in ($runtime+@('Launcher.cs','Windows-QuickStart.txt','LICENSE','THIRD_PARTY_NOTICES.md'))){
     if(-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $name) -PathType Leaf)){throw ('缺少构建文件：'+$name)}
 }
+# Render documentation from the same version as the EXE and interface, before hashing it.
+$quickStartTemplate=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Windows-QuickStart.txt'))
+$versionPlaceholder='{{PRODUCT_VERSION}}'
+if(([regex]::Matches($quickStartTemplate,[regex]::Escape($versionPlaceholder))).Count -ne 1 -or ($quickStartTemplate -split '\r?\n')[0] -cne ('流向 FlowSwitch '+$versionPlaceholder)){throw '使用说明模板首行必须且仅能包含一个产品版本占位符。'}
+$quickStartText=$quickStartTemplate.Replace($versionPlaceholder,$productVersion)
 $package=Join-Path $destinationPath 'FlowSwitch';$app=Join-Path $package 'app'
 $bundleFiles=@('node.exe','FlowSwitch.Core.exe','FlowSwitch.Core.Compat.exe','NODE-LICENSE.txt','MIHOMO-LICENSE.txt','sources/mihomo-v1.19.29-source.zip')
 $bundleManifest=Get-Content -LiteralPath (Join-Path $RuntimeDirectory 'runtime-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -29,8 +34,8 @@ foreach($name in $runtime){
     $target=Join-Path $app $name;[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $target
 }
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Windows-QuickStart.txt') -Destination (Join-Path $package '使用说明.txt')
-foreach($name in @('LICENSE','THIRD_PARTY_NOTICES.md')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name)}
+[IO.File]::WriteAllText((Join-Path $package '使用说明.txt'),$quickStartText,(New-Object Text.UTF8Encoding($true)))
+foreach($name in @('USER_GUIDE.md','LICENSE','THIRD_PARTY_NOTICES.md')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name)}
 $exe=Join-Path $package 'FlowSwitch.exe'
 # EXE metadata is generated from the same product version used by the interface.
 $versionSource=Join-Path $destinationPath 'FlowSwitch.Version.cs'
@@ -44,9 +49,14 @@ $manifest=@(Get-ChildItem -LiteralPath $package -File -Recurse | ForEach-Object 
     [pscustomobject]@{path=$_.FullName.Substring($package.Length+1).Replace('\','/');bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
 })
 [IO.File]::WriteAllText((Join-Path $package 'manifest.json'),($manifest|ConvertTo-Json -Depth 4),(New-Object Text.UTF8Encoding($false)))
+$manifestHash=(Get-FileHash -LiteralPath (Join-Path $package 'manifest.json')).Hash.ToLowerInvariant()
+$registration=[ordered]@{schema=1;product='FlowSwitch';platform='windows';arch='x64';channel='stable';version=$productVersion;build=$manifestHash;manifestSha256=$manifestHash}
+[IO.File]::WriteAllText((Join-Path $package 'update-install.json'),($registration|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive=Join-Path $destinationPath ('FlowSwitch-v'+$productVersion+'-Windows-x64.zip')
 [IO.Compression.ZipFile]::CreateFromDirectory($package,$archive,[IO.Compression.CompressionLevel]::Optimal,$true)
+& (Join-Path $RuntimeDirectory 'node.exe') (Join-Path $PSScriptRoot 'Build-UpdateManifest.cjs') $archive $package (Join-Path $destinationPath 'Windows-update.json')
+if($LASTEXITCODE -ne 0){throw '更新文件范围清单生成失败。'}
 $hash=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $destinationPath 'SHA256SUMS.txt'),($hash+'  '+[IO.Path]::GetFileName($archive)+"`r`n"),(New-Object Text.UTF8Encoding($false)))
-[pscustomobject]@{Directory=$package;Executable=$exe;Archive=$archive;Bytes=(Get-Item -LiteralPath $archive).Length;Files=($manifest.Count+1);SHA256=$hash}
+[pscustomobject]@{Directory=$package;Executable=$exe;Archive=$archive;Bytes=(Get-Item -LiteralPath $archive).Length;Files=($manifest.Count+2);SHA256=$hash}

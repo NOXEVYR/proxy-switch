@@ -1,24 +1,37 @@
-﻿$ErrorActionPreference='Stop'
+﻿param([string]$OutputDirectory='')
+$ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FlowWebsiteVisual{[DllImport("user32.dll")]public static extern int GetWindowLong(IntPtr window,int index);}'
 $qa=Join-Path $env:TEMP ('FlowSwitch-routing-workbench-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UiGuidance.ps1') -Destination $qa
 $checks=@'
         $script:Checks=0
         function Check-UI($Value,[string]$Message){if(-not $Value){throw $Message};$script:Checks++}
         function Start-Work([string]$Kind,[string]$Key){$script:Requested=[pscustomobject]@{Kind=$Kind;Key=$Key}}
+        function Reveal-Control($Control){
+            $pages=@();for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){if($ancestor -is [Windows.Forms.TabPage]){$pages+=$ancestor}}
+            [array]::Reverse($pages);foreach($page in $pages){$page.Parent.SelectedTab=$page}
+            $form.PerformLayout();[Windows.Forms.Application]::DoEvents()
+            Check-UI ($Control.Visible) ('Actual action is reachable: '+$Control.Text)
+        }
         $tabs.SelectedTab=$toolsPage;[Windows.Forms.Application]::DoEvents()
+        Reveal-Control $networkDiagnoseButton
         $networkDiagnoseButton.PerformClick()
         Check-UI ($script:Requested.Kind -eq 'NetworkDiagnose') 'Network diagnosis button dispatches the read-only diagnostic worker'
         $script:Requested=$null;$script:NetworkDiagnosis=$null;$networkRepairButton.PerformClick()
         Check-UI ($null -eq $script:Requested) 'Repair without a diagnosis cannot change settings'
+        $script:CleanSession=[pscustomobject]@{Status=[pscustomobject]@{Phase='active';Message='Isolated comparison fixture'}};Set-UiActionAvailability
         $priorSize=$form.Size;$form.Size=$form.MinimumSize;[Windows.Forms.Application]::DoEvents()
-        Check-UI (@($toolsBar.Controls|Where-Object {$_.Right -gt $toolsBar.ClientSize.Width}).Count -eq 0) 'All diagnostic action buttons fit at minimum window width'
-        Check-UI (@($clientBar.Controls|Where-Object {$_.Right -gt $clientBar.ClientSize.Width -or $_.Bottom -gt $clientBar.ClientSize.Height}).Count -eq 0) 'Second action row and comparison stop button fit at minimum width and height'
+        foreach($control in @($networkDiagnoseButton,$networkRepairButton,$cleanStopButton,$updateButton,$automaticUpdates)){
+            Reveal-Control $control
+            Check-UI ($control.Left -ge 0 -and $control.Top -ge 0 -and $control.Right -le $control.Parent.ClientSize.Width -and $control.Bottom -le $control.Parent.ClientSize.Height) ('Grouped tools action fits at minimum width and height: '+$control.Text)
+        }
+        Reveal-Control $cleanStopButton
         $script:Requested=$null;$cleanStopButton.PerformClick()
         Check-UI ($script:Requested.Kind -eq 'CleanStartStop' -and $script:Requested.Key -eq '') 'Comparison stop action dispatches the current session stop operation'
         $form.Size=$priorSize;$tabs.SelectedTab=$programPage
@@ -29,8 +42,10 @@ $checks=@'
         }
         Request-ApplicationRoute 'Follow';$payload=$script:Requested.Key|ConvertFrom-Json
         Check-UI ($script:Requested.Kind -eq 'ManagedAppRoute' -and $payload.route -eq 'Follow') 'Follow keeps application entry rather than removing it'
+        Reveal-Control $websiteButton
         $websiteButton.PerformClick()
         Check-UI ($script:Requested.Kind -eq 'WebsiteRules' -and $script:Requested.Key -eq '') 'Main website action opens global rules'
+        $tabs.SelectedTab=$programPage;[Windows.Forms.Application]::DoEvents()
         $script:AppTarget.Mode='managed';$script:LastApps=Get-DemoApps
         $script:Requested=$null;$familyRuleItem.PerformClick();$payload=$script:Requested.Key|ConvertFrom-Json
         Check-UI ($script:Requested.Kind -eq 'FamilyRoutePlan' -and $payload.Path -ceq $script:AppTarget.Path -and $payload.Route -eq 'backup') 'Family rules action previews the selected executable and explicit route'
@@ -104,7 +119,12 @@ $checks=@'
         Show-ProgramLaunchSettings $script:AppTarget
         Check-UI ($null -eq $script:PendingAction -and -not $script:DialogOpen) 'Stale executable cannot edit desktop integration'
         $script:AppTarget.RequiresRepair=$false
-        foreach($width in @(1180,1400)){$form.Width=$width;[Windows.Forms.Application]::DoEvents();Check-UI ($launchSettingsButton.Left -ge $programHint.Right -and $launchSettingsButton.Right -lt $websiteButton.Left -and $routeButton.Right -le $bottom.Width) 'Launch settings remains visible without overlap'}
+        foreach($width in @($form.MinimumSize.Width,1400)){
+            $form.Width=$width;[Windows.Forms.Application]::DoEvents()
+            $visibleActions=@($bottom.Controls|Where-Object {$_ -is [Windows.Forms.Button] -and $_.Visible})
+            foreach($button in $visibleActions){Check-UI ($button.Left -ge 0 -and $button.Top -ge 0 -and $button.Right -le $bottom.ClientSize.Width -and $button.Bottom -le $bottom.ClientSize.Height) ('Program action remains inside its panel: '+$button.Text)}
+            for($i=0;$i -lt $visibleActions.Count;$i++){for($j=$i+1;$j -lt $visibleActions.Count;$j++){Check-UI (-not $visibleActions[$i].Bounds.IntersectsWith($visibleActions[$j].Bounds)) ('Program actions do not overlap: '+$visibleActions[$i].Text+' / '+$visibleActions[$j].Text)}}
+        }
         $script:PendingAction=$null
 
         $snapshot=[pscustomobject]@{Entries=@([pscustomobject]@{Id=('a'*32);Domain='initial.example';Match='exact';Route='Direct';Executable=''});Revision=('b'*64);Available=$true;Loaded=$true;Message='测试规则已加载';ContextExecutable='C:\Fixtures\editor.exe'}
@@ -158,3 +178,4 @@ $source=$source.Replace('$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Hei
 $uiResult=@(& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'routing-workbench.png'))
 $uiResult|Write-Output
 if(-not ($uiResult -match '^PASS: \d+ routing workbench UI assertions')){throw 'Routing workbench UI did not complete its control assertions.'}
+if($OutputDirectory){[void][IO.Directory]::CreateDirectory($OutputDirectory);foreach($artifact in Get-ChildItem -LiteralPath $qa -Filter '*.png'){Copy-Item -LiteralPath $artifact.FullName -Destination (Join-Path $OutputDirectory $artifact.Name)}}

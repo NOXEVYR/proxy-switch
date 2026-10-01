@@ -48,7 +48,7 @@ function New-ExitRecoveryPlan($Session,$CurrentSystem,$CurrentEnv) {
     }
     [pscustomobject]@{System=$system;Environment=[pscustomobject]$values}
 }
-function Restore-IndependentSession([string]$ExpectedSession='',[switch]$AbandonedOnly) {
+function Restore-IndependentSession([string]$ExpectedSession='',[switch]$AbandonedOnly,[switch]$GracefulOnly) {
     Write-LifecycleEvent 'restore-request' 'stop-or-failure'
     $outcome=[pscustomobject]@{Restored=$false}
     try { Use-ChangeLock {
@@ -76,6 +76,13 @@ function Restore-IndependentSession([string]$ExpectedSession='',[switch]$Abandon
             $deadline=[DateTime]::UtcNow.AddSeconds(12)
             while((Test-SessionProcess $session.SupervisorPID $session.SupervisorStart) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
             if(Test-SessionProcess $session.SupervisorPID $session.SupervisorStart){throw '网络设置已恢复，但内核停止尚未确认；会话记录保留，请重试停止。'}
+        }
+        # Updating never uses the orphan-kill fallback. Unknown or live children block exit.
+        if($GracefulOnly){
+            $identities=@([pscustomobject]@{OwnerPID=$session.CorePID;OwnerStart=$session.CoreStart})
+            $trackedPath=Join-Path $script:DataRoot 'gateway\process.json'
+            if(Test-Path -LiteralPath $trackedPath){$trackedUpdate=Get-Content -LiteralPath $trackedPath -Raw -Encoding UTF8|ConvertFrom-Json;if($trackedUpdate.core){$identities+=@([pscustomobject]@{OwnerPID=$trackedUpdate.core;OwnerStart=$trackedUpdate.coreStartTicks})}}
+            foreach($identity in $identities){if($identity.OwnerPID -and (Get-RecoveryOwnerState $identity) -ne 'stopped'){throw '更新等待内核正常退出；仍在运行或身份未知，不强制结束，窗口和会话保留。'}}
         }
         # A crashed supervisor can leave its latest child alive. Verify PID, parent,
         # start time and configured executable before stopping that tracked child.

@@ -1,3 +1,18 @@
+# UI 功能维护（2026-10-01）
+
+- 四页各自拥有操作：网络切换、程序线路、代理入口、检查与维护；工具再分连接检查、维护与恢复、软件与记录。新增动作需注明对象、影响与撤回，更新 UiGuidance / USER_GUIDE / QuickStart 中的实际路径。
+- Main PageHost 保留 program/proxy/tools 的 0/1/2 和 home=3；首次正常打开只读首页，测试用隔离 Demo。不得让后台刷新决定显式 PendingAction 是否执行。
+- 单程序和单代理动作以选中对象为准；未知或未满足前提禁用并显示原因。只读检测选择不得改变待应用的全局线路。
+- 嵌套布局使用 Dock/TableLayout，避免 Scale 中临时窄宽度永久压缩按钮；透明绘制寻找非透明祖先背景。Test-UsabilityUI / VisualTheme / RoutingWorkbenchUI 覆盖实际窗口、菜单、帮助、1/1.25/1.5模拟缩放和小尺寸。
+- 代理编辑保存传入 Expected 配置，在写锁内核验；不覆盖另一实例的备用策略或入口。自有入口编辑不转换外部引擎，不丢失 Failover。
+
+# 3.9.4 更新维护
+
+- 更新仅从 NOXEVYR/proxy-switch 稳定 Release 获取绑定清单；保持运行时和安装布局不变，Range 失败不得下载整包兜底。后台最多 50 MiB 差异；安装总须明确操作。
+- 安装器通过独立 ShellExecute 启动，避免继承启动器管道而互等退出。进程核验复用 ProcessInventory 的有限查询，未知阻止替换，不强杀。
+- 更新前用 Restore-IndependentSession -GracefulOnly 正常恢复设置；恢复/停止失败保留可见界面。替换只涉及已登记程序文件，事务和备份存数据目录 updates。
+- Test-UpdateEngine/Transport/Install/Lifecycle 纳入 Test-All；Test-UpdateIntegration <已构建包目录> 使用真实隔离窗口/启动器/安装器，不能代替真实代理会话或账号验收。
+
 # 3.9.3 整体维护约定
 
 - 恢复与失效入口修复共用 NetworkDiagnostics 的 Get-LocalEndpointObservation / Get-RecoveryEndpointState；未知归属或 IPv6 双栈未知不能等同入口停止。撤销手动标志须保留 PAC/自动检测模式。

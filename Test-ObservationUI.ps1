@@ -2,7 +2,7 @@
 Add-Type -AssemblyName System.Windows.Forms
 $qa=Join-Path $env:TEMP ('FlowSwitch-observation-ui-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','UiGuidance.ps1','Updates.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
@@ -22,7 +22,7 @@ $checks=@'
         Check-UI ($repairItem.Visible -and $repairItem.Enabled) 'Verified unique migration exposes repair action'
         Check-UI (-not $launchItem.Available -and -not $reconnectItem.Enabled) 'Pending repair cannot launch old path or reconnect unrelated traffic'
         Check-UI (@($appMenu.Items|Where-Object {$_.Tag -and $_.Tag -ne 'Follow' -and $_.Enabled}).Count -eq 0) 'Pending repair cannot silently create conflicting rules'
-        Check-UI ($removeSettingItem.Visible -and $removeSettingItem.Enabled) 'Obsolete saved record can still be removed using its explicit action'
+        Check-UI ($removeSettingItem.Available -and $removeSettingItem.Enabled) 'Obsolete saved record can still be removed using its explicit action'
         $appMenu.Close()
         function Start-Work([string]$Kind,[string]$Key){$script:Requested=[pscustomobject]@{Kind=$Kind;Key=$Key}}
         $removeSettingItem.PerformClick()
@@ -63,8 +63,10 @@ $checks=@'
         foreach($name in @('app.exe','resources.pak','chrome_100_percent.pak')){[IO.File]::WriteAllText((Join-Path $fixture $name),'inert fixture')}
         $row.Path=Join-Path $fixture 'app.exe';$row.Mode='observe'
         $appMenu.Show($liveList,(New-Object Drawing.Point(1,1)));[Windows.Forms.Application]::DoEvents()
-        Check-UI $websiteProgramItem.Enabled 'Selected programs expose a contextual website rules editor'
-        $choice=@($appMenu.Items|Where-Object Tag -eq 'backup')[0];$choice.PerformClick()
+        Check-UI (-not $websiteProgramItem.Enabled) 'Unmanaged programs cannot claim website exceptions are active'
+        $row.Mode='managed';$appMenu.Close();$appMenu.Show($liveList,(New-Object Drawing.Point(1,1)));[Windows.Forms.Application]::DoEvents()
+        Check-UI $websiteProgramItem.Enabled 'Managed programs expose the contextual website rules editor'
+        $choice=@($savedLineMenu.DropDownItems|Where-Object Tag -eq 'backup')[0];$choice.PerformClick()
         $payload=$script:Requested.Key|ConvertFrom-Json
         Check-UI ($script:Requested.Kind -eq 'ManagedAppRoute' -and $payload.path -eq $row.Path -and $payload.route -eq 'backup') 'Actual route menu requests one operation without internal mode selection'
         $appMenu.Close();$row.Mode='engine'
@@ -72,7 +74,7 @@ $checks=@'
         Check-UI (@($appMenu.Items|Where-Object {$_.Text -match '^启动代理：'}).Count -eq 0) 'Normal menu does not ask users to choose an internal launch mode'
         $appMenu.Close();$script:Requested=$null
         $tabs.SelectedTab=$toolsPage;[Windows.Forms.Application]::DoEvents()
-        $login=@($toolsBar.Controls|Where-Object Text -eq 'Google 登录诊断')[0];$login.PerformClick()
+        $toolsSections.SelectedIndex=0;$loginDiagnosticButton.PerformClick()
         Check-UI ($script:Requested.Kind -eq 'LoginDiagnostic' -and $script:Requested.Key -eq '') 'Actual login diagnostic button resolves system proxy instead of configured gateway'
         $state=Get-DemoState;$state|Add-Member NoteProperty Warnings @() -Force;$script:Profiles.Routing.Adapter='standalone';$script:Profiles.Routing|Add-Member NoteProperty Failover ([pscustomobject]@{Enabled=$false}) -Force
         Show-State $state

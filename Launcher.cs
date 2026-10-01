@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -33,7 +33,7 @@ internal static class Launcher
     private static void VerifyFiles(string app)
     {
         string[] required = {
-            "ProxySwitch.ps1", "ProxyWindow.ps1", "ProxyBackend.ps1", "Preferences.ps1",
+            "Updates.ps1", "UpdateEngine.cjs", "UpdateInstall.ps1", "ProxySwitch.ps1", "ProxyWindow.ps1", "ProxyBackend.ps1", "Preferences.ps1",
             "Storage.ps1", "RuntimeSupport.ps1", "DesktopBranding.cs", "ShellShortcut.cs", "FlowTheme.cs", "ProgramLaunch.ps1", "ProcessInventory.ps1", "ProxyDiscovery.ps1",
             "ProgramIdentity.ps1", "ProgramFamilyTracking.ps1", "ManagedRouting.ps1", "ApplicationObservation.ps1", "RuleMaintenance.ps1", "RoutePolicy.cjs", "GatewayPortOwnership.ps1",
             "AppRouting.ps1", "AppRouter.cjs", "IndependentRouter.cjs", "IndependentGateway.ps1", "NetworkDiagnostics.ps1", "GatewayWatchdog.ps1", "GatewayLock.ps1", "config.defaults.json", "Install-Shortcut.ps1",
@@ -70,6 +70,12 @@ internal static class Launcher
                 else throw new ArgumentException("不支持的启动参数：" + args[i]);
             }
             string root = AppDomain.CurrentDomain.BaseDirectory;
+            string updateLock = Path.Combine(root, ".flowswitch-update.lock");
+            if (File.Exists(updateLock))
+            {
+                try { using (var check = new FileStream(updateLock, FileMode.Open, FileAccess.Read, FileShare.None)) {} }
+                catch (IOException) { throw new InvalidOperationException("流向正在等待退出或安装更新，请稍后再打开。更新不会强制结束其他程序。"); }
+            }
             string app = Path.Combine(root, "app");
             VerifyFiles(app);
             if (mode == "--verify") { Console.WriteLine("PASS: FlowSwitch " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3) + " Windows package files are present."); return 0; }

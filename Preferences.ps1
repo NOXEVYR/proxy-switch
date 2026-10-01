@@ -1,5 +1,5 @@
 ﻿param([string]$DataDirectory='')
-$script:ProductVersion='3.9.3'
+$script:ProductVersion='3.9.4'
 . (Join-Path $PSScriptRoot 'Storage.ps1')
 $script:LegacyDataRoot=Join-Path $env:LOCALAPPDATA 'ProxySwitch'
 $script:DataRoot=Resolve-ProxyDataDirectory $DataDirectory $env:PROXY_SWITCH_DATA_DIR ([Environment]::GetFolderPath('UserProfile')) $env:LOCALAPPDATA
@@ -81,9 +81,15 @@ function Get-RoutingSnapshot {
     if(-not $state.installed -and (@($state.entries).Count -gt 0 -or @($state.programIngresses|Where-Object {$_}).Count -gt 0 -or @($state.siteRules|Where-Object {$_}).Count -gt 0 -or $state.defaultRoute)){throw '程序规则状态不一致，请先从备份恢复规则文件。'}
     [pscustomobject]@{entries=@($state.entries);defaultRoute=$state.defaultRoute;installed=[bool]$state.installed;programIngresses=@($state.programIngresses|Where-Object {$_});siteRules=@($state.siteRules|Where-Object {$_});launchEntries=@(Get-ProgramLaunchEntries)}
 }
-function Save-ProfileSettings($Value) {
+function Save-ProfileSettings($Value,$Expected=$null) {
     $clean=ConvertTo-ValidProfileSettings $Value
     Use-ChangeLock {
+        # An editor snapshot is checked after acquiring the write lock, before backup or writes.
+        if($null -ne $Expected){
+            $latest=ConvertTo-ValidProfileSettings (Read-ProfileSettings)
+            $prior=ConvertTo-ValidProfileSettings $Expected
+            if(($latest|ConvertTo-Json -Depth 12 -Compress) -cne ($prior|ConvertTo-Json -Depth 12 -Compress)){throw '代理配置已被其他操作修改，请关闭编辑窗口后重新读取。当前配置保留。'}
+        }
         $saved=Get-RoutingSnapshot;$selection=Get-Selection
         $inUse=@($saved.programIngresses|ForEach-Object route)+@($saved.siteRules|ForEach-Object route)+@($saved.entries | ForEach-Object route)+@($saved.launchEntries | ForEach-Object route)+@($saved.defaultRoute,$selection.Key,$selection.NetworkKey,(Get-SystemKey (Get-SystemSnapshot)))
         foreach($id in $inUse){if($id -and $id -notin @('Direct','Other','Follow') -and $id -notin @($clean.Profiles | ForEach-Object Id)){throw '该代理仍被当前入口或程序规则使用，请先统一切换到其他线路再删除。'}}

@@ -9,6 +9,8 @@ $function=$ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDe
 Invoke-Expression $function.Extent.Text
 $script:Profiles=[pscustomobject]@{Routing=[pscustomobject]@{Adapter='standalone'};Profiles=@()}
 $script:LastState=[pscustomobject]@{Key='gateway'};$script:MenuOpen=$false;$script:Log=@()
+# This fixture isolates snapshot rendering; contextual action state is covered by Test-UsabilityUI.
+function Set-UiActionAvailability {}
 function Get-RouteName($Key){[string]$Key}
 function Get-GatewayKey {'gateway'}
 function Get-ProfileKeys {@('a','b','gateway')}
