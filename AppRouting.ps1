@@ -139,6 +139,8 @@ function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
         }
     }
     $gateway=Get-GatewayKey;$rows=@()
+    $entryObservation=Get-ProgramEntryObservation $null $null $false
+    try{if($gateway){$entryObservation=Get-ProgramEntryObservation (Get-SystemSnapshot) (Get-Profile $gateway)}}catch{}
     $independentApps=@($apps.Values|Where-Object {$_.SavedPath -and $_.Path})
     foreach($app in $apps.Values){
         $family=@();$familySnapshot=$null
@@ -155,7 +157,7 @@ function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
             if($excluded.Count){$family=@($family|Where-Object {-not $excluded.ContainsKey([int]$_.Id)})}
         }
         $evidence=Get-ApplicationConnectionEvidence $family $tcp $core.connections $gateway $byId $app.Path $TcpAvailable $managedEntries $familySnapshot
-        $rows+=Get-ApplicationObservationRow $app $family $evidence $core $app.CoreRule $app.LaunchRule $app.Identity $processesAvailable $familySnapshot
+        $rows+=Get-ApplicationObservationRow $app $family $evidence $core $app.CoreRule $app.LaunchRule $app.Identity $processesAvailable $familySnapshot $entryObservation
     }
     $rulesAvailable=Test-ObservationFlag $core 'rulesAvailable' ([bool]$core.available)
     $connectionsAvailable=Test-ObservationFlag $core 'connectionsAvailable' ([bool]$core.available)

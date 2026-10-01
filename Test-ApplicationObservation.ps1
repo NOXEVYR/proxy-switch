@@ -22,12 +22,41 @@ function Test-ManagedProgramSession {return $true}
 function Socket([int]$Owner,[int]$Source,[string]$Remote,[int]$Port,[string]$State='Established'){
     [pscustomobject]@{OwningProcess=$Owner;LocalAddress='127.0.0.1';LocalPort=$Source;RemoteAddress=$Remote;RemotePort=$Port;State=$State}
 }
-function Observe($Processes,$Connections=@(),$Rule=$null,$Launch=$null,$Core=$script:FixtureCore,$EngineConnections=@(),[bool]$TcpAvailable=$true,[bool]$ProcessesAvailable=$true,$App=$script:FixtureApp,$FamilySnapshot=$null){
+function Observe($Processes,$Connections=@(),$Rule=$null,$Launch=$null,$Core=$script:FixtureCore,$EngineConnections=@(),[bool]$TcpAvailable=$true,[bool]$ProcessesAvailable=$true,$App=$script:FixtureApp,$FamilySnapshot=$null,$EntryObservation=$null){
     $byId=@{};foreach($p in $Processes){$byId[[int]$p.Id]=$p}
     $evidence=Get-ApplicationConnectionEvidence $Processes $Connections $EngineConnections 'gateway' $byId $App.Path $TcpAvailable @() $FamilySnapshot
-    $row=Get-ApplicationObservationRow $App $Processes $evidence $Core $Rule $Launch $null $ProcessesAvailable $FamilySnapshot
+    $row=Get-ApplicationObservationRow $App $Processes $evidence $Core $Rule $Launch $null $ProcessesAvailable $FamilySnapshot $EntryObservation
     [pscustomobject]@{Evidence=$evidence;Row=$row}
 }
+
+# Access configuration and actual traffic are independent evidence layers.
+$fixtureGateway=Get-Profile 'gateway'
+$systemEntry=Get-ProgramEntryObservation ([pscustomobject]@{Flags=3;Server='127.0.0.1:18082'}) $fixtureGateway
+Check ($systemEntry.SystemEntryState -eq 'Bypassed' -and $systemEntry.Available -and $systemEntry.GatewayPort -eq 7897) 'An ordinary live external proxy is not the configured engine entry'
+foreach($address in @('localhost','127.0.0.2','[::1]','[0:0:0:0:0:0:0:1]','[::ffff:127.0.0.1]')){
+    $matched=Get-ProgramEntryObservation ([pscustomobject]@{Flags=3;Server=($address+':7897')}) $fixtureGateway
+    Check ($matched.SystemEntryState -eq 'Connected') ('Equivalent loopback configuration recognizes the current engine port: '+$address)
+}
+$matched=Get-ProgramEntryObservation ([pscustomobject]@{Flags=3;Server='http=localhost:7897;https=[::1]:7897'}) $fixtureGateway
+Check ($matched.SystemEntryState -eq 'Connected') 'A complete per-protocol manual list may identify the engine entry'
+foreach($snapshot in @(
+    [pscustomobject]@{Flags=3;Server='http=localhost:7897;https=localhost:18082'},
+    [pscustomobject]@{Flags=3;Server='http=localhost:7897'},
+    [pscustomobject]@{Flags=3;Server='bad input'},
+    [pscustomobject]@{Flags=3;Server='http://name:password@localhost:7897'},
+    [pscustomobject]@{Flags=3;Server='http://localhost:7897/?token=private'},
+    [pscustomobject]@{Flags=7;Server='localhost:7897'}
+)){
+    $unknownEntry=Get-ProgramEntryObservation $snapshot $fixtureGateway
+    Check ($unknownEntry.SystemEntryState -eq 'Unknown' -and -not $unknownEntry.Available -and $null -eq $unknownEntry.PSObject.Properties['Server']) 'Complex, mixed, automatic and credential-bearing settings remain unknown without exposing configuration'
+}
+$unknownEntry=Get-ProgramEntryObservation ([pscustomobject]@{Flags=3;Server='localhost:7897'}) $fixtureGateway $false
+Check ($unknownEntry.SystemEntryState -eq 'Unknown') 'An unavailable setting read is not inferred from an older matching snapshot'
+$changedGateway=$fixtureGateway.PSObject.Copy();$changedGateway.Port=19080
+$changed=Get-ProgramEntryObservation ([pscustomobject]@{Flags=3;Server='localhost:19080'}) $changedGateway
+Check ($changed.SystemEntryState -eq 'Connected' -and $changed.GatewayPort -eq 19080) 'Entry detection reads the supplied current profile rather than a hard-coded old port'
+$systemDirect=Get-ProgramEntryObservation ([pscustomobject]@{Flags=1;Server='localhost:7897'}) $fixtureGateway
+Check ($systemDirect.SystemEntryState -eq 'Bypassed') 'An inactive old manual server does not hide a direct system setting'
 
 # Process presence and observation failure have separate meanings.
 $seen=Observe @($main)
@@ -112,6 +141,34 @@ $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.5' 
 Check ($seen.Row.ConnectionDetails[0].State -eq 'SynSent' -and $seen.Row.ConnectionDetails[0].ActualRoute -eq 'Unknown') 'Pending connection details never claim an established actual route'
 $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.9' 443)) -EngineConnections @($tunB)
 Check ($seen.Row.Actual -eq '经分流内核→直连 ×1' -and $seen.Row.ConnectionDetails[0].IngressKind -eq 'Tun') 'TUN direct observations preserve the different ingress instead of claiming a bypass'
+
+# Regression: a saved Direct rule plus a socket to a separate VPN is not applied.
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 18082)) -Rule $directRule -EntryObservation $systemEntry
+Check ($seen.Row.NeedsEntryConnection -and $seen.Row.ProgramEntryState -eq 'NeedsEntry' -and $seen.Row.NeedsRelaunch -and -not $seen.Row.Loaded -and $seen.Row.Status -match '未接入.*完整退出') 'Loaded Direct policy exposes the exact missing-entry prerequisite while the app still uses an external VPN'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 18082)) -Rule $rule -EntryObservation $systemEntry
+Check (-not $seen.Row.Loaded -and $seen.Row.ControllerObservedCount -eq 0) 'A registered endpoint matching the selected profile cannot prove engine rule application'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897)) -Rule $directRule -EngineConnections @($directEngine) -EntryObservation $systemEntry
+Check ($seen.Row.Loaded -and -not $seen.Row.NeedsEntryConnection -and $seen.Row.ProgramEntryState -eq 'Observed' -and $seen.Row.ControllerObservedCount -eq 1) 'A program already entering a verified engine remains valid even if the system proxy points elsewhere'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.9' 443)) -Rule $directRule -EngineConnections @($tunB) -EntryObservation $systemEntry
+Check ($seen.Row.Loaded -and -not $seen.Row.NeedsEntryConnection -and $seen.Row.ProgramEntryState -eq 'Observed') 'A verified external TUN engine is not incorrectly required to use the system entry'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897),(Socket 10 51001 '127.0.0.1' 18082)) -Rule $directRule -EngineConnections @($directEngine) -EntryObservation $systemEntry
+Check ($seen.Row.ProgramEntryState -eq 'Partial' -and -not $seen.Row.NeedsEntryConnection -and -not $seen.Row.Loaded) 'Mixed managed and bypassed traffic stays partial instead of advertising full application'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897)) -Rule $directRule -EntryObservation $systemEntry
+Check ($seen.Row.ProgramEntryState -eq 'WaitingConnection' -and -not $seen.Row.NeedsEntryConnection -and -not $seen.Row.Loaded) 'A socket already entering the engine with unknown egress does not falsely demand system entry changes'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.5' 443)) -Rule $directRule -EntryObservation $systemEntry
+Check ($seen.Row.ProgramEntryState -eq 'Unknown' -and -not $seen.Row.NeedsEntryConnection) 'Outside TCP may use an independent tunnel and does not prove that system entry changes will take it over'
+$matched=Get-ProgramEntryObservation ([pscustomobject]@{Flags=3;Server='localhost:7897'}) $fixtureGateway
+$seen=Observe -Processes @($main) -Rule $directRule -EntryObservation $matched
+Check ($seen.Row.ProgramEntryState -eq 'WaitingConnection' -and -not $seen.Row.Loaded -and -not $seen.Row.NeedsEntryConnection) 'A connected system entry only establishes a prerequisite, never route or login success'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 18082)) -Rule $directRule -EntryObservation $unknownEntry
+Check ($seen.Row.ProgramEntryState -eq 'Unknown' -and -not $seen.Row.NeedsEntryConnection -and -not $seen.Row.Loaded) 'Unknown system setting observations cannot falsely demand an entry rewrite'
+$seen=Observe -Processes @() -Rule $directRule -EntryObservation $systemEntry
+Check ($seen.Row.ProgramEntryState -eq 'NotRunning' -and -not $seen.Row.NeedsEntryConnection) 'A stopped application remains distinguishable from an observed bypass'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 18082)) -Rule $directRule -EntryObservation $systemEntry -TcpAvailable $false
+Check ($seen.Row.ProgramEntryState -eq 'Unknown' -and -not $seen.Row.NeedsEntryConnection) 'Unavailable TCP collection preserves unknown rather than diagnosing a live bypass'
+$seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '0:0:0:0:0:0:0:1' 7897)) -Rule $directRule -EngineConnections @($directEngine) -EntryObservation $systemEntry
+Check ($seen.Row.Loaded -and $seen.Row.ProgramEntryState -eq 'Observed') 'Expanded loopback TCP endpoints retain controller-certified gateway evidence'
+Check (-not $seen.Row.AuthenticationVerified) 'Correct engine-entry routing still cannot certify game login success'
 
 # Internal communication is a paired, current socket fact, not a guess from a loopback IP.
 $selfIpc=@((Socket 10 53001 '127.0.0.1' 53002),(Socket 10 53002 '127.0.0.1' 53001))

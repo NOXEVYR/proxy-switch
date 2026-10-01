@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FlowWebsiteVisual{[DllImport("user32.dll")]public static extern int GetWindowLong(IntPtr window,int index);}'
 $qa=Join-Path $env:TEMP ('FlowSwitch-routing-workbench-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBackend.ps1','ProgramRouteAccess.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
@@ -38,7 +38,8 @@ $checks=@'
         $script:AppTarget=[pscustomobject]@{Name='Fixture Editor';Path='C:\Fixtures\editor.exe';SavedPath='C:\Fixtures\editor.exe';Mode='managed';Policy='backup';RequiresRepair=$false;HasSavedRule=$true;CanLaunch=$true}
         foreach($mode in @('launch','engine','observe','managed')){
             $script:AppTarget.Mode=$mode;Request-ApplicationRoute 'Direct';$payload=$script:Requested.Key|ConvertFrom-Json
-            Check-UI ($script:Requested.Kind -eq 'ManagedAppRoute' -and $payload.route -eq 'Direct' -and $payload.path -eq $script:AppTarget.Path) ('Normal route operation must be common for '+$mode)
+            $expectedKind=if($mode -eq 'engine'){'ProgramAccessPlan'}else{'ManagedAppRoute'}
+            Check-UI ($script:Requested.Kind -eq $expectedKind -and $payload.route -eq 'Direct' -and $payload.path -eq $script:AppTarget.Path) ('Route operation uses verified access preview for engine and native adapter for '+$mode)
         }
         Request-ApplicationRoute 'Follow';$payload=$script:Requested.Key|ConvertFrom-Json
         Check-UI ($script:Requested.Kind -eq 'ManagedAppRoute' -and $payload.route -eq 'Follow') 'Follow keeps application entry rather than removing it'
@@ -170,6 +171,29 @@ $checks=@'
         Show-Applications ([pscustomobject]@{Rows=@($app);RuleCount=1;LaunchRuleCount=0;Available=$true;RulesAvailable=$true;TcpAvailable=$true})
         Check-UI ($liveList.Items[0].SubItems[2].Text -eq '未观察到 TCP 连接' -and $liveList.Items[0].SubItems[3].Text -match '旧入口') 'Loaded route cannot manufacture traffic evidence or hide pending restart status'
         Check-UI ($ruleMeta.Text -match '已加载线路设置' -and $ruleMeta.Text -notmatch '已观察到目标出口') 'Loaded rule count is never described as observed actual route'
+        $engine=[pscustomobject]@{Name='Fixture Qt Launcher';Path='C:\Fixtures\game.exe';Policy='Direct';Mode='engine';CanLaunch=$false;RequiresRepair=$false;Running=$true;PIDs='123';NeedsEntryConnection=$true;HasSavedRule=$true;Actual='外部代理 ×1';Status='入口绕过流向 · 规则尚未接管'}
+        Show-Applications ([pscustomobject]@{Rows=@($engine);RuleCount=1;LaunchRuleCount=0;Available=$true;RulesAvailable=$true;TcpAvailable=$true})
+        $liveList.Items[0].Selected=$true;Set-UiActionAvailability
+        Check-UI ($programLaunchButton.Text -eq '应用线路并检查' -and $programLaunchButton.Enabled) 'Running non-native launcher has an actionable reapply control rather than a disabled launch promise'
+        Check-UI ($programHint.Text -match '系统入口绕过流向' -and $programHint.Text -match '保留其他专线') 'Entry bypass is explained next to the actual selected-object control'
+        $script:Requested=$null;$programLaunchButton.PerformClick();$access=$script:Requested.Key|ConvertFrom-Json
+        Check-UI ($script:Requested.Kind -eq 'ProgramAccessPlan' -and $access.path -ceq $engine.Path -and $access.route -eq 'Direct') 'Engine primary action previews exact selected game and Direct route without launching or switching all programs'
+        $engine.RequiresRepair=$true;Show-Applications ([pscustomobject]@{Rows=@($engine);RuleCount=1;Available=$true;RulesAvailable=$true;TcpAvailable=$true});$liveList.Items[0].Selected=$true;Set-UiActionAvailability
+        Check-UI (-not $programLaunchButton.Enabled) 'Changed executable identity cannot reapply an obsolete saved path'
+        $preview=[pscustomobject]@{Path='C:\Fixtures\game.exe';Route='Direct';CanApply=$true;Message='确认后接回流向入口。';Impact='保留其他程序专线、网站规则和有效备用。';FamilyPlan=[pscustomobject]@{Members=@([pscustomobject]@{Name='game';Path='C:\Fixtures\game.exe';State='Conflict';Reason='原先走A'},[pscustomobject]@{Name='child-fixed';Path='C:\Fixtures\fixed.exe';State='Conflict';Reason='子程序专线B'})+@(0..149|ForEach-Object {[pscustomobject]@{Name=('helper-'+$_);State='Missing';Reason='同安装目录、已核验父子关系。'}})}}
+        $accessDialog=New-ProgramRouteAccessDialog $preview
+        try{
+            $accessDialog.ShowInTaskbar=$false;$accessDialog.Show($form);$accessDialog.ClientSize=New-Object Drawing.Size(480,360);[Windows.Forms.Application]::DoEvents()
+            Check-UI ($accessDialog.Tag.Reading.ReadOnly -and $accessDialog.Tag.Reading.ScrollBars -eq 'Vertical' -and $accessDialog.Tag.Reading.Text -match 'helper-149') 'Large verified family preview stays readable in a scrolling dialog rather than an oversized message box'
+            Check-UI ($accessDialog.Tag.Reading.Height -ge ($accessDialog.ClientSize.Height-145)) 'Preview evidence expands with the dialog instead of leaving unused blank space'
+            Check-UI ($accessDialog.Tag.Reading.Text -match 'game · 所选程序：将设为“直连”' -and $accessDialog.Tag.Reading.Text -notmatch 'game · 保留原选择' -and $accessDialog.Tag.Reading.Text -match 'child-fixed · 保留原选择') 'Preview explicitly changes root while preserving the conflicting child'
+            Check-UI ($accessDialog.Tag.Accept.Enabled -and $accessDialog.Tag.Accept.Bottom -le $accessDialog.Tag.Accept.Parent.ClientSize.Height -and $accessDialog.Tag.Grid.Bottom -le $accessDialog.ClientSize.Height) 'Small workspace retains the explicit apply and cancel controls below the scrolling evidence'
+            $accessImage=New-Object Drawing.Bitmap($accessDialog.Width,$accessDialog.Height)
+            try{$accessDialog.DrawToBitmap($accessImage,(New-Object Drawing.Rectangle(0,0,$accessDialog.Width,$accessDialog.Height)));$accessImage.Save((Join-Path $script:Root 'program-access-preview.png'),[Drawing.Imaging.ImageFormat]::Png)}finally{$accessImage.Dispose()}
+            $accessDialog.Tag.Cancel.PerformClick();Check-UI ($accessDialog.DialogResult -eq 'Cancel') 'Cancel preview produces no application operation'
+        }finally{$accessDialog.Dispose()}
+        $preview.Route='Follow';$followDialog=New-ProgramRouteAccessDialog $preview
+        try{Check-UI ($followDialog.Tag.Reading.Text -match '撤回此程序专线，跟随默认' -and $followDialog.Tag.Reading.Text -match '保留此子程序现有选择' -and $followDialog.Tag.Reading.Text -notmatch '将补齐') 'Follow preview never presents Direct family classifications as requested changes'}finally{$followDialog.Dispose()}
         Write-Output ('PASS: '+$script:Checks+' routing workbench UI assertions; actual menus and website editor controls, isolated demo, no network writes or user applications.')
 '@
 $path=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($path)

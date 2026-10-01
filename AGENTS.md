@@ -1,3 +1,13 @@
+﻿# 3.9.5 程序接入约定
+
+- 首次未配置程序的worker在ChangeLock内重新读取保存快照和原生适配。已有engine或非Chromium统一返回ProgramAccessPlan，只读预览，经Confirmed才写；不得用陈旧UI模式转换已有专线。支持Chromium继续原managed路径；新增Test-ProgramRouteDispatch纳入Test-All。
+- 恢复归属PreWindowsAction在规则实读/系统变量CAS后持久化，hook后再CAS；PostCommit只核验已认领记录和入口。看门狗初次/每轮读取独占或损坏session为Unknown，有界重试并保留保护，不依据旧session恢复。
+
+- 引擎规则的新接入动作使用 ProgramRouteAccess 的只读Plan和120秒内显式Confirmed Apply；绑定系统/用户环境/完整配置规则/EXE和进程家族身份。普通SystemProxy可接入，TUN/Guard已知拒绝，第三方未知隧道不能宣称已关闭。
+- 单事务接回系统入口并补齐Missing家族成员，保留Conflict/unknown、默认与当前备用、其他programIngress、siteRules及Selection；不能借统一切换清空专线。PostCommitAction需在共享事务try内、写后实读之后运行，失败进入现有归属回滚。
+- 会话恢复归属随接回更新：保留仍归属字段的旧恢复baseline，外部已改字段按本次Before/语义重建，保留Bypass及自动模式。会话CAS失败或外部变化不能覆盖；回滚不完整时保留可恢复记录与核心。
+- ApplicationObservation接入三态每轮实读，不跨轮缓存。Controller精确证据才确认engine线路；外部代理TCP登记不能证明接管，入口外或读取未知保持未知。UI区分普通engine的应用线路并检查和native的按此线路打开。
+
 # UI 功能维护（2026-10-01）
 
 - 四页各自拥有操作：网络切换、程序线路、代理入口、检查与维护；工具再分连接检查、维护与恢复、软件与记录。新增动作需注明对象、影响与撤回，更新 UiGuidance / USER_GUIDE / QuickStart 中的实际路径。

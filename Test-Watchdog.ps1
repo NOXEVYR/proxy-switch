@@ -24,7 +24,7 @@ function Test-RecoveryEndpoint([string]$value){if($value -eq '127.0.0.1:18790'){
 '@
 $shell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $checks=0
-foreach($case in @('owner-unknown','owner-crash','core-crash','external-change','restore-failure')){
+foreach($case in @('owner-unknown','owner-crash','core-crash','external-change','restore-failure','session-lock','session-corrupt','session-update')){
     $data=Join-Path $qa $case;[void][IO.Directory]::CreateDirectory((Join-Path $data 'gateway'))
     $owner=Start-Process -FilePath $exe -WindowStyle Hidden -PassThru
     $watch=$null
@@ -50,6 +50,23 @@ foreach($case in @('owner-unknown','owner-crash','core-crash','external-change',
             Start-Sleep -Milliseconds 2200
             if($watch.HasExited -or -not (Test-Path (Join-Path $data 'gateway-session.json')) -or (Test-Path (Join-Path $data 'gateway/stop'))){throw 'Unknown owner identity was misclassified as an exited UI'}
             [IO.File]::Delete((Join-Path $data 'owner-unknown'))
+        }
+        if($case -eq 'session-lock'){
+            $held=[IO.File]::Open((Join-Path $data 'gateway-session.json'),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+            try{Start-Sleep -Milliseconds 2400;if($watch.HasExited -or (Test-Path (Join-Path $data 'gateway/stop'))){throw 'Locked journal stopped recovery protection'}}finally{$held.Dispose()}
+        }
+        if($case -eq 'session-corrupt'){
+            [IO.File]::WriteAllText((Join-Path $data 'gateway-session.json'),'{incomplete',$utf8)
+            Start-Sleep -Milliseconds 2400
+            if($watch.HasExited -or (Test-Path (Join-Path $data 'gateway/stop'))){throw 'Unavailable journal was treated as a stopped owner'}
+            [IO.File]::WriteAllText((Join-Path $data 'gateway-session.json'),($session|ConvertTo-Json -Depth 5),$utf8)
+        }
+        if($case -eq 'session-update'){
+            $proxy.Bypass='new-owned-bypass'
+            [IO.File]::WriteAllText((Join-Path $data 'fake-system.json'),($proxy|ConvertTo-Json),$utf8)
+            [IO.File]::WriteAllText((Join-Path $data 'gateway-session.json'),($session|ConvertTo-Json -Depth 5),$utf8)
+            Start-Sleep -Milliseconds 1200
+            if($watch.HasExited){throw 'Same-session ownership refresh stopped watchdog'}
         }
         if($case -eq 'core-crash'){[IO.File]::Delete((Join-Path $data 'listener-ready'))}else{$owner.Kill()}
         if(-not $watch.WaitForExit(10000)){throw ('Watchdog did not recover '+$case)}

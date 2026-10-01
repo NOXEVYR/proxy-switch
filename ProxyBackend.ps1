@@ -430,7 +430,7 @@ function Set-RoutingSnapshot($Snapshot,$ExpectedBefore=$null) {
         throw
     }
 }
-function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSystem,$BeforeEnv,$TargetRouting=$null,$BeforeRouting=$null,[scriptblock]$VerifyAction=$null,$BackupRouting=$null,[switch]$EnvironmentOnly,[switch]$PreserveSelection) {
+function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSystem,$BeforeEnv,$TargetRouting=$null,$BeforeRouting=$null,[scriptblock]$VerifyAction=$null,$BackupRouting=$null,[switch]$EnvironmentOnly,[switch]$PreserveSelection,[scriptblock]$PostCommitAction=$null,[scriptblock]$PreWindowsAction=$null) {
     if($EnvironmentOnly -and ($null -ne $TargetRouting -or -not (Test-SameSnapshot $TargetSystem $BeforeSystem))){throw '变量修复不能同时改变系统入口或分流规则。'}
     if($null -ne $TargetRouting -and $null -ne $BeforeRouting){foreach($field in @('programIngresses','siteRules')){if($null -eq $TargetRouting.PSObject.Properties[$field]){$TargetRouting|Add-Member NoteProperty $field @($BeforeRouting.$field|Where-Object {$_})}}}
     if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $BeforeEnv (Get-UserProxyEnv))){throw '检测期间其他程序改动了代理，请稍后重试。未写入设置。'}
@@ -443,12 +443,17 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
         if($VerifyAction){& $VerifyAction | Out-Null}
         # A controller reload can take seconds; recheck before touching Windows settings.
         if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $BeforeEnv (Get-UserProxyEnv))){throw '重载期间系统入口发生变化，请重试。'}
+        if($PreWindowsAction){
+            & $PreWindowsAction | Out-Null
+            if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $BeforeEnv (Get-UserProxyEnv))){throw '准备恢复记录期间入口或用户环境已改变，未写入设置。'}
+        }
         Write-OperationProgress '正在同步用户代理变量…'
         $nativeStarted=$true;Set-UserProxyEnv $TargetEnv -ExpectedBefore $BeforeEnv
         if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot))){throw '写入变量期间其他程序改动了系统代理。'}
         Write-OperationProgress '正在写入系统入口并实读校验…'
         if(-not $EnvironmentOnly){$systemStarted=$true;Set-SystemSnapshot $TargetSystem}
         if(-not (Test-SameSnapshot $TargetSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $TargetEnv (Get-UserProxyEnv))){throw '写入后校验失败，或其他客户端改写了入口。'}
+        if($PostCommitAction){& $PostCommitAction | Out-Null}
         if(-not $EnvironmentOnly -and -not $PreserveSelection){Save-Selection $Selection}
         Write-OperationProgress '系统入口与变量已核对，正在刷新实际连接…'
     }catch{
@@ -579,4 +584,5 @@ function Assert-RestorableEnvironment($Values) {
 . (Join-Path $PSScriptRoot 'RuleMaintenance.ps1')
 . (Join-Path $PSScriptRoot 'ManagedRouting.ps1')
 . (Join-Path $PSScriptRoot 'ProgramFamilyRouting.ps1')
+. (Join-Path $PSScriptRoot 'ProgramRouteAccess.ps1')
 . (Join-Path $PSScriptRoot 'ProgramCleanStart.ps1')
