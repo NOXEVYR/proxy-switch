@@ -38,4 +38,8 @@ jobs:
             if($LASTEXITCODE -ne 0){throw ('Usability UI failed at scale '+$scale)}
             & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-UsabilityUI.ps1 -Scale $scale -FallbackFont
             if($LASTEXITCODE -ne 0){throw ('Fallback-font UI failed at scale '+$scale)}
+            & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-UsabilityUI.ps1 -Scale $scale -SmallWorkspace
+            if($LASTEXITCODE -ne 0){throw ('Small-workspace UI failed at scale '+$scale)}
+            & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-UsabilityUI.ps1 -Scale $scale -SmallWorkspace -FallbackFont
+            if($LASTEXITCODE -ne 0){throw ('Small fallback-font UI failed at scale '+$scale)}
           }

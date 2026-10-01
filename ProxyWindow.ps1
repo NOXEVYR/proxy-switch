@@ -36,7 +36,7 @@ $accent=[Drawing.ColorTranslator]::FromHtml('#9EDBFA')
 $paper=[Drawing.ColorTranslator]::FromHtml('#121C2B')
 $form=New-Object Windows.Forms.Form
 $form.Text='流向 · 网络代理管家 | FlowSwitch '+$script:ProductVersion
-$form.ClientSize=New-Object Drawing.Size(1260,860)
+$form.ClientSize=New-Object Drawing.Size(1260,960)
 $form.MinimumSize=New-Object Drawing.Size(1180,790)
 $form.StartPosition='CenterScreen';$form.AutoScaleMode='Dpi';$form.BackColor=$paper
 $form.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
@@ -76,13 +76,14 @@ function Write-Activity([string]$Text) {
 function New-Grid($Parent,[int]$Rows,[double[]]$Heights) {
     $g=New-Object Windows.Forms.TableLayoutPanel;$g.Dock='Fill';$g.BackColor=[Drawing.Color]::Transparent;$g.ColumnCount=1;$g.RowCount=$Rows;$g.Margin=New-Object Windows.Forms.Padding(0)
     [void]$g.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,100)))
-    foreach($h in $Heights){if($h -eq -1){[void]$g.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,100)))}else{[void]$g.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Absolute,$h)))}}
+    foreach($h in $Heights){if($h -eq -1){[void]$g.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,100)))}elseif($h -eq 0){[void]$g.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::AutoSize)))}else{[void]$g.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Absolute,$h)))}}
     if($Parent){$Parent.Controls.Add($g)};return $g
 }
 function New-TaskCard($Parent,[int]$Column,[int]$Row,[string]$Title,[string]$Description,[string]$ActionText,$Action) {
     $surface=New-Object FlowSwitch.UI.SurfacePanel;$surface.Dock='Fill';$surface.Margin=New-Object Windows.Forms.Padding(4);$surface.Padding=New-Object Windows.Forms.Padding(12,8,12,8);$Parent.Controls.Add($surface,$Column,$Row)
-    $g=New-Grid $surface 3 @(28,-1,36)
-    $titleLabel=New-Label $g $Title 0 0 400 30 12 $true;$titleLabel.Dock='Fill';$g.SetCellPosition($titleLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
+    $g=New-Grid $surface 3 @(0,-1,36)
+    $titleLabel=New-Label $g $Title 0 0 400 30 12 $true;$titleLabel.Name='TaskTitle';$titleLabel.AutoSize=$true;$titleLabel.Dock='Fill';$g.SetCellPosition($titleLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
+    $g.Add_SizeChanged({$cardTitle=$this.Controls['TaskTitle'];if($cardTitle){$cardTitle.MaximumSize=New-Object Drawing.Size([Math]::Max(1,$this.ClientSize.Width-$cardTitle.Margin.Horizontal),0)}})
     $descriptionLabel=New-Label $g $Description 0 0 400 70 9;$descriptionLabel.Dock='Fill';$descriptionLabel.ForeColor=$muted;$g.SetCellPosition($descriptionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
     $button=New-Button $g $ActionText 0 0 192 36 $Action;$button.Dock='Fill';$button.Margin=New-Object Windows.Forms.Padding(0,4,0,0);$g.SetCellPosition($button,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,2)))
     return $button
@@ -103,22 +104,22 @@ $null=New-Label $sidebar '流向' 24 100 150 48 23 $true
 $sideSubtitle=New-Label $sidebar 'F L O W S W I T C H' 24 147 150 24 8;$sideSubtitle.ForeColor=$muted
 $sectionLabel=New-Label $sidebar '网络工作台' 24 202 130 25 9;$sectionLabel.ForeColor=$muted
 $sideFoot=New-Label $sidebar ("每条连接，自由选择。`r`nFlowSwitch "+$script:ProductVersion) 22 740 150 54 9;$sideFoot.ForeColor=$muted;$sideFoot.Anchor='Bottom,Left'
-$sidebar.Add_SizeChanged({$sideFoot.Top=$sidebar.ClientSize.Height-$sideFoot.Height-24})
+$sidebar.Add_SizeChanged({$sideFoot.Top=$sidebar.ClientSize.Height-$sideFoot.Height-24;$lastNavigationBottom=0;foreach($n in $navigation){$lastNavigationBottom=[Math]::Max($lastNavigationBottom,$n.Bottom)};$sideFoot.Visible=($sideFoot.Top -gt $lastNavigationBottom+16)})
 $header=New-Object Windows.Forms.Panel;$header.Dock='Fill';$header.BackColor=$paper;$header.Margin=New-Object Windows.Forms.Padding(0,0,0,12);$layout.Controls.Add($header,0,0)
 $brand=New-Label $header '程序线路' 0 1 350 36 20 $true;$brand.ForeColor=[Drawing.Color]::White
 $tagline=New-Label $header '选中程序 → 设置线路 → 按此线路打开。' 2 39 670 24 9;$tagline.ForeColor=$muted
 $help=New-Button $header '本页用法' 816 17 116 34 {Show-Guide @('programs','proxies','diagnostics','switch')[$tabs.SelectedIndex]};$help.Anchor='Top,Right'
-$header.Add_SizeChanged({$help.Left=$header.ClientSize.Width-$help.Width;$tagline.Width=[Math]::Max(80,$help.Left-16)})
+$header.Add_SizeChanged({$help.Left=$header.ClientSize.Width-$help.Width;$brand.Width=[Math]::Max(80,$help.Left-16);$tagline.Width=[Math]::Max(80,$help.Left-16)})
 $noticePanel=New-Object Windows.Forms.Panel;$noticePanel.Dock='Fill';$noticePanel.Margin=New-Object Windows.Forms.Padding(0,0,0,8);$layout.Controls.Add($noticePanel,0,1)
 $statusLabel=New-Label $noticePanel '正在核对配置' 0 0 1020 22 10 $true;$statusLabel.Anchor='Top,Left,Right'
 $noticeLabel=New-Label $noticePanel '打开面板只读取状态；选好线路后再应用。' 0 23 1020 22 9;$noticeLabel.ForeColor=$muted;$noticeLabel.Anchor='Top,Left,Right'
 $noticePanel.Add_SizeChanged({$statusLabel.Width=$noticePanel.ClientSize.Width;$noticeLabel.Width=$noticePanel.ClientSize.Width})
 $tabs=New-Object FlowSwitch.UI.PageHost;$tabs.Dock='Fill';$tabs.Margin=New-Object Windows.Forms.Padding(0)
-$programPage=New-Object Windows.Forms.TabPage('程序线路');$proxyPage=New-Object Windows.Forms.TabPage('代理入口');$toolsPage=New-Object Windows.Forms.TabPage('检查与维护');$homePage=New-Object Windows.Forms.TabPage('网络切换')
+$programPage=New-Object FlowSwitch.UI.ScrollablePage('程序线路');$proxyPage=New-Object FlowSwitch.UI.ScrollablePage('代理入口');$toolsPage=New-Object FlowSwitch.UI.ScrollablePage('检查与维护');$homePage=New-Object FlowSwitch.UI.ScrollablePage('网络切换')
 foreach($page in @($programPage,$proxyPage,$toolsPage,$homePage)){$page.BackColor=[FlowSwitch.UI.Palette]::Surface}
 # Retain existing page indices for keyboard shortcuts and preview integrations.
 $tabs.TabPages.AddRange(@($programPage,$proxyPage,$toolsPage,$homePage));$layout.Controls.Add($tabs,0,2)
-$homeGrid=New-Grid $homePage 3 @(96,144,-1);$homeGrid.Padding=New-Object Windows.Forms.Padding(12)
+$homeGrid=New-Grid $homePage 3 @(96,0,-1);$homeGrid.Padding=New-Object Windows.Forms.Padding(12);$homeGrid.MinimumSize=New-Object Drawing.Size(0,740)
 $cards=New-Object Windows.Forms.TableLayoutPanel;$cards.Dock='Fill';$cards.ColumnCount=3;$cards.RowCount=1;$cards.Margin=New-Object Windows.Forms.Padding(0)
 [void]$cards.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,100)))
 for($i=0;$i -lt 3;$i++){[void]$cards.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,33.333)))}
@@ -134,44 +135,44 @@ $cardCaption=New-Label $panels[2] '程序专用线路' 16 10 260 22 9;$cardCapti
 $ruleValue=New-Label $panels[2] '正在读取…' 16 32 285 29 14 $true
 $ruleMeta=New-Label $panels[2] '在程序线路页单独设置' 16 61 290 21 8;$ruleMeta.ForeColor=$muted
 foreach($panel in $panels){$panel.Add_SizeChanged({foreach($label in $this.Controls){$label.Width=[Math]::Max(20,$this.ClientSize.Width-$label.Left*2)}})}
-$switchRow=New-Object FlowSwitch.UI.SurfacePanel;$switchRow.Dock='Fill';$switchRow.Padding=New-Object Windows.Forms.Padding(16,12,16,12);$switchRow.Margin=New-Object Windows.Forms.Padding(0,0,0,10);$homeGrid.Controls.Add($switchRow,0,1)
-$switchGrid=New-Grid $switchRow 3 @(32,32,-1)
+$switchRow=New-Object FlowSwitch.UI.SurfacePanel;$switchRow.Dock='Fill';$switchRow.AutoSize=$true;$switchRow.AutoSizeMode='GrowAndShrink';$switchRow.Padding=New-Object Windows.Forms.Padding(16,12,16,12);$switchRow.Margin=New-Object Windows.Forms.Padding(0,0,0,10);$homeGrid.Controls.Add($switchRow,0,1)
+$switchGrid=New-Grid $switchRow 3 @(32,0,84);$switchGrid.AutoSize=$true
 $switchTitle=New-Label $switchGrid '让所有程序使用同一线路' 0 0 500 30 12 $true;$switchTitle.Dock='Fill';$switchGrid.SetCellPosition($switchTitle,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
 $switchScope=New-Label $switchGrid '更改 Windows 系统代理及命令行代理变量；撤销程序专用线路，保留网站例外。旧应用可能需要正常重开。' 0 0 900 30 9;$switchScope.Dock='Fill';$switchScope.ForeColor=$muted;$switchGrid.SetCellPosition($switchScope,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
-$switchActions=New-Object Windows.Forms.TableLayoutPanel;$switchActions.Dock='Fill';$switchActions.ColumnCount=3;$switchActions.RowCount=1;$switchActions.Margin=New-Object Windows.Forms.Padding(0)
-[void]$switchActions.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,100)));foreach($width in @(160,180)){[void]$switchActions.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Absolute,$width)))}
-[void]$switchActions.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,100)));$switchGrid.Controls.Add($switchActions,0,2)
+$switchScope.AutoSize=$true;$switchGrid.Add_SizeChanged({$switchScope.MaximumSize=New-Object Drawing.Size([Math]::Max(1,$switchGrid.ClientSize.Width),0)})
+$switchActions=New-Object Windows.Forms.TableLayoutPanel;$switchActions.Dock='Fill';$switchActions.ColumnCount=2;$switchActions.RowCount=2;$switchActions.Margin=New-Object Windows.Forms.Padding(0)
+for($i=0;$i -lt 2;$i++){[void]$switchActions.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,50)));[void]$switchActions.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,50)))};$switchGrid.Controls.Add($switchActions,0,2)
 $networkChoice=New-Object FlowSwitch.UI.RouteChoice;$networkChoice.Name='UnifiedRouteChoice';$networkChoice.DropDownStyle='DropDownList';$networkChoice.DisplayMember='Name';$networkChoice.Dock='Fill';$networkChoice.Margin=New-Object Windows.Forms.Padding(0,3,12,3);$switchActions.Controls.Add($networkChoice,0,0)
+$switchActions.SetColumnSpan($networkChoice,2)
 $networkChoice.Add_SelectionChangeCommitted({$script:ChoiceDirty=$true;$noticeLabel.Text='已选择待应用目标；点击「统一切换」才会更改网络。'})
-$unify=New-Button $switchActions '统一切换' 0 0 146 38 {if($networkChoice.SelectedItem){Start-Work 'Switch' $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}};$unify.Dock='Fill';$unify.Margin=New-Object Windows.Forms.Padding(0,0,12,0);$unify.Primary=$true;$switchActions.SetCellPosition($unify,(New-Object Windows.Forms.TableLayoutPanelCellPosition(1,0)))
-$undo=New-Button $switchActions '撤回线路更改' 0 0 170 38 {Start-Work 'Restore' ''};$undo.Dock='Fill';$undo.Margin=New-Object Windows.Forms.Padding(0);$switchActions.SetCellPosition($undo,(New-Object Windows.Forms.TableLayoutPanelCellPosition(2,0)))
+$unify=New-Button $switchActions '统一切换' 0 0 146 38 {if($networkChoice.SelectedItem){Start-Work 'Switch' $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}};$unify.Dock='Fill';$unify.Margin=New-Object Windows.Forms.Padding(0,4,12,0);$unify.Primary=$true;$switchActions.SetCellPosition($unify,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
+$undo=New-Button $switchActions '撤回线路更改' 0 0 170 38 {Start-Work 'Restore' ''};$undo.Dock='Fill';$undo.Margin=New-Object Windows.Forms.Padding(0,4,0,0);$switchActions.SetCellPosition($undo,(New-Object Windows.Forms.TableLayoutPanelCellPosition(1,1)))
 $homeTasks=New-CardGrid $null;$homeGrid.Controls.Add($homeTasks,0,2)
 $null=New-TaskCard $homeTasks 0 0 '1. 准备代理入口' '先运行你已有的代理软件，再发现或填写地址。这里登记入口，不提供代理节点。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
 $null=New-TaskCard $homeTasks 1 0 '2. 为程序单独选线' '希望某个程序走另一条线路？选择它的 EXE 或快捷方式，再设置线路和打开方式。' '设置程序线路' {$tabs.SelectedTab=$programPage}
 $websiteButton=New-TaskCard $homeTasks 0 1 '网站例外：直连与代理并用' '只填写域名。例如国内网站直连、其他网站走代理；规则只影响经过流向入口的连接。' '设置网站例外…' {Start-Work 'WebsiteRules' ''}
 $null=New-TaskCard $homeTasks 1 1 '连接不通时先检查' '分别检查本地入口、上游和目标网站。端口监听或网页打开都不等于登录成功。' '检查当前网络' {$tabs.SelectedTab=$toolsPage;$toolsSections.SelectedIndex=0;Start-Work 'NetworkDiagnose' ''}
-$programGrid=New-Grid $programPage 3 @(52,-1,126);$programGrid.Padding=New-Object Windows.Forms.Padding(14)
-$toolbar=New-Object Windows.Forms.Panel;$toolbar.Dock='Fill';$toolbar.Margin=New-Object Windows.Forms.Padding(0);$programGrid.Controls.Add($toolbar,0,0)
-$null=New-Label $toolbar '搜索程序' 0 6 74 26 10
-$searchField=New-Object FlowSwitch.UI.SurfacePanel;$searchField.SetBounds(76,2,230,34);$searchField.BackColor=[FlowSwitch.UI.Palette]::Raised;$toolbar.Controls.Add($searchField)
-$searchBox=New-Object Windows.Forms.TextBox;$searchBox.BorderStyle='None';$searchBox.SetBounds(10,7,210,22);$searchField.Controls.Add($searchBox)
-$savedOnly=New-Object Windows.Forms.CheckBox;$savedOnly.Text='只看已设置';$savedOnly.SetBounds(320,4,140,30);$toolbar.Controls.Add($savedOnly)
-$add=New-Button $toolbar '添加程序…' 653 1 142 36 {Add-ProgramRule};$add.Anchor='Top,Right'
-$refresh=New-Button $toolbar '刷新列表' 875 1 106 36 {Start-Work 'Status' ''};$refresh.Anchor='Top,Right'
-$toolbar.Add_SizeChanged({$refresh.Left=$toolbar.ClientSize.Width-$refresh.Width;$add.Left=$refresh.Left-$add.Width-12})
+$programGrid=New-Grid $programPage 3 @(0,-1,0);$programGrid.Padding=New-Object Windows.Forms.Padding(14);$programGrid.MinimumSize=New-Object Drawing.Size(0,500)
+$toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Fill';$toolbar.AutoSize=$true;$toolbar.AutoSizeMode='GrowAndShrink';$toolbar.WrapContents=$true;$toolbar.Margin=New-Object Windows.Forms.Padding(0,0,0,10);$programGrid.Controls.Add($toolbar,0,0)
+$searchLabel=New-Label $toolbar '搜索程序' 0 0 74 26 10;$searchLabel.Margin=New-Object Windows.Forms.Padding(0,6,4,0)
+$searchField=New-Object FlowSwitch.UI.SurfacePanel;$searchField.Size=New-Object Drawing.Size(230,36);$searchField.Padding=New-Object Windows.Forms.Padding(10,7,10,7);$searchField.Margin=New-Object Windows.Forms.Padding(0,0,12,6);$searchField.BackColor=[FlowSwitch.UI.Palette]::Raised;$toolbar.Controls.Add($searchField)
+$searchBox=New-Object Windows.Forms.TextBox;$searchBox.BorderStyle='None';$searchBox.Dock='Fill';$searchField.Controls.Add($searchBox)
+$savedOnly=New-Object Windows.Forms.CheckBox;$savedOnly.Text='只看已设置';$savedOnly.AutoSize=$true;$savedOnly.Margin=New-Object Windows.Forms.Padding(0,7,12,6);$toolbar.Controls.Add($savedOnly)
+$add=New-Button $toolbar '添加程序…' 0 0 142 36 {Add-ProgramRule};$add.Margin=New-Object Windows.Forms.Padding(0,0,12,6)
+$refresh=New-Button $toolbar '刷新列表' 0 0 106 36 {Start-Work 'Status' ''};$refresh.Margin=New-Object Windows.Forms.Padding(0,0,0,6)
 $liveHost=New-Object FlowSwitch.UI.ListHost;$liveHost.Dock='Fill';$liveHost.Margin=New-Object Windows.Forms.Padding(0);$liveList=$liveHost.List;$liveList.View='Details';$liveList.FullRowSelect=$true;$liveList.GridLines=$false;$liveList.BorderStyle='None';$liveList.MultiSelect=$false
 $liveList.HideSelection=$false;$liveList.HeaderStyle='Nonclickable';$liveList.ShowItemToolTips=$true;$liveList.ForeColor=$ink
 foreach($column in @(@('程序',185),@('已保存的线路',100),@('实际连接（TCP）',355),@('设置与生效状态',320))){[void]$liveList.Columns.Add($column[0],[int]$column[1])};$programGrid.Controls.Add($liveHost,0,1)
 $emptyLabel=New-Label $liveList '未找到匹配程序。可清空搜索或添加 EXE / 快捷方式。' 25 65 700 50 11;$emptyLabel.ForeColor=$muted;$emptyLabel.Visible=$false
-$bottom=New-Grid $null 3 @(32,46,-1);$bottom.Padding=New-Object Windows.Forms.Padding(0,8,0,0);$programGrid.Controls.Add($bottom,0,2)
+$bottom=New-Grid $null 3 @(32,0,34);$bottom.AutoSize=$true;$bottom.AutoSizeMode='GrowAndShrink';$bottom.Padding=New-Object Windows.Forms.Padding(0,8,0,0);$programGrid.Controls.Add($bottom,0,2)
 $programSelectionLabel=New-Label $bottom '先从列表选择一个程序' 0 0 900 28 11 $true;$programSelectionLabel.Dock='Fill';$bottom.SetCellPosition($programSelectionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
-$programActions=New-Object Windows.Forms.FlowLayoutPanel;$programActions.Dock='Fill';$programActions.WrapContents=$false;$programActions.Margin=New-Object Windows.Forms.Padding(0);$bottom.Controls.Add($programActions,0,1)
+$programActions=New-Object Windows.Forms.FlowLayoutPanel;$programActions.Dock='Fill';$programActions.AutoSize=$true;$programActions.AutoSizeMode='GrowAndShrink';$programActions.WrapContents=$true;$programActions.Margin=New-Object Windows.Forms.Padding(0);$bottom.Controls.Add($programActions,0,1)
 $routeButton=New-Button $programActions '设置此程序线路 ▾' 0 0 190 36 {Show-SelectedMenu};$routeButton.Primary=$true
 $programLaunchButton=New-Button $programActions '按此线路打开' 0 0 166 36 {if($liveList.SelectedItems.Count){Start-Work 'AppLaunch' $liveList.SelectedItems[0].Tag.Path}}
 $programMoreButton=New-Button $programActions '更多设置 ▾' 0 0 142 36 {if($liveList.SelectedItems.Count){$script:AppTarget=$liveList.SelectedItems[0].Tag;$appMenu.Show($programMoreButton,(New-Object Drawing.Point(0,$programMoreButton.Height)))}}
 $programHint=New-Label $bottom '只更改所选程序；网站例外和桌面绑定在更多设置中。空闲时无 TCP 连接不代表断网。' 0 0 900 34 9;$programHint.Dock='Fill';$programHint.ForeColor=$muted;$bottom.SetCellPosition($programHint,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,2)))
-$toolsGrid=New-Grid $toolsPage 2 @(50,-1);$toolsGrid.Padding=New-Object Windows.Forms.Padding(14)
-$toolNavigation=New-Object Windows.Forms.FlowLayoutPanel;$toolNavigation.Dock='Fill';$toolNavigation.WrapContents=$false;$toolsGrid.Controls.Add($toolNavigation,0,0)
+$toolsGrid=New-Grid $toolsPage 2 @(0,-1);$toolsGrid.Padding=New-Object Windows.Forms.Padding(14);$toolsGrid.MinimumSize=New-Object Drawing.Size(0,500)
+$toolNavigation=New-Object Windows.Forms.FlowLayoutPanel;$toolNavigation.Dock='Fill';$toolNavigation.AutoSize=$true;$toolNavigation.AutoSizeMode='GrowAndShrink';$toolNavigation.WrapContents=$true;$toolNavigation.Margin=New-Object Windows.Forms.Padding(0,0,0,8);$toolsGrid.Controls.Add($toolNavigation,0,0)
 $toolsSections=New-Object FlowSwitch.UI.PageHost;$toolsSections.Dock='Fill';$toolsSections.Margin=New-Object Windows.Forms.Padding(0);$toolsGrid.Controls.Add($toolsSections,0,1)
 $checkPage=New-Object Windows.Forms.TabPage('连接检查');$maintenancePage=New-Object Windows.Forms.TabPage('维护与恢复');$recordsPage=New-Object Windows.Forms.TabPage('软件与记录');foreach($p in @($checkPage,$maintenancePage,$recordsPage)){$p.BackColor=[FlowSwitch.UI.Palette]::Surface};$toolsSections.TabPages.AddRange(@($checkPage,$maintenancePage,$recordsPage))
 $toolCategoryButtons=@()
@@ -205,8 +206,8 @@ try{$automaticUpdates.Checked=(Read-FlowUpdateSettings).enabled -ne $false}catch
 $automaticUpdates.Add_CheckedChanged({try{Set-FlowUpdateAutomatic $this.Checked}catch{Write-Activity '更新检查偏好保存失败。'}});$updateActions.Controls.Add($automaticUpdates)
 $updateNote=New-Label $clientBar '只从官方稳定版本检查和校验文件；安装需要明确点击并确认。安装前正常恢复代理，失败时保留当前窗口。' 0 0 900 48 9;$updateNote.Dock='Fill';$updateNote.ForeColor=$muted;$clientBar.SetCellPosition($updateNote,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
 $logHeading=New-Object Windows.Forms.Panel;$logHeading.Dock='Fill';$recordsGrid.Controls.Add($logHeading,0,1)
-$null=New-Label $logHeading '操作记录与检查结果' 0 8 420 30 11 $true
-$exportButton=New-Button $logHeading '导出诊断报告…' 0 0 176 36 {Export-Diagnostics};$exportButton.Anchor='Top,Right';$logHeading.Add_SizeChanged({$exportButton.Left=$logHeading.ClientSize.Width-$exportButton.Width})
+$logTitle=New-Label $logHeading '操作记录与检查结果' 0 8 420 30 11 $true
+$exportButton=New-Button $logHeading '导出诊断报告…' 0 0 176 36 {Export-Diagnostics};$exportButton.Anchor='Top,Right';$logHeading.Add_SizeChanged({$exportButton.Left=$logHeading.ClientSize.Width-$exportButton.Width;$logTitle.Width=[Math]::Max(20,$exportButton.Left-16)})
 $logHost=New-Object FlowSwitch.UI.LogHost;$logHost.Dock='Fill';$logBox=$logHost.Log;$logBox.Multiline=$true;$logBox.ReadOnly=$true;$logBox.ScrollBars='Vertical';$logBox.Dock='None';$logBox.BackColor=[Drawing.ColorTranslator]::FromHtml('#1B2A3D');$logBox.ForeColor=$ink;$logBox.BorderStyle='None';$recordsGrid.Controls.Add($logHost,0,2)
 $actionLabel=New-Label $layout '先准备代理入口，再统一切换或为程序单独选线。' 0 0 1000 32 9;$actionLabel.Dock='Fill';$actionLabel.TextAlign='MiddleLeft';$actionLabel.ForeColor=$muted;$layout.SetCellPosition($actionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,3)))
 $footer=New-Object Windows.Forms.Panel;$footer.Dock='Fill';$footer.Margin=New-Object Windows.Forms.Padding(0);$layout.Controls.Add($footer,0,4)
@@ -214,7 +215,7 @@ $autoRefresh=New-Object Windows.Forms.CheckBox;$autoRefresh.Text='自动刷新';
 $autoDiscovery=New-Object Windows.Forms.CheckBox;$autoDiscovery.Text='自动发现代理';$autoDiscovery.Checked=$true;$autoDiscovery.SetBounds(110,0,140,24);$autoDiscovery.ForeColor=$muted;$footer.Controls.Add($autoDiscovery);$autoDiscovery.Add_CheckedChanged({$script:NextPoll=[DateTime]::MinValue})
 $countLabel=New-Label $footer '' 260 1 350 24 9;$countLabel.ForeColor=$muted
 $checkedLabel=New-Label $footer '' 732 1 260 24 9;$checkedLabel.Anchor='Top,Right';$checkedLabel.TextAlign='TopRight';$checkedLabel.ForeColor=$muted
-$footer.Add_SizeChanged({$checkedLabel.Left=$footer.ClientSize.Width-$checkedLabel.Width;$countLabel.Width=[Math]::Max(40,$checkedLabel.Left-$countLabel.Left-12)})
+$footer.Add_SizeChanged({$checkedLabel.Left=$footer.ClientSize.Width-$checkedLabel.Width;$checkedLabel.Visible=($checkedLabel.Left -ge $countLabel.Left+80);$countLabel.Width=[Math]::Max(40,$(if($checkedLabel.Visible){$checkedLabel.Left}else{$footer.ClientSize.Width})-$countLabel.Left-12)})
 $uiTips=New-Object Windows.Forms.ToolTip;$uiTips.AutoPopDelay=16000;$uiTips.InitialDelay=450;$uiTips.ReshowDelay=150
 $uiTips.SetToolTip($unify,(Get-FlowHelpText 'switch'));$uiTips.SetToolTip($undo,'恢复最近一次线路切换前的网络和程序线路。桌面快捷方式请在启动方式中单独解除绑定。');$uiTips.SetToolTip($routeButton,(Get-FlowHelpText 'programs'));$uiTips.SetToolTip($websiteButton,(Get-FlowHelpText 'websites'));$uiTips.SetToolTip($programLaunchButton,(Get-FlowHelpText 'launch'))
 $appMenu=New-Object Windows.Forms.ContextMenuStrip;$appMenu.Font=$form.Font;$appMenu.ShowImageMargin=$false;$appMenu.Renderer=New-Object FlowSwitch.UI.MenuRenderer;$appMenu.BackColor=[FlowSwitch.UI.Palette]::Surface;$appMenu.ForeColor=$ink
@@ -291,9 +292,9 @@ $savedOnly.Add_CheckedChanged({if($script:LastApps){Show-Applications $script:La
 $form.Add_KeyDown({if($_.Control -and $_.KeyCode -eq 'F'){$tabs.SelectedIndex=0;$searchBox.Focus();$_.SuppressKeyPress=$true};if($_.KeyCode -eq 'F5'){Start-Work 'Status' '';$_.SuppressKeyPress=$true}})
 $form.Add_DragEnter({if($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)){$_.Effect='Copy'}})
 $form.Add_DragDrop({$files=$_.Data.GetData([Windows.Forms.DataFormats]::FileDrop);if($files.Count -eq 1){Add-ProgramRule $files[0]}else{Write-Activity '每次拖入一个程序，便于确认对应线路。'}})
-$proxyGrid=New-Grid $proxyPage 4 @(60,48,-1,110);$proxyGrid.Padding=New-Object Windows.Forms.Padding(14)
+$proxyGrid=New-Grid $proxyPage 4 @(60,0,-1,0);$proxyGrid.Padding=New-Object Windows.Forms.Padding(14);$proxyGrid.MinimumSize=New-Object Drawing.Size(0,500)
 $intro=New-Label $proxyGrid '登记已有代理软件提供的 HTTP / SOCKS5 入口。发现、保存和检测都不会自动切换网络；流向自身不提供代理节点。' 0 0 980 54 10;$intro.Dock='Fill';$proxyGrid.SetCellPosition($intro,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
-$proxyBar=New-Object Windows.Forms.FlowLayoutPanel;$proxyBar.Dock='Fill';$proxyBar.WrapContents=$false;$proxyBar.Margin=New-Object Windows.Forms.Padding(0);$proxyGrid.Controls.Add($proxyBar,0,1)
+$proxyBar=New-Object Windows.Forms.FlowLayoutPanel;$proxyBar.Dock='Fill';$proxyBar.AutoSize=$true;$proxyBar.AutoSizeMode='GrowAndShrink';$proxyBar.WrapContents=$true;$proxyBar.Margin=New-Object Windows.Forms.Padding(0,0,0,8);$proxyGrid.Controls.Add($proxyBar,0,1)
 $proxyAddButton=New-Button $proxyBar '添加代理入口…' 0 0 166 36 {Show-ProfileEditor}
 $discoveryButton=New-Button $proxyBar '发现后台代理' 0 0 166 36 {Start-Work 'Discover' ''}
 $proxyServiceButton=New-Button $proxyBar '备用与服务 ▾' 0 0 166 36 {$proxyServiceMenu.Show($proxyServiceButton,(New-Object Drawing.Point(0,$proxyServiceButton.Height)))}
@@ -305,9 +306,9 @@ $serviceHelpItem=New-Object Windows.Forms.ToolStripMenuItem('这些设置怎么�
 $proxyHost=New-Object FlowSwitch.UI.ListHost;$proxyHost.Dock='Fill';$proxyHost.Margin=New-Object Windows.Forms.Padding(0);$proxyList=$proxyHost.List;$proxyList.View='Details';$proxyList.FullRowSelect=$true;$proxyList.MultiSelect=$false;$proxyList.HideSelection=$false
 foreach($column in @(@('名称',240),@('协议',100),@('地址',245),@('端口',85),@('用途',135),@('状态',150))){[void]$proxyList.Columns.Add($column[0],[int]$column[1])};$proxyGrid.Controls.Add($proxyHost,0,2);$proxyList.Add_DoubleClick({Edit-SelectedProfile})
 $proxyEmpty=New-Label $proxyList '先运行代理软件，再点击「发现后台代理」；也可添加自定义地址。' 28 60 750 45 12;$proxyEmpty.ForeColor=$muted
-$proxySelection=New-Grid $null 3 @(30,44,-1);$proxySelection.Padding=New-Object Windows.Forms.Padding(0,6,0,0);$proxyGrid.Controls.Add($proxySelection,0,3)
+$proxySelection=New-Grid $null 3 @(30,0,32);$proxySelection.AutoSize=$true;$proxySelection.AutoSizeMode='GrowAndShrink';$proxySelection.Padding=New-Object Windows.Forms.Padding(0,6,0,0);$proxyGrid.Controls.Add($proxySelection,0,3)
 $proxySelectionLabel=New-Label $proxySelection '先选择一个代理入口' 0 0 900 28 11 $true;$proxySelectionLabel.Dock='Fill';$proxySelection.SetCellPosition($proxySelectionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
-$proxyActions=New-Object Windows.Forms.FlowLayoutPanel;$proxyActions.Dock='Fill';$proxyActions.WrapContents=$false;$proxyActions.Margin=New-Object Windows.Forms.Padding(0);$proxySelection.Controls.Add($proxyActions,0,1)
+$proxyActions=New-Object Windows.Forms.FlowLayoutPanel;$proxyActions.Dock='Fill';$proxyActions.AutoSize=$true;$proxyActions.AutoSizeMode='GrowAndShrink';$proxyActions.WrapContents=$true;$proxyActions.Margin=New-Object Windows.Forms.Padding(0);$proxySelection.Controls.Add($proxyActions,0,1)
 $proxyEditButton=New-Button $proxyActions '编辑入口…' 0 0 140 36 {Edit-SelectedProfile}
 $proxyProbeButton=New-Button $proxyActions '检测此入口' 0 0 140 36 {if($proxyList.SelectedItems.Count){Start-Work 'Diagnose' $proxyList.SelectedItems[0].Tag.Id}}
 $proxyOpenButton=New-Button $proxyActions '打开关联代理软件' 0 0 192 36 {if($proxyList.SelectedItems.Count){Open-Client $proxyList.SelectedItems[0].Tag.Id}}

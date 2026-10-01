@@ -25,10 +25,25 @@ function Test-UpdateProcessExited($Identity){
     $rows=@(Get-ProcessInventory -Id ([int]$Identity.id))
     if(-not $rows.Count){return $true}
     $row=$rows[0]
-    if(-not $row.Path -or $row.StartTime -eq [DateTime]::MinValue){throw 'Process identity is unavailable'}
+    # A snapshot can still contain a naturally exiting host whose limited query
+    # no longer supplies its identity. Unknown is never proof of exit.
+    if(-not $row.Path -or -not $row.StartTime -or $row.StartTime -eq [DateTime]::MinValue){return $false}
     if($row.StartTime.ToUniversalTime().Ticks.ToString() -cne [string]$Identity.ticks){return $true}
     if($row.Path -ine [string]$Identity.path){throw 'Process identity changed'}
     return $false
+}
+function Wait-UpdateProcessesExited($Identities,[DateTime]$Deadline){
+    # All hosts share the original handoff deadline; retries cannot extend it.
+    if([DateTime]::UtcNow -ge $Deadline){throw 'Owned process exit was not confirmed before update handoff expired'}
+    foreach($identity in @($Identities)){
+        while($true){
+            if([DateTime]::UtcNow -ge $Deadline){throw 'Owned process exit was not confirmed before update handoff expired'}
+            $exited=Test-UpdateProcessExited $identity
+            if([DateTime]::UtcNow -ge $Deadline){throw 'Owned process exit was not confirmed before update handoff expired'}
+            if($exited){break}
+            Start-Sleep -Milliseconds 100
+        }
+    }
 }
 function Assert-UpdatePortsReleased($Ports){
     if(-not @($Ports).Count){return}
@@ -99,7 +114,7 @@ function Invoke-UpdateInstall([string]$TicketPath){
         $deadline=[DateTime]::UtcNow.AddSeconds(90);$commit=Join-Path $stage ('commit-'+$handoff.nonce)
         while(-not (Test-Path -LiteralPath $commit)){if([DateTime]::UtcNow -gt $deadline){throw 'Update handoff expired'};Start-Sleep -Milliseconds 100}
         if([IO.File]::ReadAllText($commit) -cne $handoff.nonce){throw 'Invalid handoff confirmation'}
-        foreach($identity in @($handoff.processes)){while(-not (Test-UpdateProcessExited $identity)){if([DateTime]::UtcNow -gt $deadline){throw 'Owned process has not exited'};Start-Sleep -Milliseconds 100}}
+        Wait-UpdateProcessesExited @($handoff.processes) $deadline
         if(Test-Path -LiteralPath (Join-Path $data 'gateway-session.json')){throw 'Gateway session still exists'}
         Assert-UpdatePortsReleased @($handoff.ports)
         Assert-NoUpdateHost $root

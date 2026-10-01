@@ -1,4 +1,4 @@
-﻿param([string]$OutputDirectory='', [ValidateSet(1,1.25,1.5)][double]$Scale=1, [switch]$FallbackFont)
+﻿param([string]$OutputDirectory='', [ValidateSet(1,1.25,1.5)][double]$Scale=1, [switch]$FallbackFont, [switch]$SmallWorkspace)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::ThrowException)
@@ -8,7 +8,7 @@ foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBacke
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UiGuidance.ps1') -Destination $qa
-[Console]::WriteLine('RUNTIME PowerShell='+$PSVersionTable.PSVersion+' apartment='+[Threading.Thread]::CurrentThread.ApartmentState+'; main-window geometry/font simulation='+$Scale+'; fallback-font='+[bool]$FallbackFont+'; system DPI unchanged; later dialogs use existing actual-control checks')
+[Console]::WriteLine('RUNTIME PowerShell='+$PSVersionTable.PSVersion+' apartment='+[Threading.Thread]::CurrentThread.ApartmentState+'; main-window geometry/font simulation='+$Scale+'; fallback-font='+[bool]$FallbackFont+'; fixed-small-workspace='+[bool]$SmallWorkspace+'; system DPI unchanged; later dialogs use existing actual-control checks')
 foreach($sourceName in @('ProxyWindow.ps1','FlowTheme.cs')){[Console]::WriteLine('SOURCE '+$sourceName+' SHA256='+(Get-FileHash -LiteralPath (Join-Path $qa $sourceName) -Algorithm SHA256).Hash)}
 # Guard every Windows/network/process mutation even if a future UI handler bypasses Start-Work.
 $backendPath=Join-Path $qa 'ProxyBackend.ps1'
@@ -26,17 +26,25 @@ $checks=@'
         function Assert-Usability($Value,[string]$Message){if(-not $Value){throw ('Usability: '+$Message)};$script:UsabilityChecks++}
         function Start-Work([string]$Kind,[string]$Key){$script:UsabilityRequest=[pscustomobject]@{Kind=$Kind;Key=$Key};$script:UsabilityRequests++}
         function Get-UiTree($Root){foreach($child in $Root.Controls){$child;Get-UiTree $child}}
-        function Get-TaskGrid($Control){for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){if($ancestor.GetType().FullName -eq 'FlowSwitch.UI.TaskGrid'){return $ancestor}}}
         function Scroll-TaskControl($Control){
-            $grid=Get-TaskGrid $Control
-            if($grid){$grid.ScrollControlIntoView($Control);$grid.PerformLayout();[Windows.Forms.Application]::DoEvents()}
+            $scrollAncestors=@(for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){if($ancestor -is [Windows.Forms.ScrollableControl] -and $ancestor.AutoScroll){$ancestor}})
+            [array]::Reverse($scrollAncestors)
+            # Scrolling an inner viewport changes the target's location in its outer page.
+            # Repeat outer-to-inner so both viewports settle before validating full bounds.
+            for($pass=0;$pass -lt 2;$pass++){foreach($ancestor in $scrollAncestors){$ancestor.ScrollControlIntoView($Control);$ancestor.PerformLayout();[Windows.Forms.Application]::DoEvents()}}
         }
         function Assert-ControlBounds($Control,[string]$Context){
             Scroll-TaskControl $Control
             $parent=$Control.Parent
             Assert-Usability ($Control.Width -gt 0 -and $Control.Height -gt 0 -and $Control.Left -ge 0 -and $Control.Top -ge 0 -and $Control.Right -le $parent.ClientSize.Width -and $Control.Bottom -le $parent.ClientSize.Height) ($Context+' clipped in parent: '+$Control.Text+' '+$Control.Bounds+' parent '+$parent.ClientSize)
             $screenRect=$Control.RectangleToScreen($Control.ClientRectangle)
-            for($ancestor=$parent;$ancestor;$ancestor=$ancestor.Parent){$visibleRect=$ancestor.RectangleToScreen($ancestor.ClientRectangle);Assert-Usability ($visibleRect.Contains($screenRect)) ($Context+' clipped by '+$ancestor.GetType().Name+': '+$Control.Text+' control '+$screenRect+' ancestor '+$visibleRect)}
+            for($ancestor=$parent;$ancestor;$ancestor=$ancestor.Parent){
+                $visibleRect=$ancestor.RectangleToScreen($ancestor.ClientRectangle)
+                if(-not $visibleRect.Contains($screenRect)){
+                    for($scroll=$parent;$scroll;$scroll=$scroll.Parent){if($scroll -is [Windows.Forms.ScrollableControl] -and $scroll.AutoScroll){[Console]::WriteLine('CLIPPED-SCROLL type='+$scroll.GetType().Name+' client='+$scroll.ClientSize+' display='+$scroll.DisplayRectangle+' min='+$scroll.AutoScrollMinSize+' position='+$scroll.AutoScrollPosition+' vertical='+$scroll.VerticalScroll.Visible+' horizontal='+$scroll.HorizontalScroll.Visible)}}
+                }
+                Assert-Usability ($visibleRect.Contains($screenRect)) ($Context+' clipped by '+$ancestor.GetType().Name+': '+$Control.Text+' control '+$screenRect+' ancestor '+$visibleRect)
+            }
             foreach($sibling in $parent.Controls){
                 if($sibling -ne $Control -and $sibling.Visible -and ($sibling -is [Windows.Forms.Button] -or $sibling -is [Windows.Forms.Label] -or $sibling -is [Windows.Forms.CheckBox] -or $sibling -is [Windows.Forms.ComboBox])){Assert-Usability (-not $Control.Bounds.IntersectsWith($sibling.Bounds)) ($Context+' overlaps '+$Control.Text+' / '+$sibling.Text)}
             }
@@ -44,7 +52,7 @@ $checks=@'
         function Write-WindowEvidence([string]$Context){
             $graphics=$form.CreateGraphics()
             try{
-                [Console]::WriteLine('WINDOW scale='+$factor+' case='+$Context+' actual='+$form.Size+' client='+$form.ClientSize+' DPI='+$graphics.DpiX+'x'+$graphics.DpiY+' Screen.WorkingArea='+[Windows.Forms.Screen]::FromControl($form).WorkingArea+' MaxWindowTrackSize='+[Windows.Forms.SystemInformation]::MaxWindowTrackSize+' font='+$form.Font.Name+'/'+$form.Font.SizeInPoints+'pt; task-description='+$homeTasks.Controls[0].Controls[0].Controls[1].Font)
+                [Console]::WriteLine('WINDOW scale='+$factor+' fixed-small-workspace='+$smallWorkspace+' case='+$Context+' actual='+$form.Size+' client='+$form.ClientSize+' DPI='+$graphics.DpiX+'x'+$graphics.DpiY+' Screen.WorkingArea='+[Windows.Forms.Screen]::FromControl($form).WorkingArea+' MaxWindowTrackSize='+[Windows.Forms.SystemInformation]::MaxWindowTrackSize+' font='+$form.Font.Name+'/'+$form.Font.SizeInPoints+'pt; task-description='+$homeTasks.Controls[0].Controls[0].Controls[1].Font)
             }finally{$graphics.Dispose()}
         }
         function Assert-TaskScrollAccess($Root,[string]$Context){
@@ -142,6 +150,7 @@ $checks=@'
             Assert-Usability ($script:InfoSeen -and -not $script:InfoError) ('Guide actual dialog opens and fits: '+$script:InfoError)
         }
         $factor=[single]::Parse($env:FLOW_USABILITY_SCALE,[Globalization.CultureInfo]::InvariantCulture)
+        $smallWorkspace=$env:FLOW_USABILITY_SMALL_WORKSPACE -eq '1'
         $originalDefault=$form.Size;$originalMinimum=$form.MinimumSize
         # Snapshot local fonts before changing their ancestors. Inherited Font values must not be multiplied again.
         $explicitFonts=@(foreach($control in @($form)+@(Get-UiTree $form)+@($appMenu,$routeMenu,$proxyServiceMenu,$proxyMoreMenu)){
@@ -162,6 +171,15 @@ $checks=@'
             [pscustomobject]@{Name='default';Width=[int]($originalDefault.Width*$factor);Height=[int]($originalDefault.Height*$factor)},
             [pscustomobject]@{Name='wide';Width=[int](1600*$factor);Height=[int](980*$factor)}
         )
+        if($smallWorkspace){
+            # Cloud desktop window limits remain fixed after scaling geometry and fonts.
+            $form.MinimumSize=New-Object Drawing.Size(800,680)
+            $dimensions=@(
+                [pscustomobject]@{Name='minimum';Width=1022;Height=726},
+                [pscustomobject]@{Name='default';Width=1022;Height=726},
+                [pscustomobject]@{Name='wide';Width=1044;Height=788}
+            )
+        }
         Assert-Usability ($tabs.TabPages.Count -eq 4 -and $navigation.Count -eq 4) 'Four pages and four navigation actions are present'
         Assert-Usability ($tabs.TabPages[0] -eq $programPage -and $tabs.TabPages[1] -eq $proxyPage -and $tabs.TabPages[2] -eq $toolsPage -and $tabs.TabPages[3] -eq $homePage) 'Existing tab indices remain compatible and home is appended'
         Assert-Usability ($layout.RowCount -eq 5) 'Shell has header, status, workspace, action and footer rows'
@@ -175,6 +193,11 @@ $checks=@'
                 Assert-Usability ($tabs.SelectedIndex -eq $index -and $brand.Text -eq $tabs.SelectedTab.Text -and @($navigation|Where-Object Selected).Count -eq 1) ('Navigation selects '+$pages[$index])
                 Save-UiCapture ($pages[$index]+'-'+$dimension.Name+'-'+$factor)
                 Assert-ActionLayout $form ($dimension.Name+'/'+$pages[$index]+'/'+$factor)
+                if($tabs.SelectedTab -is [Windows.Forms.ScrollableControl] -and $tabs.SelectedTab.AutoScroll){
+                    $page=$tabs.SelectedTab
+                    [Console]::WriteLine('PAGE-SCROLL case='+$dimension.Name+'/'+$pages[$index]+'/'+$factor+' client='+$page.ClientSize+' display='+$page.DisplayRectangle+' position='+$page.AutoScrollPosition+' vertical='+$page.VerticalScroll.Visible+' horizontal='+$page.HorizontalScroll.Visible)
+                    Assert-Usability (-not $page.HorizontalScroll.Visible) ($dimension.Name+'/'+$pages[$index]+' page needs no horizontal scroll')
+                }
                 if($index -eq 3){Assert-TaskScrollAccess $form ('home-'+$dimension.Name+'-'+$factor)}
                 if($index -eq 3){Assert-Usability ($networkChoice.Visible -and $unify.Visible -and $undo.Visible -and $cards.Visible) 'Home exposes global route choice, explicit switch and rollback'}
                 else{Assert-Usability (-not $switchRow.Visible -and -not $cards.Visible) 'Other pages reserve space for their own task'}
@@ -191,16 +214,16 @@ $checks=@'
         $navigation[3].PerformClick();[Windows.Forms.Application]::DoEvents()
         $homeText=(@(Get-UiTree $homePage|Where-Object {$_.Visible -and $_ -is [Windows.Forms.Label]}|ForEach-Object Text) -join "`r`n")
         Assert-Usability ($homeText -match 'Windows|系统代理' -and $homeText -match '环境变量|命令行' -and $homeText -match '程序.*(专用|线路)' -and $homeText -match '(网站.*(保留|例外)|保留.*网站)') 'Home explains unified scope and retained website exceptions'
-        $script:UsabilityRequest=$null;$unify.PerformClick()
+        $script:UsabilityRequest=$null;Scroll-TaskControl $unify;$unify.PerformClick()
         Assert-Usability ($script:UsabilityRequest.Kind -eq 'Switch' -and $script:UsabilityRequest.Key -ceq $networkChoice.SelectedItem.Id) 'Home explicit switch dispatches the visible selected route'
-        $script:UsabilityRequest=$null;$undo.PerformClick()
+        $script:UsabilityRequest=$null;Scroll-TaskControl $undo;$undo.PerformClick()
         Assert-Usability ($script:UsabilityRequest.Kind -eq 'Restore') 'Home rollback remains reachable'
         $navigation[0].PerformClick();[Windows.Forms.Application]::DoEvents()
         $launchAction=$programLaunchButton
         Assert-Usability ($null -ne $launchAction -and $launchAction.Visible) 'Program page exposes direct launch using its route'
         foreach($item in $liveList.Items){$item.Selected=$false};[Windows.Forms.Application]::DoEvents()
         Assert-Usability (-not $routeButton.Enabled -and -not $programMoreButton.Enabled -and -not $launchAction.Enabled) 'Selection-only route, more settings and launch are disabled without a program'
-        $script:UsabilityRequest=$null;$routeButton.PerformClick();$launchAction.PerformClick()
+        $script:UsabilityRequest=$null;Scroll-TaskControl $routeButton;$routeButton.PerformClick();Scroll-TaskControl $launchAction;$launchAction.PerformClick()
         Assert-Usability ($null -eq $script:UsabilityRequest -and -not $appMenu.Visible) 'Disabled selection actions cannot dispatch or open a stale menu'
         Save-UiCapture ('programs-unselected-'+$factor)
         $fixture=[pscustomobject]@{Name='隔离测试编辑器';Path='C:\Fixtures\editor.exe';SavedPath='C:\Fixtures\editor.exe';Policy='backup';Mode='managed';CanLaunch=$true;HasSavedRule=$true;RequiresRepair=$false;Loaded=$true;Actual='未观察到 TCP 连接';Status='已保存备用线路，等待启动';PIDs='';ChildNames='';Coverage='隔离演示对象'}
@@ -212,16 +235,16 @@ $checks=@'
         Save-UiCapture ('programs-selected-'+$factor)
         foreach($dimension in $dimensions){$form.Size=New-Object Drawing.Size($dimension.Width,$dimension.Height);[Windows.Forms.Application]::DoEvents();Save-UiCapture ('programs-selected-'+$dimension.Name+'-'+$factor);Assert-ActionLayout $form ('selected/'+$dimension.Name);Assert-Instruction $programSelectionLabel ('selected target/'+$dimension.Name);Assert-Instruction $programHint ('selected scope/'+$dimension.Name)}
         $form.Size=New-Object Drawing.Size($dimensions[1].Width,$dimensions[1].Height);[Windows.Forms.Application]::DoEvents()
-        $script:UsabilityRequest=$null;$launchAction.PerformClick()
+        $script:UsabilityRequest=$null;Scroll-TaskControl $launchAction;$launchAction.PerformClick()
         Assert-Usability ($script:UsabilityRequest.Kind -eq 'AppLaunch' -and $script:UsabilityRequest.Key -ceq $fixture.Path) 'Direct launch dispatches the selected executable without launching a user application'
-        $routeButton.PerformClick();[Windows.Forms.Application]::DoEvents()
+        Scroll-TaskControl $routeButton;$routeButton.PerformClick();[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($routeMenu.Visible) 'Selected-program route button opens its compact route menu'
         foreach($routeKey in @('Follow','Direct','office','backup')){Assert-Usability (@($routeMenu.Items|Where-Object {$_.Tag -ceq $routeKey -and $_.Available -and $_.Enabled}).Count -eq 1) ('Program route menu still exposes '+$routeKey)}
         Save-UiCapture ('program-route-menu-'+$factor) $routeMenu
         $script:UsabilityRequest=$null;@($routeMenu.Items|Where-Object Tag -eq 'Direct')[0].PerformClick();$routeMenu.Close()
         $requestPayload=$script:UsabilityRequest.Key|ConvertFrom-Json
         Assert-Usability ($script:UsabilityRequest.Kind -eq 'ManagedAppRoute' -and $requestPayload.path -ceq $fixture.Path -and $requestPayload.route -ceq 'Direct') 'Selected route action keeps exact program scope'
-        $programMoreButton.PerformClick();[Windows.Forms.Application]::DoEvents()
+        Scroll-TaskControl $programMoreButton;$programMoreButton.PerformClick();[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($appMenu.Visible -and $menuTitle.Text -ceq $fixture.Name) 'Program more-settings menu names the selected target'
         $menuItems=@(Get-MenuTree $appMenu.Items)
         $submenuIndex=0
@@ -229,7 +252,7 @@ $checks=@'
         Save-UiCapture ('program-more-menu-'+$factor) $appMenu;$appMenu.Close()
         $navigation[1].PerformClick();[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($proxyServiceButton.Visible -and $proxyMoreButton.Visible) 'Proxy service and selected-entry more settings have visible entries'
-        $proxyServiceButton.PerformClick();[Windows.Forms.Application]::DoEvents()
+        Scroll-TaskControl $proxyServiceButton;$proxyServiceButton.PerformClick();[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($proxyServiceMenu.Visible) 'Proxy service entry opens an actual menu'
         foreach($advancedItem in @($failoverItem,$independentItem,$externalItem,$serviceHelpItem)){Assert-Usability ($advancedItem.Available -and $proxyServiceMenu.Items.Contains($advancedItem)) ('Advanced proxy service action retained: '+$advancedItem.Text)}
         Save-UiCapture ('proxy-services-'+$factor) $proxyServiceMenu
@@ -239,10 +262,10 @@ $checks=@'
         Assert-Usability (-not $proxyEditButton.Enabled -and -not $proxyProbeButton.Enabled -and -not $proxyMoreButton.Enabled -and -not $proxyOpenButton.Enabled) 'Proxy selection actions are disabled without an entry'
         $proxyList.Items[0].Selected=$true;[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($proxyEditButton.Enabled -and $proxyProbeButton.Enabled -and $proxyMoreButton.Enabled) 'Selecting a proxy enables only its entry operations'
-        $proxyMoreButton.PerformClick();[Windows.Forms.Application]::DoEvents()
+        Scroll-TaskControl $proxyMoreButton;$proxyMoreButton.PerformClick();[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($proxyMoreMenu.Visible -and $deleteProxyItem.Available) 'Selected proxy menu retains explicit removal'
         Save-UiCapture ('proxy-more-'+$factor) $proxyMoreMenu;$proxyMoreMenu.Close()
-        $script:UsabilityRequest=$null;$proxyProbeButton.PerformClick()
+        $script:UsabilityRequest=$null;Scroll-TaskControl $proxyProbeButton;$proxyProbeButton.PerformClick()
         Assert-Usability ($script:UsabilityRequest.Kind -eq 'Diagnose' -and $script:UsabilityRequest.Key -ceq $proxyList.SelectedItems[0].Tag.Id) 'Proxy diagnosis targets exactly the selected entry'
         Assert-Usability (@(Get-UiTree $toolsPage|Where-Object {$_ -is [Windows.Forms.TabControl]}).Count -ge 1) 'Tools have browsable task groups'
         foreach($control in @($networkDiagnoseButton,$networkRepairButton,$cleanStopButton,$updateButton,$automaticUpdates)){Reveal-UiControl $control;Assert-ActionLayout $form ('tools behavior/'+$control.Text)}
@@ -336,7 +359,7 @@ $checks=@'
         try{$failoverTimer.Start();Show-FailoverEditor}finally{$failoverTimer.Stop();$failoverTimer.Dispose()}
         Assert-Usability ($script:FailoverSeen -and -not $script:FailoverError -and -not $script:DialogOpen) ('Latest failover policy dialog opens and cancels cleanly: '+$script:FailoverError)
         Assert-Usability ($script:ProfileSaveCalls -eq $saveCallsBefore -and ($script:ProfileFixture|ConvertTo-Json -Depth 12 -Compress) -ceq $failoverSnapshot) 'Canceling the freshly read policy never saves or changes settings'
-        Write-Output ('PASS: '+$script:UsabilityChecks+' usability UI assertions; '+$script:UsabilityShots+' captures; scale '+$factor+'; isolated Demo and mutation guards; fresh failover and read-failure regressions.')
+        Write-Output ('PASS: '+$script:UsabilityChecks+' usability UI assertions; '+$script:UsabilityShots+' captures; scale '+$factor+'; fixed small workspace '+$smallWorkspace+'; isolated Demo and mutation guards; fresh failover and read-failure regressions.')
 '@
 $path=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($path)
 if($FallbackFont){$source=$source.Replace("'Microsoft YaHei UI'","'Microsoft Sans Serif'")}
@@ -345,12 +368,15 @@ if(([regex]::Matches($source,[regex]::Escape($marker))).Count -ne 1){throw 'Prev
 $source=$source.Replace($marker,$checks+"`r`n"+$marker)
 [IO.File]::WriteAllText($path,$source,(New-Object Text.UTF8Encoding($true)))
 $priorScale=$env:FLOW_USABILITY_SCALE
+$priorSmallWorkspace=$env:FLOW_USABILITY_SMALL_WORKSPACE
 try{
     $env:FLOW_USABILITY_SCALE=$Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $env:FLOW_USABILITY_SMALL_WORKSPACE=$(if($SmallWorkspace){'1'}else{'0'})
     $uiPassed=$false
     & (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'usability.png') | ForEach-Object {if($_ -match '^PASS: \d+ usability UI assertions'){$uiPassed=$true};Write-Output $_}
     if(-not $uiPassed){throw 'Usability UI did not complete its assertions.'}
 }finally{
     $env:FLOW_USABILITY_SCALE=$priorScale
+    $env:FLOW_USABILITY_SMALL_WORKSPACE=$priorSmallWorkspace
     if($OutputDirectory){[void][IO.Directory]::CreateDirectory($OutputDirectory);foreach($artifact in Get-ChildItem -LiteralPath $qa -Filter '*.png'){Copy-Item -LiteralPath $artifact.FullName -Destination (Join-Path $OutputDirectory $artifact.Name)}}
 }

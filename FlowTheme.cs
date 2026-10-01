@@ -100,7 +100,7 @@ namespace FlowSwitch.UI
     }
     public sealed class TaskGrid : TableLayoutPanel
     {
-        private float minimumCardHeight=180;
+        private float minimumCardHeight=210;
         private bool adjusting;
         public override Rectangle DisplayRectangle {
             get { Rectangle rect=base.DisplayRectangle; rect.Width=ClientSize.Width; return rect; }
@@ -132,6 +132,25 @@ namespace FlowSwitch.UI
                     RowStyles[0].Height=first; RowStyles[1].Height=second;
                     AutoScrollMinSize=new Size(0,minimum*2+Padding.Vertical);
                 }
+                base.OnLayout(e);
+            } finally {adjusting=false;}
+        }
+    }
+    public sealed class ScrollablePage : TabPage
+    {
+        private bool adjusting;
+        public ScrollablePage(string title) {Text=title;AutoScroll=true;}
+        public override Rectangle DisplayRectangle {
+            get {Rectangle rect=base.DisplayRectangle;rect.Width=ClientSize.Width;return rect;}
+        }
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            if(adjusting) {base.OnLayout(e);return;}
+            adjusting=true;
+            try {
+                int minimum=0;
+                foreach(Control child in Controls) if(child.Dock==DockStyle.Fill) minimum=Math.Max(minimum,child.MinimumSize.Height);
+                AutoScrollMinSize=new Size(0,minimum);
                 base.OnLayout(e);
             } finally {adjusting=false;}
         }
