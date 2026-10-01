@@ -65,6 +65,7 @@ namespace FlowSwitch.UI
         public bool Selected {get;set;}
         public bool Navigation {get;set;}
         public int Glyph {get;set;}
+        public Rectangle TextBounds {get{return new Rectangle(Navigation?46:7,0,Math.Max(0,Width-(Navigation?55:14)),Height);}}
         public ActionButton() { DoubleBuffered=true; FlatStyle=FlatStyle.Flat; FlatAppearance.BorderSize=0; UseVisualStyleBackColor=false; BackColor=Palette.Raised; ForeColor=Palette.Text; }
         protected override void OnMouseEnter(EventArgs e){over=true;Invalidate();base.OnMouseEnter(e);}
         protected override void OnMouseLeave(EventArgs e){over=false;down=false;Invalidate();base.OnMouseLeave(e);}
@@ -94,7 +95,45 @@ namespace FlowSwitch.UI
             var textColor=!Enabled?Palette.Muted:(Primary?ColorTranslator.FromHtml("#132D43"):(Selected?Palette.Accent:ForeColor));
             var flags=TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine;
             flags|=Navigation?TextFormatFlags.Left:TextFormatFlags.HorizontalCenter;
-            TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(Navigation?46:7,0,Width-(Navigation?55:14),Height),textColor,flags);
+            TextRenderer.DrawText(e.Graphics,Text,Font,TextBounds,textColor,flags);
+        }
+    }
+    public sealed class TaskGrid : TableLayoutPanel
+    {
+        private float minimumCardHeight=180;
+        private bool adjusting;
+        public override Rectangle DisplayRectangle {
+            get { Rectangle rect=base.DisplayRectangle; rect.Width=ClientSize.Width; return rect; }
+        }
+        public TaskGrid()
+        {
+            AutoScroll=true; ColumnCount=2; RowCount=2; Margin=Padding.Empty;
+            for(int i=0;i<2;i++) {
+                ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
+                RowStyles.Add(new RowStyle(SizeType.Absolute,minimumCardHeight));
+            }
+        }
+        protected override void ScaleControl(SizeF factor,BoundsSpecified specified)
+        {
+            minimumCardHeight=Math.Max(1,minimumCardHeight*factor.Height);
+            base.ScaleControl(factor,specified);
+        }
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            if(adjusting) {base.OnLayout(e);return;}
+            adjusting=true;
+            try {
+                if(RowStyles.Count>=2) {
+                    int minimum=(int)Math.Ceiling(minimumCardHeight);
+                    int available=Math.Max(0,ClientSize.Height-Padding.Vertical);
+                    int first=Math.Max(minimum,available/2);
+                    int second=Math.Max(minimum,available-first);
+                    RowStyles[0].SizeType=RowStyles[1].SizeType=SizeType.Absolute;
+                    RowStyles[0].Height=first; RowStyles[1].Height=second;
+                    AutoScrollMinSize=new Size(0,minimum*2+Padding.Vertical);
+                }
+                base.OnLayout(e);
+            } finally {adjusting=false;}
         }
     }
     public sealed class PageHost : TabControl

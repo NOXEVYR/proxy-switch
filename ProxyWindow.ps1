@@ -36,7 +36,7 @@ $accent=[Drawing.ColorTranslator]::FromHtml('#9EDBFA')
 $paper=[Drawing.ColorTranslator]::FromHtml('#121C2B')
 $form=New-Object Windows.Forms.Form
 $form.Text='流向 · 网络代理管家 | FlowSwitch '+$script:ProductVersion
-$form.ClientSize=New-Object Drawing.Size(1260,840)
+$form.ClientSize=New-Object Drawing.Size(1260,860)
 $form.MinimumSize=New-Object Drawing.Size(1180,790)
 $form.StartPosition='CenterScreen';$form.AutoScaleMode='Dpi';$form.BackColor=$paper
 $form.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
@@ -88,8 +88,7 @@ function New-TaskCard($Parent,[int]$Column,[int]$Row,[string]$Title,[string]$Des
     return $button
 }
 function New-CardGrid($Parent) {
-    $g=New-Object Windows.Forms.TableLayoutPanel;$g.Dock='Fill';$g.ColumnCount=2;$g.RowCount=2;$g.Margin=New-Object Windows.Forms.Padding(0)
-    for($i=0;$i -lt 2;$i++){[void]$g.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,50)));[void]$g.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,50)))}
+    $g=New-Object FlowSwitch.UI.TaskGrid;$g.Dock='Fill';$g.Margin=New-Object Windows.Forms.Padding(0)
     if($Parent){$Parent.Controls.Add($g)};return $g
 }
 $layout=New-Grid $null 5 @(76,58,-1,32,26);$layout.Padding=New-Object Windows.Forms.Padding(24,16,24,12);$layout.BackColor=$paper

@@ -5,13 +5,13 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: powershell
 jobs:
-  checks:
+  isolated-regression:
     runs-on: windows-2022
     timeout-minutes: 15
-    defaults:
-      run:
-        shell: powershell
     steps:
       - uses: actions/checkout@v4
       - name: Full isolated regression
@@ -22,6 +22,11 @@ jobs:
           [void][IO.Directory]::CreateDirectory($env:TEMP)
           & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-All.ps1
           if($LASTEXITCODE -ne 0){throw 'Regression failed'}
+  ui-regression:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
       - name: Routing and visual UI regression
         run: |
           & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-RoutingWorkbenchUI.ps1
@@ -31,4 +36,6 @@ jobs:
           foreach($scale in @(1,1.25,1.5)){
             & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-UsabilityUI.ps1 -Scale $scale
             if($LASTEXITCODE -ne 0){throw ('Usability UI failed at scale '+$scale)}
+            & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-UsabilityUI.ps1 -Scale $scale -FallbackFont
+            if($LASTEXITCODE -ne 0){throw ('Fallback-font UI failed at scale '+$scale)}
           }

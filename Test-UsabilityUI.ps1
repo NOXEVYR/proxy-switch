@@ -1,4 +1,4 @@
-﻿param([string]$OutputDirectory='', [ValidateSet(1,1.25,1.5)][double]$Scale=1)
+﻿param([string]$OutputDirectory='', [ValidateSet(1,1.25,1.5)][double]$Scale=1, [switch]$FallbackFont)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::ThrowException)
@@ -8,6 +8,8 @@ foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBacke
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UiGuidance.ps1') -Destination $qa
+[Console]::WriteLine('RUNTIME PowerShell='+$PSVersionTable.PSVersion+' apartment='+[Threading.Thread]::CurrentThread.ApartmentState+'; main-window geometry/font simulation='+$Scale+'; fallback-font='+[bool]$FallbackFont+'; system DPI unchanged; later dialogs use existing actual-control checks')
+foreach($sourceName in @('ProxyWindow.ps1','FlowTheme.cs')){[Console]::WriteLine('SOURCE '+$sourceName+' SHA256='+(Get-FileHash -LiteralPath (Join-Path $qa $sourceName) -Algorithm SHA256).Hash)}
 # Guard every Windows/network/process mutation even if a future UI handler bypasses Start-Work.
 $backendPath=Join-Path $qa 'ProxyBackend.ps1'
 [IO.File]::AppendAllText($backendPath,@'
@@ -24,10 +26,57 @@ $checks=@'
         function Assert-Usability($Value,[string]$Message){if(-not $Value){throw ('Usability: '+$Message)};$script:UsabilityChecks++}
         function Start-Work([string]$Kind,[string]$Key){$script:UsabilityRequest=[pscustomobject]@{Kind=$Kind;Key=$Key};$script:UsabilityRequests++}
         function Get-UiTree($Root){foreach($child in $Root.Controls){$child;Get-UiTree $child}}
+        function Get-TaskGrid($Control){for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){if($ancestor.GetType().FullName -eq 'FlowSwitch.UI.TaskGrid'){return $ancestor}}}
+        function Scroll-TaskControl($Control){
+            $grid=Get-TaskGrid $Control
+            if($grid){$grid.ScrollControlIntoView($Control);$grid.PerformLayout();[Windows.Forms.Application]::DoEvents()}
+        }
+        function Assert-ControlBounds($Control,[string]$Context){
+            Scroll-TaskControl $Control
+            $parent=$Control.Parent
+            Assert-Usability ($Control.Width -gt 0 -and $Control.Height -gt 0 -and $Control.Left -ge 0 -and $Control.Top -ge 0 -and $Control.Right -le $parent.ClientSize.Width -and $Control.Bottom -le $parent.ClientSize.Height) ($Context+' clipped in parent: '+$Control.Text+' '+$Control.Bounds+' parent '+$parent.ClientSize)
+            $screenRect=$Control.RectangleToScreen($Control.ClientRectangle)
+            for($ancestor=$parent;$ancestor;$ancestor=$ancestor.Parent){$visibleRect=$ancestor.RectangleToScreen($ancestor.ClientRectangle);Assert-Usability ($visibleRect.Contains($screenRect)) ($Context+' clipped by '+$ancestor.GetType().Name+': '+$Control.Text+' control '+$screenRect+' ancestor '+$visibleRect)}
+            foreach($sibling in $parent.Controls){
+                if($sibling -ne $Control -and $sibling.Visible -and ($sibling -is [Windows.Forms.Button] -or $sibling -is [Windows.Forms.Label] -or $sibling -is [Windows.Forms.CheckBox] -or $sibling -is [Windows.Forms.ComboBox])){Assert-Usability (-not $Control.Bounds.IntersectsWith($sibling.Bounds)) ($Context+' overlaps '+$Control.Text+' / '+$sibling.Text)}
+            }
+        }
+        function Write-WindowEvidence([string]$Context){
+            $graphics=$form.CreateGraphics()
+            try{
+                [Console]::WriteLine('WINDOW scale='+$factor+' case='+$Context+' actual='+$form.Size+' client='+$form.ClientSize+' DPI='+$graphics.DpiX+'x'+$graphics.DpiY+' Screen.WorkingArea='+[Windows.Forms.Screen]::FromControl($form).WorkingArea+' MaxWindowTrackSize='+[Windows.Forms.SystemInformation]::MaxWindowTrackSize+' font='+$form.Font.Name+'/'+$form.Font.SizeInPoints+'pt; task-description='+$homeTasks.Controls[0].Controls[0].Controls[1].Font)
+            }finally{$graphics.Dispose()}
+        }
+        function Assert-TaskScrollAccess($Root,[string]$Context){
+            foreach($grid in @(Get-UiTree $Root|Where-Object {$_.Visible -and $_.GetType().FullName -eq 'FlowSwitch.UI.TaskGrid'})){
+                Assert-Usability ($grid.AutoScroll -and $grid.ColumnCount -eq 2 -and $grid.RowCount -eq 2) ($Context+' task grid provides two-column scroll access')
+                $taskControls=@(Get-UiTree $grid|Where-Object {$_.Visible -and ($_ -is [Windows.Forms.Button] -or $_ -is [Windows.Forms.Label])})
+                Assert-Usability ($taskControls.Count -ge 9) ($Context+' task descriptions and actions are present')
+                $grid.AutoScrollPosition=New-Object Drawing.Point(0,0);[Windows.Forms.Application]::DoEvents()
+                $first=$taskControls[0];$last=$taskControls[$taskControls.Count-1]
+                Assert-ControlBounds $first ($Context+'/first task')
+                Save-UiCapture ($Context+'-task-first')
+                foreach($control in $taskControls){
+                    Assert-ControlBounds $control ($Context+'/accessible task')
+                    if($control -is [Windows.Forms.Label]){Assert-Instruction $control ($Context+'/task instruction')}
+                }
+                Assert-ControlBounds $last ($Context+'/last task')
+                Save-UiCapture ($Context+'-task-last')
+                if($grid.DisplayRectangle.Height -gt $grid.ClientSize.Height){
+                    [Console]::WriteLine('TASK-SCROLL case='+$Context+' client='+$grid.ClientSize+' display='+$grid.DisplayRectangle+' position='+$grid.AutoScrollPosition+' vertical='+$grid.VerticalScroll.Visible+' horizontal='+$grid.HorizontalScroll.Visible+' min='+$grid.AutoScrollMinSize)
+                    Assert-Usability ($grid.VerticalScroll.Visible -and $grid.AutoScrollPosition.Y -lt 0) ($Context+' small task grid scrolls to its final task')
+                    Assert-Usability (-not $grid.HorizontalScroll.Visible) ($Context+' task grid needs no horizontal scroll')
+                }
+                $grid.AutoScrollPosition=New-Object Drawing.Point(0,0);[Windows.Forms.Application]::DoEvents()
+                Assert-ControlBounds $first ($Context+'/return to first task')
+                Assert-Usability ($grid.AutoScrollPosition.Y -eq 0) ($Context+' task grid returns to its first task')
+            }
+        }
         function Reveal-UiControl($Control){
             $pages=@();for($ancestor=$Control.Parent;$ancestor;$ancestor=$ancestor.Parent){if($ancestor -is [Windows.Forms.TabPage]){$pages+=$ancestor}}
             [array]::Reverse($pages);foreach($page in $pages){$page.Parent.SelectedTab=$page}
             $form.PerformLayout();[Windows.Forms.Application]::DoEvents()
+            Scroll-TaskControl $Control
             Assert-Usability ($Control.Visible) ('Grouped action can be reached: '+$Control.Text)
         }
         function Get-MenuTree($Items){foreach($item in $Items){$item;if($item -is [Windows.Forms.ToolStripMenuItem] -and $item.HasDropDownItems){Get-MenuTree $item.DropDownItems}}}
@@ -43,20 +92,18 @@ $checks=@'
         function Assert-ActionLayout($Root,[string]$Context){
             foreach($control in @(Get-UiTree $Root|Where-Object {$_.Visible -and ($_ -is [Windows.Forms.Button] -or $_ -is [Windows.Forms.CheckBox] -or $_ -is [Windows.Forms.ComboBox])})){
                 $parent=$control.Parent
-                Assert-Usability ($control.Width -gt 0 -and $control.Height -gt 0 -and $control.Left -ge 0 -and $control.Top -ge 0 -and $control.Right -le $parent.ClientSize.Width -and $control.Bottom -le $parent.ClientSize.Height) ($Context+' action clipped in parent: '+$control.Text+' '+$control.Bounds+' parent '+$parent.ClientSize)
-                $screenRect=$control.RectangleToScreen($control.ClientRectangle);$ancestor=$parent
-                while($ancestor){$visibleRect=$ancestor.RectangleToScreen($ancestor.ClientRectangle);Assert-Usability ($visibleRect.Contains($screenRect)) ($Context+' action clipped by '+$ancestor.GetType().Name+': '+$control.Text);$ancestor=$ancestor.Parent}
-                foreach($sibling in $parent.Controls){
-                    if($sibling -ne $control -and $sibling.Visible -and ($sibling -is [Windows.Forms.Button] -or $sibling -is [Windows.Forms.Label] -or $sibling -is [Windows.Forms.CheckBox] -or $sibling -is [Windows.Forms.ComboBox])){Assert-Usability (-not $control.Bounds.IntersectsWith($sibling.Bounds)) ($Context+' action overlaps '+$control.Text+' / '+$sibling.Text)}
-                }
+                Assert-ControlBounds $control ($Context+' action')
                 if($control -is [Windows.Forms.Button]){
                     $textSize=[Windows.Forms.TextRenderer]::MeasureText($control.Text,$control.Font)
-                    Assert-Usability ($textSize.Width -le $control.ClientSize.Width -and $textSize.Height -le $control.ClientSize.Height) ($Context+' button caption clipped: '+$control.Text+' measured '+$textSize+' client '+$control.ClientSize)
+                    $textBounds=$control.ClientRectangle
+                    if($control -is [FlowSwitch.UI.ActionButton]){$textBounds=$control.TextBounds}
+                    Assert-Usability ($textSize.Width -le $textBounds.Width -and $textSize.Height -le $textBounds.Height) ($Context+' button caption clipped: '+$control.Text+' measured '+$textSize+' text bounds '+$textBounds+' font '+$control.Font)
                 }
             }
         }
         function Assert-Instruction($Label,[string]$Context){
             Assert-Usability ($null -ne $Label -and $Label.Visible -and -not [string]::IsNullOrWhiteSpace($Label.Text)) ($Context+' instruction is visible')
+            Assert-ControlBounds $Label $Context
             $textSize=[Windows.Forms.TextRenderer]::MeasureText($Label.Text,$Label.Font,(New-Object Drawing.Size($Label.ClientSize.Width,10000)),[Windows.Forms.TextFormatFlags]::WordBreak)
             Assert-Usability ($textSize.Height -le $Label.ClientSize.Height) ($Context+' instruction clipped: '+$Label.Text+' requires '+$textSize.Height+'px; available '+$Label.ClientSize.Height+'px')
             $background=$Label;while($background.BackColor.A -lt 255 -and $background.Parent){$background=$background.Parent}
@@ -96,7 +143,20 @@ $checks=@'
         }
         $factor=[single]::Parse($env:FLOW_USABILITY_SCALE,[Globalization.CultureInfo]::InvariantCulture)
         $originalDefault=$form.Size;$originalMinimum=$form.MinimumSize
-        if($factor -ne 1){$form.Scale((New-Object Drawing.SizeF($factor,$factor)));$form.MinimumSize=New-Object Drawing.Size([int]($originalMinimum.Width*$factor),[int]($originalMinimum.Height*$factor))}
+        # Snapshot local fonts before changing their ancestors. Inherited Font values must not be multiplied again.
+        $explicitFonts=@(foreach($control in @($form)+@(Get-UiTree $form)+@($appMenu,$routeMenu,$proxyServiceMenu,$proxyMoreMenu)){
+            if([ComponentModel.TypeDescriptor]::GetProperties($control)['Font'].ShouldSerializeValue($control)){[pscustomobject]@{Control=$control;Font=$control.Font}}
+        })
+        if($factor -ne 1){
+            $form.SuspendLayout()
+            try{
+                $form.Scale((New-Object Drawing.SizeF($factor,$factor)))
+                foreach($entry in $explicitFonts){$font=$entry.Font;$entry.Control.Font=New-Object Drawing.Font($font.FontFamily,[single]($font.Size*$factor),$font.Style,$font.Unit,$font.GdiCharSet,$font.GdiVerticalFont)}
+                $form.MinimumSize=New-Object Drawing.Size([int]($originalMinimum.Width*$factor),[int]($originalMinimum.Height*$factor))
+            }finally{$form.ResumeLayout($true)}
+        }
+        foreach($entry in $explicitFonts){Assert-Usability ([Math]::Abs($entry.Control.Font.Size-$entry.Font.Size*$factor) -lt 0.01) ('Explicit font scales once: '+$entry.Control.GetType().Name+'/'+$entry.Control.Text)}
+        Assert-Usability ([object]::ReferenceEquals($unify.Font,$form.Font)) 'Action font continues to inherit the scaled form font'
         $dimensions=@(
             [pscustomobject]@{Name='minimum';Width=$form.MinimumSize.Width;Height=$form.MinimumSize.Height},
             [pscustomobject]@{Name='default';Width=[int]($originalDefault.Width*$factor);Height=[int]($originalDefault.Height*$factor)},
@@ -109,19 +169,20 @@ $checks=@'
         $pages=@('programs','proxies','tools','home')
         foreach($dimension in $dimensions){
             $form.Size=New-Object Drawing.Size($dimension.Width,$dimension.Height);$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
-            Write-Output ('WINDOW scale='+$factor+' case='+$dimension.Name+' actual='+$form.Size+' client='+$form.ClientSize)
+            Write-WindowEvidence $dimension.Name
             foreach($index in @(3,0,1,2)){
                 $navigation[$index].PerformClick();$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
                 Assert-Usability ($tabs.SelectedIndex -eq $index -and $brand.Text -eq $tabs.SelectedTab.Text -and @($navigation|Where-Object Selected).Count -eq 1) ('Navigation selects '+$pages[$index])
                 Save-UiCapture ($pages[$index]+'-'+$dimension.Name+'-'+$factor)
                 Assert-ActionLayout $form ($dimension.Name+'/'+$pages[$index]+'/'+$factor)
+                if($index -eq 3){Assert-TaskScrollAccess $form ('home-'+$dimension.Name+'-'+$factor)}
                 if($index -eq 3){Assert-Usability ($networkChoice.Visible -and $unify.Visible -and $undo.Visible -and $cards.Visible) 'Home exposes global route choice, explicit switch and rollback'}
                 else{Assert-Usability (-not $switchRow.Visible -and -not $cards.Visible) 'Other pages reserve space for their own task'}
                 if($index -eq 3){foreach($label in @(Get-UiTree $homeTasks|Where-Object {$_ -is [Windows.Forms.Label] -and $_.Visible})){Assert-Instruction $label ($dimension.Name+'/home task')};Assert-Instruction $switchScope ($dimension.Name+'/unified scope')}
                 if($index -eq 0){Assert-Instruction $programHint ($dimension.Name+'/program instructions');Assert-Instruction $programSelectionLabel ($dimension.Name+'/program selection')}
                 if($index -eq 2){
                     foreach($groupHost in @(Get-UiTree $toolsPage|Where-Object {$_ -is [Windows.Forms.TabControl]})){
-                        foreach($groupPage in $groupHost.TabPages){$groupHost.SelectedTab=$groupPage;[Windows.Forms.Application]::DoEvents();Save-UiCapture ('tools-group'+$groupHost.SelectedIndex+'-'+$dimension.Name+'-'+$factor);Assert-ActionLayout $form ($dimension.Name+'/tools/'+$groupPage.Text+'/'+$factor);foreach($label in @(Get-UiTree $groupPage|Where-Object {$_ -is [Windows.Forms.Label] -and $_.Visible})){Assert-Instruction $label ($dimension.Name+'/tools instruction')}}
+                        foreach($groupPage in $groupHost.TabPages){$groupHost.SelectedTab=$groupPage;[Windows.Forms.Application]::DoEvents();Save-UiCapture ('tools-group'+$groupHost.SelectedIndex+'-'+$dimension.Name+'-'+$factor);Assert-ActionLayout $form ($dimension.Name+'/tools/'+$groupPage.Text+'/'+$factor);Assert-TaskScrollAccess $form ('tools-group'+$groupHost.SelectedIndex+'-'+$dimension.Name+'-'+$factor);foreach($label in @(Get-UiTree $groupPage|Where-Object {$_ -is [Windows.Forms.Label] -and $_.Visible})){Assert-Instruction $label ($dimension.Name+'/tools instruction')}}
                     }
                 }
             }
@@ -278,6 +339,7 @@ $checks=@'
         Write-Output ('PASS: '+$script:UsabilityChecks+' usability UI assertions; '+$script:UsabilityShots+' captures; scale '+$factor+'; isolated Demo and mutation guards; fresh failover and read-failure regressions.')
 '@
 $path=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($path)
+if($FallbackFont){$source=$source.Replace("'Microsoft YaHei UI'","'Microsoft Sans Serif'")}
 $marker='$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)'
 if(([regex]::Matches($source,[regex]::Escape($marker))).Count -ne 1){throw 'Preview injection marker must be unique.'}
 $source=$source.Replace($marker,$checks+"`r`n"+$marker)
@@ -285,9 +347,9 @@ $source=$source.Replace($marker,$checks+"`r`n"+$marker)
 $priorScale=$env:FLOW_USABILITY_SCALE
 try{
     $env:FLOW_USABILITY_SCALE=$Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
-    $uiResult=@(& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'usability.png'))
-    $uiResult|Write-Output
-    if(-not ($uiResult -match '^PASS: \d+ usability UI assertions')){throw 'Usability UI did not complete its assertions.'}
+    $uiPassed=$false
+    & (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'usability.png') | ForEach-Object {if($_ -match '^PASS: \d+ usability UI assertions'){$uiPassed=$true};Write-Output $_}
+    if(-not $uiPassed){throw 'Usability UI did not complete its assertions.'}
 }finally{
     $env:FLOW_USABILITY_SCALE=$priorScale
     if($OutputDirectory){[void][IO.Directory]::CreateDirectory($OutputDirectory);foreach($artifact in Get-ChildItem -LiteralPath $qa -Filter '*.png'){Copy-Item -LiteralPath $artifact.FullName -Destination (Join-Path $OutputDirectory $artifact.Name)}}
