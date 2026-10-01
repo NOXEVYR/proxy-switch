@@ -4,11 +4,21 @@ function Test-SessionProcess($ProcessId,$Ticks) {
     try{$p=[Diagnostics.Process]::GetProcessById([int]$ProcessId);try{return $p.StartTime.ToUniversalTime().Ticks.ToString() -eq [string]$Ticks}finally{$p.Dispose()}}catch{return $false}
 }
 function Get-ProcessStartTicks([int]$ProcessId) {$p=[Diagnostics.Process]::GetProcessById($ProcessId);try{$p.StartTime.ToUniversalTime().Ticks.ToString()}finally{$p.Dispose()}}
+function Get-RecoveryEndpointHost([uri]$Endpoint) {
+    $endpointHost=$Endpoint.Host.Trim('[',']').ToLowerInvariant()
+    if($endpointHost -eq 'localhost'){return 'loopback'}
+    $endpointIp=$null
+    if([Net.IPAddress]::TryParse($endpointHost,[ref]$endpointIp)){
+        if($endpointIp.IsIPv4MappedToIPv6){$endpointIp=$endpointIp.MapToIPv4()}
+        if($endpointIp.Equals([Net.IPAddress]::Loopback) -or $endpointIp.Equals([Net.IPAddress]::IPv6Loopback)){return 'loopback'}
+    }
+    $endpointHost
+}
 function Test-RecoveryEndpoint([string]$Endpoint) {
     if(-not $Endpoint){return $false}
     try{
-        $raw=$Endpoint;if($raw -notmatch '^[a-z]+://'){$raw='http://'+$raw};$uri=[uri]$raw
-        if($uri.Host -notin @('localhost','127.0.0.1','[::1]','::1')){return $true}
+        $raw=$Endpoint;if($raw -notmatch '^[a-z][a-z0-9+.-]*://'){$raw='http://'+$raw};$uri=[uri]$raw
+        if((Get-RecoveryEndpointHost $uri) -ne 'loopback'){return $true}
         $tcp=New-Object Net.Sockets.TcpClient
         try{$connect=$tcp.ConnectAsync($uri.Host.Trim('[',']'),$uri.Port);return ($connect.Wait(500) -and $tcp.Connected)}finally{$tcp.Dispose()}
     }catch{return $false}
@@ -16,11 +26,37 @@ function Test-RecoveryEndpoint([string]$Endpoint) {
 function Test-SameRecoveryEndpoint([string]$First,[string]$Second) {
     if(-not $First -or -not $Second){return $false}
     try{
-        $a=$First;$b=$Second;if($a -notmatch '^[a-z]+://'){$a='http://'+$a};if($b -notmatch '^[a-z]+://'){$b='http://'+$b}
-        $a=[uri]$a;$b=[uri]$b;$firstHost=$a.Host.Trim('[',']').ToLowerInvariant();$secondHost=$b.Host.Trim('[',']').ToLowerInvariant()
-        if($firstHost -in @('localhost','127.0.0.1','::1')){$firstHost='loopback'};if($secondHost -in @('localhost','127.0.0.1','::1')){$secondHost='loopback'}
+        $a=$First;$b=$Second;if($a -notmatch '^[a-z][a-z0-9+.-]*://'){$a='http://'+$a};if($b -notmatch '^[a-z][a-z0-9+.-]*://'){$b='http://'+$b}
+        $a=[uri]$a;$b=[uri]$b;$firstHost=Get-RecoveryEndpointHost $a;$secondHost=Get-RecoveryEndpointHost $b
         return ($firstHost -ceq $secondHost -and $a.Port -eq $b.Port)
     }catch{return $false}
+}
+function Get-IndependentRetiringEndpoints($Session) {
+    $endpoints=@([string]$Session.TargetSystem.Server)
+    $rulesPath=Join-Path $script:DataRoot 'app-rules.json'
+    if([IO.File]::Exists($rulesPath)){
+        $rules=Get-Content -LiteralPath $rulesPath -Raw -Encoding UTF8|ConvertFrom-Json
+        foreach($ingress in @($rules.programIngresses)){
+            if(-not $ingress){continue}
+            $port=0
+            if(-not [int]::TryParse([string]$ingress.port,[ref]$port) -or $port -lt 1 -or $port -gt 65535){throw '程序固定入口记录无法核验，后台服务保留，请先排查网络。'}
+            $endpoints+=('127.0.0.1:'+ $port)
+        }
+    }
+    @($endpoints|Where-Object {$_}|Select-Object -Unique)
+}
+function Assert-IndependentStopUnreferenced($System,$Environment,[string[]]$Endpoints) {
+    $remaining=@()
+    if($System.Flags -band 2){
+        foreach($part in @(([string]$System.Server) -split '[;\s]+')){
+            $endpoint=$part.Trim() -replace '(?i)^(?:http|https|ftp|socks)=',''
+            foreach($retiring in $Endpoints){if(Test-SameRecoveryEndpoint $endpoint.Trim() $retiring){$remaining+='系统代理';break}}
+        }
+    }
+    foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')){
+        foreach($retiring in $Endpoints){if(Test-SameRecoveryEndpoint ([string]$Environment.$name) $retiring){$remaining+=$name;break}}
+    }
+    if($remaining.Count){throw ((@($remaining|Select-Object -Unique) -join '、')+' 仍指向即将停止的流向入口。已保留外部设置和后台服务；请在检查与维护中核对这些设置，改为其他可用入口或直连后再停止。')}
 }
 function New-ExitRecoveryPlan($Session,$CurrentSystem,$CurrentEnv) {
     $system=$CurrentSystem
@@ -58,6 +94,8 @@ function Restore-IndependentSession([string]$ExpectedSession='',[switch]$Abandon
         if($ExpectedSession -and [string]$session.Started -cne $ExpectedSession){return}
         if($AbandonedOnly -and (Get-RecoveryOwnerState $session) -ne 'stopped'){throw '原会话仍在运行或身份未知，未恢复或停止它。'}
         $before=Get-SystemSnapshot;$envBefore=Get-UserProxyEnv;$plan=New-ExitRecoveryPlan $session $before $envBefore
+        $retiringEndpoints=@(Get-IndependentRetiringEndpoints $session)
+        Assert-IndependentStopUnreferenced $plan.System $plan.Environment $retiringEndpoints
         if(-not (Test-SameSnapshot $before (Get-SystemSnapshot)) -or -not (Test-SameEnv $envBefore (Get-UserProxyEnv))){throw '恢复期间网络设置发生变化，稍后重试。'}
         # Restore Windows first. Never stop a core while Windows still points at it.
         if(-not (Test-SameSnapshot $before $plan.System)){Set-SystemSnapshot $plan.System}
@@ -65,8 +103,10 @@ function Restore-IndependentSession([string]$ExpectedSession='',[switch]$Abandon
         # ownership at the point of writing instead of replaying the old snapshot.
         $envBefore=Get-UserProxyEnv
         $plan.Environment=(New-ExitRecoveryPlan $session $plan.System $envBefore).Environment
-        if(-not (Test-SameEnv $envBefore $plan.Environment)){Set-UserProxyEnv $plan.Environment}
+        Assert-IndependentStopUnreferenced (Get-SystemSnapshot) $plan.Environment $retiringEndpoints
+        if(-not (Test-SameEnv $envBefore $plan.Environment)){Set-UserProxyEnv $plan.Environment -ExpectedBefore $envBefore}
         if(-not (Test-SameSnapshot (Get-SystemSnapshot) $plan.System) -or -not (Test-SameEnv (Get-UserProxyEnv) $plan.Environment)){throw '退出恢复尚未通过实读校验，内核继续运行。'}
+        Assert-IndependentStopUnreferenced (Get-SystemSnapshot) (Get-UserProxyEnv) $retiringEndpoints
         $archive=Join-Path $script:DataRoot ('backups\gateway-exit-'+(Get-Date -Format 'yyyyMMdd-HHmmss-fff')+'.json')
         Write-LocalJson $archive $session
         [IO.File]::WriteAllText((Join-Path $script:DataRoot 'gateway\stop'),'stop')
@@ -345,15 +385,16 @@ function Get-EntryLifecycleWarnings($Snapshot,$Environment,$Listeners) {
     foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')){if((Get-EndpointKey $Environment.$name) -eq $gateway){$references+=$name}}
     $row=$Listeners|Where-Object Key -eq $gateway|Select-Object -First 1
     $messages=@();$life=Get-GatewayLifecycle
-    if($references.Count -and -not $row.Ready){$messages+=('固定入口 '+(Get-EndpointAddress $own)+' 未监听，但 '+($references -join '、')+' 仍指向它。请先启动流向并等待入口就绪，再重试登录；尚未到达认证接口。')}
+    if($references.Count -and $row -and $row.Ready -eq $false){$messages+=('固定入口 '+(Get-EndpointAddress $own)+' 未监听，但 '+($references -join '、')+' 仍指向它。请先启动流向并等待入口就绪，再重试登录；尚未到达认证接口。')}
     if($life.phase -eq 'restarting'){$messages+='内核异常退出，正在有限重启；入口恢复前请暂停启动登录。'}
     if($life.phase -eq 'failed'){$messages+='独立内核恢复失败。请检查生命周期记录；已运行应用可能缓存旧入口，保存工作后完整重开应用。'}
     if($references.Count -or $life.phase -in @('failed','stopped')){$messages+='恢复系统代理不会刷新已运行应用的环境变量或缓存。若仍报旧端口拒绝连接，请保存工作后完整重开应用及其启动器；本工具不会结束它们。'}
     @($messages)
 }
-function ConvertTo-LoginDiagnostic([bool]$LocalReady,[string]$Protocol,[int]$ExitCode,[int]$ConnectCode,[int]$HttpCode) {
+function ConvertTo-LoginDiagnostic([Nullable[bool]]$LocalReady,[string]$Protocol,[int]$ExitCode,[int]$ConnectCode,[int]$HttpCode) {
     $stage='local-entry';$message='本地入口不可用，请先启动代理服务并等待就绪。';$handshake=$false;$https=$false
-    if($LocalReady){
+    if($null -eq $LocalReady){$stage='local-entry-unknown';$message='本地监听或归属无法核验，未据此判定入口停止，也未继续发送登录链路探测。请稍后重新排查。'}
+    elseif($LocalReady){
         $handshake=($Protocol -eq 'http' -and $ConnectCode -eq 200) -or ($Protocol -eq 'socks5' -and $HttpCode -gt 0)
         $https=$ExitCode -eq 0 -and $HttpCode -ge 100 -and $handshake
         if($https){$stage='https-response';$message='HTTPS 请求已到达 Google OAuth 接口，HTTP '+$HttpCode+'；未发送令牌或登录请求，不代表账号登录成功。'}
@@ -366,7 +407,10 @@ function Test-LoginChain([string]$Key='') {
     if(-not $Key){$Key=Get-SystemKey (Get-SystemSnapshot)}
     if($Key -in @('Direct','Other','Unset') -or $Key -notin (Get-ProfileKeys)){throw '请先选择一个已配置的代理入口进行登录链路诊断。'}
     $profile=Get-Profile $Key
-    if(-not (Get-Listener $profile -ProbeRemote)){return (ConvertTo-LoginDiagnostic $false $profile.Protocol 7 0 0)}
+    $local=Get-LocalEndpointObservation (Get-EndpointAddress $profile) (Get-TcpObservationSnapshot)
+    if($local){
+        if($local.Ready -ne $true){return (ConvertTo-LoginDiagnostic $local.Ready $profile.Protocol $(if($local.Ready -eq $false){7}else{-1}) 0 0)}
+    }elseif(-not (Get-Listener $profile -ProbeRemote)){return (ConvertTo-LoginDiagnostic $false $profile.Protocol 7 0 0)}
     $probe=$null
     try {
         # Fixed URL and HEAD only. No URL input, request body, authorization, cookie, or token.

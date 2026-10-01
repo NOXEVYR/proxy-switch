@@ -48,4 +48,32 @@ $tcp.Rows[0].OwningProcess=$PID;$tcp.Rows[0].LocalAddress='::1'
 Check ((Get-LocalEndpointObservation '127.0.0.1:19001' $tcp).Ready -eq $false) 'IPv6-only listener does not validate an IPv4 endpoint in diagnosis'
 $tcp.Rows[0].LocalAddress='::'
 Check ($null -eq (Get-LocalEndpointObservation '127.0.0.1:19001' $tcp).Ready) 'Unknown IPv6 dual-stack mode cannot authorize IPv4 cleanup'
+# Real Get-Listener and shared tri-state code, with OS identity reads injected.
+Write-LocalJson $script:ConfigPath @{Version=3;Profiles=@(@{Id='up';Name='Fixture';Protocol='http';Host='127.0.0.1';Port=19001;CorePath='C:\Fixture\core.exe'});Routing=@{Adapter='none';ProfileId='';UnifiedMode='system'}}
+$script:Profiles=Read-ProfileSettings
+$script:System=[pscustomobject]@{Flags=3;Server='127.0.0.1:19001';Bypass='localhost'}
+$script:Environment=[pscustomobject]@{HTTP_PROXY='http://127.0.0.1:19001';HTTPS_PROXY='http://127.0.0.1:19001';ALL_PROXY='http://127.0.0.1:19001';NO_PROXY='localhost'}
+$script:FixtureTcp=[pscustomobject]@{Available=$true;Rows=@([pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=19001;OwningProcess=100})}
+function Get-TcpObservationSnapshot {$script:FixtureTcp}
+function Get-ProcessInventory {param($Id);$script:FixtureOwner}
+function Get-LiveConnections {@()}
+function Get-ClientWarnings {@()}
+function Get-OverrideWarnings {@()}
+function Get-ClientInterference {[pscustomobject]@{Tun=$false;Guard=$false;SystemProxy=$false}}
+foreach($identity in @('unreadable','wrong-core','expected')){
+ $script:FixtureOwner=$null
+ if($identity -eq 'wrong-core'){$script:FixtureOwner=[pscustomobject]@{Id=100;ProcessName='other';Path='C:\Fixture\other.exe'}}
+ if($identity -eq 'expected'){$script:FixtureOwner=[pscustomobject]@{Id=100;ProcessName='core';Path='C:\Fixture\core.exe'}}
+ $d=Get-NetworkDiagnosis;$s=Get-ProxyStatus -TcpRows $script:FixtureTcp.Rows
+ if($identity -eq 'expected'){
+  Check ($s.EndpointReady -eq $true -and $d.Endpoints[0].Ready -eq $true -and $d.Issues.Code -notcontains 'system-entry-unknown') 'Verified configured owner remains ready in both status and diagnosis'
+ }else{
+  Check ($null -eq $s.EndpointReady -and $null -eq $d.Endpoints[0].Ready -and $d.Issues.Code -contains 'system-entry-unknown' -and $d.Issues.Code -notcontains 'environment-entry-down' -and -not $d.RepairAction) ('Real listener lookup preserves '+$identity+' identity as unknown across status and diagnosis')
+  Check (($s.Warnings -join ' ') -match '未知' -and ($s.Warnings -join ' ') -notmatch '固定入口.*未监听') 'Unknown status explains uncertainty without claiming a dead owned entrance'
+ }
+}
+$script:Environment.NO_PROXY='custom.local, *,localhost';$d=Get-NetworkDiagnosis;$s=Get-ProxyStatus -TcpRows $script:FixtureTcp.Rows
+Check (-not $s.Aligned -and $s.EnvConflict -and ($s.Warnings -join ' ') -match 'Go' -and $d.Issues.Code -contains 'environment-bypass-all') 'Identical proxy addresses do not claim alignment when client-dependent global bypass remains'
+$script:Environment.NO_PROXY='*.example.invalid,localhost';$s=Get-ProxyStatus -TcpRows $script:FixtureTcp.Rows
+Check ($s.Aligned -and ($s.Warnings -join ' ') -notmatch '全局绕过') 'Ordinary domain-specific bypass is retained without a false global-conflict warning'
 Write-Output ('PASS: '+$script:Checks+' recovery consistency checks; isolated snapshots only.')

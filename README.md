@@ -1,16 +1,18 @@
-> 3.9.4 源码候选：重新梳理四页功能和操作说明；检查与维护 → 软件与记录新增“检查更新”和自动检查开关。官方小体积文件差异可暂存；安装须手动确认并正常恢复/停止代理。重启后默认只读，按需统一切换。正式程序包状态以 Releases 为准。
+> 3.9.4 Windows 维护：重新梳理四页功能和操作说明；检查与维护 → 软件与记录新增“检查更新”和自动检查开关。官方小体积文件差异可暂存；安装须手动确认并正常恢复/停止代理。重启后默认只读，按需统一切换。正式程序包状态以 Releases 为准。
 >
 > 更新失败会保留数据目录 updates 下的事务和备份。若状态为 installing / rollback-blocked，先正常停止流向并保留整个更新目录，再使用该 stage 内 UpdateInstall.ps1 的 `-Ticket <handoff.json完整路径> -Recover` 恢复；外部修改不会被覆盖。未知进程或未释放端口会阻止恢复。
 
 常用流程：在「代理入口」准备上游，在「网络切换」统一选线；需要例外时到「程序线路」选择程序，或使用首页的「设置网站例外」。各页右上角「本页用法」有可浏览步骤；完整说明见 [用户指南](USER_GUIDE.md)。
 
+3.9.4 候选同时补齐多代理环境冲突、失效用户变量修复、停止前等价入口引用保护及托管冷启动检查。选中程序后用「按此线路打开」核验自己的入口与出口；上游失效时保留服务和配置并提示换线，不把窗口打开当作网络恢复。多轮独立检查和验收范围见 [验证记录](TEST_REPORT.md)。
+
 > 3.9.3 整体维护：统一恢复判断、保留自动代理模式、区分线路提交与观察失败，并改善入口就绪等待。Gemini 真实对话发送与跨电脑长期使用仍需实测，详见验收记录。
 
-> 已包含 3.9.1 启动入口改进：程序选线不再自动绑定桌面入口。选中程序后点击“启动方式…”：可以只在流向内按指定线路打开、另建独立代理图标，或明确绑定原桌面入口；解除绑定保留线路和正在运行的程序。自动发现按当前配置排除自有网关及程序入口，保留已有忽略设置。3.9.3 同时包含列表滚动、选择与焦点保持修复。
+> 已包含 3.9.1 启动入口改进：程序选线不再自动绑定桌面入口。在「程序线路」选中程序，打开「更多设置 ▾ → 启动与桌面入口 → 启动方式与桌面绑定…」：可以只在流向内按此线路打开、另建独立代理图标，或明确绑定原桌面入口；解除绑定保留线路和正在运行的程序。自动发现按当前配置排除自有网关及程序入口，保留已有忽略设置。3.9.3 同时包含列表滚动、选择与焦点保持修复。
 
 <img src="assets/FlowSwitch.png" alt="流向 FlowSwitch" width="144" />
 
-# 流向 FlowSwitch 3.9.3
+# 流向 FlowSwitch 3.9.4
 
 管理已有 HTTP / SOCKS5 代理，通过固定入口选择出口。代理退出或卸载导致系统入口失效时，可在「检查与维护 → 连接检查 → 开始网络检查 → 查看并修复」检测备用并恢复入口；没有可用备用时撤销确认失效的设置。它不提供 VPN 服务、订阅或节点。
 
@@ -18,7 +20,7 @@
 
 Windows x64 程序包与源码包在本仓库 Releases 发布；旧版下载档案继续保留在 portfolio。程序包自带锁定运行组件。请完整解压，并保留本机配置备份。自动化验证覆盖隔离核心和实际请求，不能代替真实 IDE 登录与长期使用验收。
 
-**[下载 Windows x64 · 3.9.3](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.3/FlowSwitch-v3.9.3-Windows-x64.zip)** · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.3/FlowSwitch-v3.9.3-Windows-Source.zip) · [SHA-256 校验](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.3/SHA256SUMS.txt)
+**[下载 Windows x64 · 3.9.4](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.4/FlowSwitch-v3.9.4-Windows-x64.zip)** · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.4/FlowSwitch-v3.9.4-Windows-Source.zip) · [SHA-256 校验](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.4/SHA256SUMS.txt)
 
 ## macOS 原生测试版
 

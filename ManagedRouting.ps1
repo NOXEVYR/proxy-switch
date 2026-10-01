@@ -40,6 +40,139 @@ function Ensure-ManagedGateway([string]$InitialRoute='') {
     }while([DateTime]::UtcNow -lt $deadline)
     throw '流向入口尚未就绪，未启动目标程序。请打开流向查看服务状态，或停止服务后重新启动。'
 }
+function Test-ManagedLaunchCancelled($Cancellation) {
+    $null -ne $Cancellation -and $Cancellation.IsCancellationRequested
+}
+function Test-ManagedWebsiteMatch([string]$HostName,$Rule) {
+    $HostName -ceq $Rule.domain -or ($Rule.type -ceq 'suffix' -and $HostName.EndsWith('.'+$Rule.domain,[StringComparison]::Ordinal))
+}
+function Test-ManagedDirectWebsiteSpace($Live,[string]$IngressId) {
+    if($Live.siteRulesLoaded -ne $true){return $false}
+    # Mirror RoutePolicy.orderedSiteRules / connectionPolicy: program scope first,
+    # domain depth descending, exact before suffix at equal depth, then input order.
+    $rules=@();$index=0
+    foreach($rule in @($Live.siteRules)){
+        if($rule.scope -cne 'global' -and $rule.scope -cne $IngressId){continue}
+        if($rule.loaded -ne $true){continue}
+        if($rule.type -cnotin @('domain','suffix') -or -not $rule.domain){return $false}
+        try{$domain=ConvertTo-WebsiteDomain $rule.domain}catch{return $false}
+        $rules+=@([pscustomobject]@{scope=$rule.scope;type=$rule.type;domain=$domain;route=$rule.route;
+            Rank=$(if($rule.scope -ceq $IngressId){0}else{1});Depth=($domain.Split('.').Length);
+            Exact=$(if($rule.type -ceq 'domain'){0}else{1});Index=$index});$index++
+    }
+    $ordered=@($rules|Sort-Object Rank,@{Expression='Depth';Descending=$true},Exact,Index)
+    for($i=0;$i -lt $ordered.Count;$i++){
+        $direct=$ordered[$i];if($direct.route -cne 'Direct'){continue}
+        $covered=$false
+        for($j=0;$j -lt $i;$j++){
+            if(Test-ManagedWebsiteMatch $direct.domain $ordered[$j]){
+                if($direct.type -ceq 'domain' -or $ordered[$j].type -ceq 'suffix'){$covered=$true;break}
+            }
+        }
+        if($covered){continue}
+        # An exact rule covering only the suffix's main domain leaves child domains.
+        # A child with no preceding equal-domain rule cannot match any preceding
+        # deeper rule; preceding ancestor suffix rules were excluded above.
+        $baseCovered=$false
+        for($j=0;$j -lt $i;$j++){if(Test-ManagedWebsiteMatch $direct.domain $ordered[$j]){$baseCovered=$true;break}}
+        if(-not $baseCovered){return $true}
+        if($direct.type -ceq 'domain'){continue}
+        $labelLimit=[Math]::Min(63,252-$direct.domain.Length);if($labelLimit -lt 1){continue}
+        $excluded=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        $tail='.'+$direct.domain
+        for($j=0;$j -lt $i;$j++){
+            $other=$ordered[$j].domain
+            if($other.EndsWith($tail,[StringComparison]::Ordinal)){
+                $label=$other.Substring(0,$other.Length-$tail.Length)
+                if($label.IndexOf('.') -lt 0){[void]$excluded.Add($label)}
+            }
+        }
+        # At most N rules exclude N one-label children. N+1 distinct short labels
+        # suffice; when only one character fits, exhaust all 36 valid characters.
+        $alphabet='0123456789abcdefghijklmnopqrstuvwxyz'
+        for($n=0;$n -le $excluded.Count;$n++){
+            $value=$n;$label=''
+            do{$label=([string]$alphabet[($value%36)])+$label;$value=[int][Math]::Floor($value/36)}while($value -gt 0)
+            if($label.Length -gt $labelLimit){break}
+            if(-not $excluded.Contains($label)){return $true}
+        }
+    }
+    return $false
+}
+function Invoke-ManagedIngressTransportProbe($Ingress,$Urls,[DateTime]$Deadline,$Cancellation=$null) {
+    # Use the application's entrance, not the global entrance or a direct upstream.
+    # The established endpoint probes never send account data or preserve response bodies.
+    $profile=[pscustomobject]@{Protocol='http';Host='127.0.0.1';Port=[int]$Ingress.port}
+    $probes=@();$finished=@{}
+    try {
+        foreach($url in $Urls){
+            if((Test-ManagedLaunchCancelled $Cancellation) -or [DateTime]::UtcNow -ge $Deadline){return $false}
+            $probes+=@(Start-HttpEndpointProbe $profile $url $true)
+        }
+        do {
+            if(Test-ManagedLaunchCancelled $Cancellation){return $false}
+            foreach($probe in $probes){
+                if(-not $finished.ContainsKey($probe.Url) -and $probe.Process.HasExited){
+                    $finished[$probe.Url]=$true
+                    if((Read-HttpEndpointProbe $probe).Accepted -eq $true){return $true}
+                }
+            }
+            if($finished.Count -eq $probes.Count){return $false}
+            Start-Sleep -Milliseconds 30
+        }while([DateTime]::UtcNow -lt $Deadline)
+        return $false
+    }finally{foreach($probe in $probes){Close-HttpEndpointProbe $probe}}
+}
+function Wait-ManagedProgramIngressReady($Ingress,[int]$TimeoutMilliseconds=20000,$Cancellation=$null) {
+    $started=[DateTime]::UtcNow;$deadline=$started.AddMilliseconds($TimeoutMilliseconds)
+    $urls=@('https://www.google.com/generate_204','https://api.openai.com/v1/models','https://chatgpt.com/')
+    $unavailable=$false;$unknown=$false
+    do {
+        if(Test-ManagedLaunchCancelled $Cancellation){throw '启动检查已取消，未启动程序；保存线路和固定入口保持不变。'}
+        $remaining=[int]($deadline-[DateTime]::UtcNow).TotalMilliseconds;if($remaining -le 0){break}
+        try{$live=Invoke-AppRouter @{action='status'} -TimeoutMilliseconds ([Math]::Min(2500,$remaining))}catch{$live=$null;$unknown=$true}
+        $ready=$null;if($live){$ready=$live.programIngresses|Where-Object {$_.id -ceq $Ingress.id}|Select-Object -First 1}
+        if($live.available -eq $true -and $live.rulesAvailable -eq $true -and $ready.loaded -eq $true -and $ready.ready -eq $true -and $ready.effectiveRoute -notin @('Unknown',$null,'')){
+            $route=[string]$ready.effectiveRoute;$limited=$false;$candidates=$urls;$healthy=$route -eq 'Direct'
+            if($route -eq 'Blocked'){
+                if(Test-ManagedDirectWebsiteSpace $live $Ingress.id){
+                    $limited=$true;$healthy=$true
+                }else{$unavailable=$true;break}
+            }elseif(-not $healthy){
+                # A cold selector initially names its preferred proxy before any health round.
+                # Wait for a round completed after this launch check, allowing the existing
+                # supervisor to choose its verified fallback without resetting preferences.
+                $checked=[DateTime]::MinValue
+                if([DateTime]::TryParse([string]$live.failover.updated,[ref]$checked)){
+                    $checked=$checked.ToUniversalTime()
+                    $healthy=$checked -ge $started -and $checked -le [DateTime]::UtcNow -and $live.failover.health.$route -eq $true
+                    if($checked -ge $started -and $live.failover.health.$route -eq $false){$unavailable=$true}
+                }
+            }
+            if($healthy){
+                $probeDeadline=[DateTime]::UtcNow.AddSeconds(6);if($probeDeadline -gt $deadline){$probeDeadline=$deadline}
+                # Direct is an explicit policy, including local/domestic-only use. A
+                # foreign health site cannot veto that policy. The controller verifies
+                # loaded rules and exact owned ingress; no general Internet claim follows.
+                $passed=$route -eq 'Direct' -or $limited
+                if(-not $passed){try{$passed=Invoke-ManagedIngressTransportProbe $Ingress $candidates $probeDeadline $Cancellation}catch{$unknown=$true}}
+                if(Test-ManagedLaunchCancelled $Cancellation){throw '启动检查已取消，未启动程序；保存线路和固定入口保持不变。'}
+                if($passed -and [DateTime]::UtcNow -lt $deadline){
+                    $remaining=[int]($deadline-[DateTime]::UtcNow).TotalMilliseconds
+                    try{$after=Invoke-AppRouter @{action='status'} -TimeoutMilliseconds ([Math]::Min(2500,$remaining))}catch{$after=$null;$unknown=$true}
+                    $verified=$null;if($after){$verified=$after.programIngresses|Where-Object {$_.id -ceq $Ingress.id}|Select-Object -First 1}
+                    $healthStillVerified=$route -in @('Direct','Blocked') -or $after.failover.health.$route -eq $true
+                    if([DateTime]::UtcNow -lt $deadline -and $after.available -eq $true -and $after.rulesAvailable -eq $true -and $verified.loaded -eq $true -and $verified.ready -eq $true -and $verified.effectiveRoute -ceq $route -and $healthStillVerified){
+                        if(-not $limited -or ($after.siteRulesLoaded -eq $true -and (@($after.siteRules)|ConvertTo-Json -Depth 12 -Compress) -ceq (@($live.siteRules)|ConvertTo-Json -Depth 12 -Compress))){return [pscustomobject]@{EffectiveRoute=$route;LimitedDirect=$limited}}
+                    }
+                }else{$unavailable=$true}
+            }
+        }else{$unknown=$true}
+        $remaining=[int]($deadline-[DateTime]::UtcNow).TotalMilliseconds;if($remaining -gt 0){Start-Sleep -Milliseconds ([Math]::Min(150,$remaining))}
+    }while([DateTime]::UtcNow -lt $deadline)
+    if($unavailable){throw '程序固定入口的实际转发检测未通过，或默认代理不可用且没有适用于此程序的已加载直连网站例外；未启动程序。请在“代理入口”检查上游，或为此程序切换可用线路后重试。保存线路、后台服务和固定端口保持不变。'}
+    throw '程序固定入口或出口尚未就绪，健康或转发状态未知；未启动程序。请在“检查与维护”检查服务及线路后重试。保存线路、后台服务和固定端口保持不变。'
+}
 function Set-UniversalProxy([string]$Key) {
     Use-ChangeLock {
         Assert-ManagedRoute $Key

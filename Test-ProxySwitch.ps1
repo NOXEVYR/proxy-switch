@@ -20,7 +20,7 @@ $script:SavedSelection=$null;$script:Writes=0;$script:Backups=0;$script:FailSyst
 function Get-SystemSnapshot{$script:SavedSystem}
 function Set-SystemSnapshot($Snapshot){$script:Writes++;if($script:FailSystem){$script:FailSystem=$false;throw 'test native failure'};$script:SavedSystem=$Snapshot}
 function Get-UserProxyEnv{$script:SavedEnv}
-function Set-UserProxyEnv($Values){$script:Writes++;$script:SavedEnv=$Values;if($script:FailEnv){$script:FailEnv=$false;throw 'test env failure'}}
+function Set-UserProxyEnv($Values,$ExpectedBefore){$script:Writes++;$script:SavedEnv=$Values;if($script:FailEnv){$script:FailEnv=$false;throw 'test env failure'}}
 function Get-Selection{$script:SavedSelection}
 function Save-Selection($Selection){if($script:FailSelection){$script:FailSelection=$false;throw 'test selection failure'};$script:SavedSelection=$Selection}
 function Save-Backup($Snapshot){$script:Backups++;return 'in-memory-backup'}

@@ -5,8 +5,10 @@ $script:DataRoot=$qa;$script:Checks=0
 function Check($Value,$Message){if(-not $Value){throw $Message};$script:Checks++}
 function Import-Function($File,$Name){$t=$null;$e=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $File),[ref]$t,[ref]$e);$fn=$ast.Find({param($a)$a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $Name},$true);if(-not $fn){throw $Name};return $fn.Extent.Text}
 Invoke-Expression (Import-Function 'ProxyWindow.ps1' 'Invoke-FlowWindowClose')
+Invoke-Expression (Import-Function 'ProgramCleanStart.ps1' 'Test-CleanStartSessionFinished')
 Invoke-Expression (Import-Function 'Updates.ps1' 'Assert-FlowUpdateIdle')
-function Get-CleanStartSession {$null}
+$script:CleanSession=$null
+function Get-CleanStartSession {$script:CleanSession}
 function Get-IndependentSessionPath {Join-Path $qa 'gateway-session.json'}
 function Get-RecoveryOwnerState {'alive'}
 function Show-FlowWindow {$form.Show()}
@@ -32,6 +34,45 @@ try{
         Set-Variable -Scope Script -Name $flag -Value $true
         $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true};Check $blocked ($flag+' blocks install');Set-Variable -Scope Script -Name $flag -Value $false
     }
+    # Normal completion uses "complete", and cancelled launch does not prove recovery succeeded.
+    $cleanDirectory=Join-Path $qa 'clean-fixture';[void][IO.Directory]::CreateDirectory($cleanDirectory)
+    $script:CleanSession=[pscustomobject]@{Id=('a'*32);Directory=$cleanDirectory;Status=$null}
+    foreach($phase in @('complete','failed','external-change','launch-failed','launch-unknown','cancelled','restored','completed')){
+        foreach($outcome in @('','not-needed')){
+            $script:CleanSession.Status=[pscustomobject]@{Phase=$phase;RestoreOutcome=$outcome}
+            $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true}
+            Check (-not $blocked) ($phase+' without any temporary settings permits install')
+        }
+    }
+    foreach($phase in @('preparing','starting','active','recovery-failed','future-state')){
+        $script:CleanSession.Status=[pscustomobject]@{Phase=$phase;RestoreOutcome='restored'}
+        $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true};Check $blocked ($phase+' is not a completed clean session')
+    }
+    foreach($outcome in @('pending','failed','future-outcome')){
+        $script:CleanSession.Status=[pscustomobject]@{Phase='cancelled';RestoreOutcome=$outcome}
+        $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true};Check $blocked ('cancelled launch still blocks '+$outcome+' recovery')
+    }
+    $script:CleanSession.Status=$null
+    $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true};Check $blocked 'missing clean status blocks install'
+    [IO.File]::WriteAllText((Join-Path $cleanDirectory 'recovery.json'),'{}')
+    $script:CleanSession.Status=[pscustomobject]@{Phase='complete';RestoreOutcome='restored'}
+    $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true};Check $blocked 'terminal message without recovery completion record blocks install'
+    foreach($outcome in @('restored','direct-fallback','external-change')){
+        $script:CleanSession.Status=[pscustomobject]@{Phase='external-change';RestoreOutcome=$outcome}
+        [IO.File]::WriteAllText((Join-Path $cleanDirectory 'restore-result.json'),([pscustomobject]@{SessionId=$script:CleanSession.Id;Outcome=$outcome;System=@{Flags=1}}|ConvertTo-Json -Depth 3))
+        $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true}
+        Check (-not $blocked) ('verified '+$outcome+' completion permits install without claiming ownership of later external settings')
+    }
+    foreach($invalidRecord in @(
+        '{invalid-json',
+        '{"SessionId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","Outcome":"restored","System":{"Flags":1}}',
+        '{"SessionId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Outcome":"pending","System":{"Flags":1}}',
+        '{"SessionId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Outcome":"restored","System":null}'
+    )){
+        [IO.File]::WriteAllText((Join-Path $cleanDirectory 'restore-result.json'),$invalidRecord)
+        $blocked=$false;try{Assert-FlowUpdateIdle}catch{$blocked=$true};Check $blocked 'damaged, wrong-session or unfinished recovery proof blocks install'
+    }
+    $script:CleanSession=$null
     $script:UpdateProcess=[pscustomobject]@{Active=$true};$event=New-Object Windows.Forms.FormClosingEventArgs([Windows.Forms.CloseReason]::UserClosing,$false);Invoke-FlowWindowClose $event
     Check $event.Cancel 'active download blocks explicit exit'
     # A cancelled/failed second check must not leave a Cancel caption on a staged install action.

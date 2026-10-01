@@ -60,4 +60,38 @@ function Use-ChangeLock([scriptblock]$Action){Write-LocalJson (Get-IndependentSe
 [IO.File]::Delete((Join-Path $script:DataRoot 'gateway\stop'))
 Restore-IndependentSession -ExpectedSession 'old-session'
 Check ((Test-Path (Get-IndependentSessionPath)) -and (Test-SameSnapshot $script:Sys $target) -and -not (Test-Path (Join-Path $script:DataRoot 'gateway\stop'))) 'A delayed old watchdog cannot restore or stop a newer session'
+function Use-ChangeLock([scriptblock]$Action){& $Action}
+function Set-SystemSnapshot($value){$script:Trace+='system';$script:Sys=$value}
+Write-LocalJson (Join-Path $script:DataRoot 'app-rules.json') ([pscustomobject]@{programIngresses=@([pscustomobject]@{id='fixture';port=18791})})
+$aliasCases=@(
+    @{System=[pscustomobject]@{Flags=3;Server='localhost:18790';Bypass='external'};Env=$targetEnv;Label='localhost alias'},
+    @{System=[pscustomobject]@{Flags=3;Server='[::1]:18790';Bypass='external'};Env=$targetEnv;Label='IPv6 loopback alias'},
+    @{System=[pscustomobject]@{Flags=3;Server='127.0.0.1:18790';Bypass='external'};Env=$targetEnv;Label='external bypass edit'},
+    @{System=[pscustomobject]@{Flags=3;Server='http=127.0.0.1:20000;https=localhost:18790';Bypass='external'};Env=$targetEnv;Label='per-protocol owned entry'},
+    @{System=[pscustomobject]@{Flags=3;Server='http=127.0.0.1:20000; https=localhost:18790';Bypass='external'};Env=$targetEnv;Label='space before protocol prefix'},
+    @{System=[pscustomobject]@{Flags=3;Server='http=127.0.0.1:20000 https=localhost:18790';Bypass='external'};Env=$targetEnv;Label='space separated protocol list'},
+    @{System=[pscustomobject]@{Flags=3;Server="http=127.0.0.1:20000`t https=localhost:18790";Bypass='external'};Env=$targetEnv;Label='whitespace separated protocol list'},
+    @{System=[pscustomobject]@{Flags=3;Server='localhost:18791';Bypass='external'};Env=$targetEnv;Label='program ingress system entry'},
+    @{System=$direct;Env=[pscustomobject]@{HTTP_PROXY=$null;HTTPS_PROXY='http://localhost:18790';ALL_PROXY=$null;NO_PROXY='external'};Label='external HTTPS_PROXY alias'},
+    @{System=$direct;Env=[pscustomobject]@{HTTP_PROXY=$null;HTTPS_PROXY=$null;ALL_PROXY='socks5h://[::1]:18791';NO_PROXY='external'};Label='program ingress environment alias'}
+)
+foreach($case in $aliasCases){
+    $script:Sys=$case.System;$script:Env=$case.Env;$script:Trace=@()
+    Write-LocalJson (Get-IndependentSessionPath) $session
+    $failure='';try{Restore-IndependentSession}catch{$failure=$_.Exception.Message}
+    Check ($failure -match '仍指向即将停止' -and -not $script:Trace.Count -and (Test-SameSnapshot $script:Sys $case.System) -and (Test-SameEnv $script:Env $case.Env)) ($case.Label+' preserves external settings and prevents writes')
+    Check ((Test-Path (Get-IndependentSessionPath)) -and -not (Test-Path (Join-Path $script:DataRoot 'gateway\stop'))) ($case.Label+' retains service and session instead of stranding the proxy address')
+}
+$script:Sys=$target;$script:Env=$targetEnv;$script:Trace=@()
+$duringRestore=[pscustomobject]@{HTTP_PROXY=$null;HTTPS_PROXY='http://localhost:18790';ALL_PROXY=$null;NO_PROXY='external'}
+function Set-SystemSnapshot($value){$script:Trace+='system';$script:Sys=$value;$script:Env=$duringRestore}
+Write-LocalJson (Get-IndependentSessionPath) $session
+$failure='';try{Restore-IndependentSession}catch{$failure=$_.Exception.Message}
+Check ($failure -match '仍指向即将停止' -and $script:Env.HTTPS_PROXY -eq $duringRestore.HTTPS_PROXY -and $script:Trace.Count -eq 1) 'External same-entry variable edit during system restoration is reread and preserved'
+Check ((Test-Path (Get-IndependentSessionPath)) -and -not (Test-Path (Join-Path $script:DataRoot 'gateway\stop'))) 'Concurrent same-entry edit blocks stop after the system setter yields'
+function Set-SystemSnapshot($value){$script:Trace+='system';$script:Sys=$value}
+$script:Sys=[pscustomobject]@{Flags=1;Server='localhost:18790';Bypass='external'};$script:Env=$oldEnv;$script:Trace=@()
+Write-LocalJson (Get-IndependentSessionPath) $session
+Restore-IndependentSession
+Check (-not (Test-Path (Get-IndependentSessionPath)) -and $script:Sys.Server -eq 'localhost:18790' -and $script:Sys.Flags -eq 1) 'Disabled manual proxy text is preserved without incorrectly blocking stop'
 Write-Output ('PASS: '+$script:checks+' exit recovery assertions; no Windows proxy settings written.')

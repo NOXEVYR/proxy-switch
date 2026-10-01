@@ -8,16 +8,21 @@ function Check($Value,$Message){if(-not $Value){throw $Message};$script:checks++
 try{
     $node=Join-Path $RuntimeDirectory 'node.exe';$sourceCore=Join-Path $RuntimeDirectory 'FlowSwitch.Core.exe'
     $testCore=Join-Path $qa 'FlowSwitch-TestEngine.exe';Copy-Item -LiteralPath $sourceCore -Destination $testCore
-    $fixtureScript=Join-Path $qa 'servers.cjs';$portsFile=Join-Path $qa 'ports.json'
+    $fixtureScript=Join-Path $qa 'servers.cjs';$portsFile=Join-Path $qa 'ports.json';$controlFile=Join-Path $qa 'server-control.json'
     [IO.File]::WriteAllText($fixtureScript,@'
-const http=require('http'),fs=require('fs');
+const http=require('http'),fs=require('fs');const servers=[],addresses=[];let revision='';
 Promise.all(['A','B','D'].map(marker=>new Promise(resolve=>{
 const s=http.createServer((q,r)=>{r.writeHead(200,{'Content-Length':1});r.end(marker)});
 s.on('connect',(q,c)=>{c.write('HTTP/1.1 200 Connection Established\r\n\r\n');c.once('data',()=>c.end('HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n'+marker));});
-s.listen(0,'127.0.0.1',()=>resolve(s.address().port));
-}))).then(ports=>fs.writeFileSync(process.argv[2],JSON.stringify(ports)));
+servers.push(s);s.listen(0,'127.0.0.1',()=>{addresses.push(s.address().port);resolve(s.address().port)});
+}))).then(ports=>{fs.writeFileSync(process.argv[2],JSON.stringify(ports));
+const timer=setInterval(async()=>{let q;try{q=JSON.parse(fs.readFileSync(process.argv[3],'utf8').replace(/^\uFEFF/,''))}catch{return}
+if(q.revision===revision)return;revision=q.revision;
+for(let i=0;i<3;i++){if(q.enabled[i]&&!servers[i].listening)await new Promise(r=>servers[i].listen(ports[i],'127.0.0.1',r));else if(!q.enabled[i]&&servers[i].listening)await new Promise(r=>servers[i].close(r));}
+fs.writeFileSync(process.argv[3]+'.ack',revision);if(q.stop){clearInterval(timer);process.exit(0)}
+},50);});
 '@)
-    $fixture=Start-Process -FilePath $node -ArgumentList ('"'+$fixtureScript+'" "'+$portsFile+'"') -WindowStyle Hidden -PassThru
+    $fixture=Start-Process -FilePath $node -ArgumentList ('"'+$fixtureScript+'" "'+$portsFile+'" "'+$controlFile+'"') -WindowStyle Hidden -PassThru
     $deadline=[DateTime]::UtcNow.AddSeconds(10);while(-not [IO.File]::Exists($portsFile) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
     $ports=[IO.File]::ReadAllText($portsFile)|ConvertFrom-Json
     $reserve=New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,0);$reserve.Start();$port=$reserve.LocalEndpoint.Port;$reserve.Stop()
@@ -61,6 +66,16 @@ s.listen(0,'127.0.0.1',()=>resolve(s.address().port));
         $p=Get-Profile $Key;$body=Read-TestBody $p.Port
         [pscustomobject]@{Key=$Key;Usable=($body -match '[ABD]');Results=@()}
     }
+    $realIngressProbe=${function:Invoke-ManagedIngressTransportProbe}
+    function Invoke-ManagedIngressTransportProbe($Ingress,$Urls,$Deadline,$Cancellation){
+        & $realIngressProbe $Ingress @('http://network.invalid:'+($ports[2])+'/launch-readiness') $Deadline $Cancellation
+    }
+    function Set-FixtureServers([bool]$A,[bool]$B,[switch]$Stop){
+        $revision=[Guid]::NewGuid().ToString('N');Write-LocalJson $controlFile @{revision=$revision;enabled=@($A,$B,(-not $Stop));stop=[bool]$Stop}
+        $deadline=[DateTime]::UtcNow.AddSeconds(8)
+        do{try{if([IO.File]::ReadAllText($controlFile+'.ack') -ceq $revision){return}}catch{};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $deadline)
+        throw 'Own upstream fixture did not apply its server-control request'
+    }
 
     $desktop=Join-Path $qa 'desktop';[void][IO.Directory]::CreateDirectory($desktop)
     $realShortcut=${function:Install-ProgramProxyShortcut}
@@ -97,6 +112,16 @@ public static class BrowserFixture {
         }while([DateTime]::UtcNow -lt $deadline)
         return $false
     }
+    function Reset-TestClients {
+        foreach($name in @('stop-clients','root.result','worker.result','worker.pid','root.endpoint','worker.endpoint')){
+            $path=Join-Path $qa $name;if([IO.File]::Exists($path)){[IO.File]::Delete($path)}
+        }
+    }
+    function Stop-TestClients($Launch){
+        $until=[DateTime]::UtcNow.AddSeconds(5);while(-not [IO.File]::Exists((Join-Path $qa 'worker.pid')) -and [DateTime]::UtcNow -lt $until){Start-Sleep -Milliseconds 30}
+        $root=[Diagnostics.Process]::GetProcessById($Launch.PID);$worker=[Diagnostics.Process]::GetProcessById([int][IO.File]::ReadAllText((Join-Path $qa 'worker.pid')))
+        try{[IO.File]::WriteAllText((Join-Path $qa 'stop-clients'),'stop');[void]$root.WaitForExit(5000);[void]$worker.WaitForExit(5000);Check ($root.HasExited -and $worker.HasExited) 'Own reopened root and worker exit naturally through fixture stop'}finally{$root.Dispose();$worker.Dispose()}
+    }
     Set-UniversalProxy 'a'|Out-Null
     $configured=Set-ManagedApplicationRoute $exe 'a'
     $ingress=Get-ManagedProgramIngress $exe
@@ -132,14 +157,46 @@ public static class BrowserFixture {
     Set-ManagedApplicationRoute $exe 'b'|Out-Null
     Check ((Get-RoutingSnapshot).defaultRoute -eq $defaultBefore -and (Get-ManagedProgramIngress $exe).route -eq 'b') 'Cold program B selection preserves the separately saved unified default'
     Restore-IndependentSession
-    Start-ManagedProgram $exe|Out-Null
+    Reset-TestClients
+    $cold=Start-ManagedProgram $exe
     $reopened=Invoke-AppRouter @{action='status'}
     Check ($reopened.programIngresses[0].ready -and $reopened.programIngresses[0].effectiveRoute -eq 'b' -and (Get-ManagedProgramIngress $exe).port -eq $ingress.port) 'Managed launch after full service stop restores saved program B before opening app'
+    Check (Wait-ClientResult 'B') 'Cold launch B restores real parent and worker HTTP transport rather than only selector state'
+    Stop-TestClients $cold
     Restore-IndependentSession
+    Set-FixtureServers $false $false;Reset-TestClients;$failure='';$watch=[Diagnostics.Stopwatch]::StartNew()
+    try{Start-ManagedProgram $exe|Out-Null}catch{$failure=$_.Exception.Message};$watch.Stop()
+    Check ($failure -match '未启动' -and -not [IO.File]::Exists((Join-Path $qa 'root.endpoint')) -and $watch.Elapsed.TotalSeconds -lt 25) 'Cold all-offline proxies refuse target launch within the readiness deadline'
+    Check ((Get-ManagedProgramIngress $exe).port -eq $ingress.port -and (Get-ManagedProgramIngress $exe).route -eq 'b' -and (Test-Path -LiteralPath (Get-IndependentSessionPath))) 'Failed launch retains saved program choice, fixed port and background service for repair'
+    Restore-IndependentSession;Set-FixtureServers $false $true;Reset-TestClients
+    $cold=Start-ManagedProgram $exe
+    Check (Wait-ClientResult 'B') 'Program B cold-launches while unrelated default A is completely offline'
+    Stop-TestClients $cold;Restore-IndependentSession
+    Set-FixtureServers $true $true;Set-ManagedApplicationRoute $exe 'a'|Out-Null;Restore-IndependentSession
+    Set-FixtureServers $false $true;Reset-TestClients;$cold=Start-ManagedProgram $exe
+    Check (Wait-ClientResult 'B') 'Cold preferred A offline waits for verified fallback B before launching parent and worker'
+    Check ((Get-ManagedProgramIngress $exe).route -eq 'a' -and (Invoke-AppRouter @{action='status'}).programIngresses[0].effectiveRoute -eq 'b') 'Automatic cold fallback preserves saved A preference and stable entrance'
+    Stop-TestClients $cold;Restore-IndependentSession
+    Set-FixtureServers $true $true;$script:Profiles.Routing.Failover.Enabled=$false;Write-LocalJson $script:ConfigPath $script:Profiles
+    Reset-TestClients;$cold=Start-ManagedProgram $exe
+    Check (Wait-ClientResult 'A') 'Disabled automatic failover still produces fresh health and permits usable preferred A'
+    Stop-TestClients $cold;Restore-IndependentSession
+    Set-FixtureServers $false $true;Reset-TestClients;$failure=''
+    try{Start-ManagedProgram $exe|Out-Null}catch{$failure=$_.Exception.Message}
+    Check ($failure -match '未启动' -and -not [IO.File]::Exists((Join-Path $qa 'root.endpoint'))) 'Disabled failover does not borrow available B to launch an offline A policy'
+    Restore-IndependentSession;$script:Profiles.Routing.Failover.Enabled=$true;Write-LocalJson $script:ConfigPath $script:Profiles
+    Set-FixtureServers $false $false;Set-ManagedApplicationRoute $exe 'Direct'|Out-Null;Restore-IndependentSession
+    Reset-TestClients;[IO.File]::WriteAllText((Join-Path $qa 'request.url'),('http://localhost:'+$ports[2]+'/test'));$cold=Start-ManagedProgram $exe
+    Check (Wait-ClientResult 'D') 'Explicit Direct cold-launch succeeds for local target with every proxy offline'
+    Stop-TestClients $cold;Restore-IndependentSession
+    Set-FixtureServers $false $false -Stop;Check ($fixture.WaitForExit(4000)) 'Own upstream fixtures close through their control channel without termination'
     Write-Output ('PASS: '+$checks+' real managed switching checks; real launcher, parent, child, core and HTTP; only Windows and RunOnce writes stubbed.')
 }finally{
     if($qa){[IO.File]::WriteAllText((Join-Path $qa 'stop-clients'),'stop')}
     if($script:DataRoot -and [IO.File]::Exists((Join-Path $script:DataRoot 'gateway-session.json'))){try{Restore-IndependentSession}catch{}}
     $stop=Join-Path $qa 'data\gateway\stop';if([IO.Directory]::Exists([IO.Path]::GetDirectoryName($stop))){[IO.File]::WriteAllText($stop,'stop')}
-    if($fixture){if(-not $fixture.HasExited){$fixture.Kill();[void]$fixture.WaitForExit(3000)};$fixture.Dispose()}
+    if($fixture){
+        if(-not $fixture.HasExited){try{Set-FixtureServers $false $false -Stop}catch{};if(-not $fixture.WaitForExit(4000)){throw 'Own upstream fixture did not stop through its control channel'}}
+        $fixture.Dispose()
+    }
 }

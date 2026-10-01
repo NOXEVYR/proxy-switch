@@ -30,7 +30,7 @@ function Start-FlowUpdateCheck([switch]$Manual,[switch]$AllowLarge){
 function Assert-FlowUpdateIdle {
     if($script:DialogOpen -or $script:MenuOpen -or $script:PendingAction -or $script:ChoiceDirty -or $script:UpdateProcess -or ($script:Worker -and $script:Worker.Kind -ne 'Status')){throw '仍有未应用选择、对话框或操作进行中，请完成后再安装。'}
     $clean=Get-CleanStartSession
-    if($clean -and $clean.Status.phase -notin @('restored','completed','cancelled')){throw '直连对照或恢复尚未结束，请先完成恢复再更新。'}
+    if(-not (Test-CleanStartSessionFinished $clean)){throw '直连对照或恢复尚未结束，请先完成恢复再更新。'}
 }
 function Get-FlowUpdateIdentity([int]$ProcessId){
     $row=@(Get-ProcessInventory -Id $ProcessId)|Select-Object -First 1

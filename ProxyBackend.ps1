@@ -136,11 +136,18 @@ function Get-UserProxyEnv {
     foreach ($name in $script:ProxyNames) { $result[$name] = [Environment]::GetEnvironmentVariable($name,'User') }
     [pscustomobject]$result
 }
-function Set-UserProxyEnv($Values) {
+function Set-UserProxyEnv($Values,$ExpectedBefore=$null) {
+    # Windows has no cross-process atomic environment transaction. Close the
+    # multi-field overwrite window by rechecking each value immediately before
+    # writing it; a conflict is handled by the caller's ownership-aware rollback.
+    if($null -eq $ExpectedBefore){$ExpectedBefore=Get-UserProxyEnv}
     foreach ($name in $script:ProxyNames) {
         $value = $Values.$name
         if ($null -ne $value) { $value = [string]$value }
-        if([string][Environment]::GetEnvironmentVariable($name,'User') -cne [string]$value){[Environment]::SetEnvironmentVariable($name,$value,'User')}
+        $current=[Environment]::GetEnvironmentVariable($name,'User')
+        if([string]$current -ceq [string]$value){continue}
+        if([string]$current -cne [string]$ExpectedBefore.$name){throw ('用户代理变量 '+$name+' 已被其他程序改动，未覆盖新值。')}
+        [Environment]::SetEnvironmentVariable($name,$value,'User')
     }
 }
 function Get-Selection {
@@ -273,12 +280,16 @@ function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable
         if($route -ne 'Unset' -and $route -ne $key){$envConflict=$true}
     }
     $listeners=@();foreach($id in (Get-ProfileKeys)){
-        $p=Get-Profile $id;$remote=$p.Host -notin @('localhost','127.0.0.1','::1');$l=$null;if($TcpAvailable){$l=Get-Listener $p -TcpRows $TcpRows}
-        $listeners+=[pscustomobject]@{Key=$id;Name=$p.Name;Protocol=$p.Protocol;Port=$p.Port;Remote=$remote;Ready=$(if($remote -or -not $TcpAvailable){$null}else{$null -ne $l})}
+        $p=Get-Profile $id;$remote=$p.Host -notin @('localhost','127.0.0.1','::1');$entryReady=$null
+        $observed=Get-LocalEndpointObservation (Get-EndpointAddress $p) ([pscustomobject]@{Available=$TcpAvailable;Rows=$TcpRows}) $p
+        if($observed){$entryReady=$observed.Ready}
+        $listeners+=[pscustomobject]@{Key=$id;Name=$p.Name;Protocol=$p.Protocol;Port=$p.Port;Remote=$remote;Ready=$entryReady}
     }
     $ready=$key -eq 'Direct'
     if($key -ne 'Direct'){$entry=$listeners | Where-Object {$_.Key -eq $key} | Select-Object -First 1;$ready=$(if($entry){$entry.Ready}else{$null})}
     $live=@(Get-LiveConnections -TcpRows $TcpRows);$warnings=@(Get-ClientWarnings)+@(Get-OverrideWarnings $key);if($TcpAvailable){$warnings+=@(Get-EntryLifecycleWarnings $snapshot $envValues $listeners)}else{$warnings+='Windows 连接列表读取失败，入口监听和连接状态未知；这不代表网络已断开。'}
+    if($key -ne 'Direct' -and $null -eq $ready){$warnings+='当前入口监听或归属无法核验，状态未知；不会据此认定入口未监听。'}
+    if((Test-BroadProxyBypass $envValues.NO_PROXY) -and ($key -ne 'Direct' -or @($environment|Where-Object Route -ne 'Unset').Count)){$aligned=$false;$envConflict=$true;$warnings+=Get-BroadProxyBypassWarning}
     if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){
         $gatewayListener=$listeners|Where-Object Key -eq (Get-GatewayKey)|Select-Object -First 1
         if($gatewayListener -and $null -ne $gatewayListener.Ready -and -not $gatewayListener.Ready){$warnings+='固定分流入口未就绪，统一切换依赖该入口。请启动承载该入口的引擎，或在代理管理中明确启用独立分流；不会自动改走其他端口。'}
@@ -433,7 +444,7 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
         # A controller reload can take seconds; recheck before touching Windows settings.
         if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $BeforeEnv (Get-UserProxyEnv))){throw '重载期间系统入口发生变化，请重试。'}
         Write-OperationProgress '正在同步用户代理变量…'
-        $nativeStarted=$true;Set-UserProxyEnv $TargetEnv
+        $nativeStarted=$true;Set-UserProxyEnv $TargetEnv -ExpectedBefore $BeforeEnv
         if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot))){throw '写入变量期间其他程序改动了系统代理。'}
         Write-OperationProgress '正在写入系统入口并实读校验…'
         if(-not $EnvironmentOnly){$systemStarted=$true;Set-SystemSnapshot $TargetSystem}
@@ -453,7 +464,7 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
                     if([string]$currentEnv.$name -ceq [string]$TargetEnv.$name){$rollbackEnv[$name]=$BeforeEnv.$name}
                     else{$rollbackEnv[$name]=$currentEnv.$name;if([string]$currentEnv.$name -cne [string]$BeforeEnv.$name){$preserved+='环境变量'}}
                 }
-                if(-not (Test-SameEnv $currentEnv ([pscustomobject]$rollbackEnv))){Set-UserProxyEnv ([pscustomobject]$rollbackEnv)}
+                if(-not (Test-SameEnv $currentEnv ([pscustomobject]$rollbackEnv))){Set-UserProxyEnv ([pscustomobject]$rollbackEnv) -ExpectedBefore $currentEnv}
             }catch{$rollbackErrors+='环境变量'}
             if($systemStarted){try{
                 $currentSystem=Get-SystemSnapshot
