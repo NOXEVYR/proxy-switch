@@ -14,7 +14,7 @@
 
 <img src="assets/FlowSwitch.png" alt="流向 FlowSwitch" width="144" />
 
-# 流向 FlowSwitch 3.9.5
+# 流向 FlowSwitch 3.9.6
 
 管理已有 HTTP / SOCKS5 代理，通过固定入口选择出口。代理退出或卸载导致系统入口失效时，可在「检查与维护 → 连接检查 → 开始网络检查 → 查看并修复」检测备用并恢复入口；没有可用备用时撤销确认失效的设置。它不提供 VPN 服务、订阅或节点。
 
@@ -22,7 +22,7 @@
 
 Windows x64 程序包与源码包在本仓库 Releases 发布；旧版下载档案继续保留在 portfolio。程序包自带锁定运行组件。请完整解压，并保留本机配置备份。自动化验证覆盖隔离核心和实际请求，不能代替真实 IDE 登录与长期使用验收。
 
-**[下载 Windows x64 · 3.9.5](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.5/FlowSwitch-v3.9.5-Windows-x64.zip)** · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.5/FlowSwitch-v3.9.5-Windows-Source.zip) · [SHA-256 校验](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.5/SHA256SUMS.txt)
+**[下载 Windows x64 · 3.9.6](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.6/FlowSwitch-v3.9.6-Windows-x64.zip)** · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.6/FlowSwitch-v3.9.6-Windows-Source.zip) · [SHA-256 校验](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.6/SHA256SUMS.txt)
 
 ## macOS 原生测试版
 
