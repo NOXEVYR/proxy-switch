@@ -8,6 +8,12 @@
 - 会话恢复归属随接回更新：保留仍归属字段的旧恢复baseline，外部已改字段按本次Before/语义重建，保留Bypass及自动模式。会话CAS失败或外部变化不能覆盖；回滚不完整时保留可恢复记录与核心。
 - ApplicationObservation接入三态每轮实读，不跨轮缓存。Controller精确证据才确认engine线路；外部代理TCP登记不能证明接管，入口外或读取未知保持未知。UI区分普通engine的应用线路并检查和native的按此线路打开。
 
+# 3.9.7 Qt 与程序入口共存
+
+- QtWebEngine 核验同目录 Qt5/6 Core、Network、WebEngineCore 与 helper 完整版本；参数仅写新 ProcessStartInfo 环境。网络参数冲突及 helper 路径覆盖拒绝，保留其他 flags，不改原 EXE 或用户变量。Qt 组件覆盖不能冒充整组网络、UDP 或登录验收。
+- Qt 首次接入走120秒显式预览/Confirmed Apply，绑定配置/环境/文件身份；只替换 root 引擎规则，保留其他程序/子程序规则、网站、默认和备用。启动用 PreserveWindowsSettings，退出按 OwnGatewayEndpoint 核验，不能把第三方入口当成自有入口。后续明确统一接管先 CAS 写入新的恢复归属，失败按归属回退。
+- 界面活跃但监督器与原/最新 child 均明确停止时，可提供 GracefulOnly 残留恢复；缺失、损坏、异代记录或任何存活服务进程不得按停止清理。Test-QtProgramLaunch、Test-QtProgramAccess、Test-StoppedServiceRecovery 纳入 Test-All；Test-ProgramCoexistence 使用真实隔离内核，不替代真实 Qt 请求与游戏登录。
+
 # UI 功能维护（2026-10-01）
 
 - 四页各自拥有操作：网络切换、程序线路、代理入口、检查与维护；工具再分连接检查、维护与恢复、软件与记录。新增动作需注明对象、影响与撤回，更新 UiGuidance / USER_GUIDE / QuickStart 中的实际路径。

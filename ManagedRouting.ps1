@@ -8,7 +8,7 @@ function Assert-ManagedRoute([string]$Route,[switch]$AllowFollow) {
     $keys=@('Direct')+(Get-ProfileKeys);if($AllowFollow){$keys+=@('Follow')}
     if($Route -notin $keys -or ($Route -eq (Get-GatewayKey) -and $script:Profiles.Routing.Adapter -eq 'standalone')){throw '请选择有效上游、直连或跟随统一线路，不能把流向入口作为自己的出口。'}
 }
-function Ensure-ManagedGateway([string]$InitialRoute='') {
+function Ensure-ManagedGateway([string]$InitialRoute='',[switch]$PreserveWindowsSettings) {
     if($InitialRoute -eq 'Follow'){$InitialRoute=''}
     if($script:Profiles.Routing.Adapter -eq 'standalone' -and (Test-Path -LiteralPath (Get-IndependentSessionPath))){
         $session=Get-Content -LiteralPath (Get-IndependentSessionPath) -Raw -Encoding UTF8|ConvertFrom-Json
@@ -24,7 +24,7 @@ function Ensure-ManagedGateway([string]$InitialRoute='') {
     }
     if($script:Profiles.Routing.Adapter -ne 'standalone' -or -not (Test-Path -LiteralPath (Get-IndependentSessionPath))){
         if($InitialRoute){Assert-ManagedRoute $InitialRoute}
-        Enable-IndependentGateway -OwnerPID $PID -InitialRoute $InitialRoute | Out-Null
+        Enable-IndependentGateway -OwnerPID $PID -InitialRoute $InitialRoute -PreserveWindowsSettings:$PreserveWindowsSettings | Out-Null
     }
     $deadline=[DateTime]::UtcNow.AddSeconds(12)
     do {
@@ -211,11 +211,12 @@ function Set-ManagedApplicationRoute([string]$Path,[string]$Route) {
         $executable=Resolve-ProgramTarget $Path;Assert-ManagedRoute $Route -AllowFollow
         foreach($profile in $script:Profiles.Profiles){if($executable -ieq $profile.CorePath -or $executable -ieq $profile.AppPath){throw '不能给代理程序自身分流，以免形成回路。'}}
         $adapter=Get-ProgramProxyAdapter $executable
-        if($adapter -ne 'chromium' -and (Get-ManagedProgramIngress $executable)){throw '此程序当前版本已无法核验原启动适配，原固定入口和规则保持不变。请检查程序路径及安装是否完整，再修复程序记录。'}
+        if($adapter -notin @('chromium','qtwebengine') -and (Get-ManagedProgramIngress $executable)){throw '此程序当前版本已无法核验原启动适配，原固定入口和规则保持不变。请检查程序路径及安装是否完整，再修复程序记录。'}
+        if($adapter -eq 'qtwebengine' -and -not (Get-ManagedProgramIngress $executable)){throw 'Qt 网页组件首次接入需要明确预览确认；请从程序线路中启用网页组件独立入口。'}
         if($Route -notin @('Direct','Follow') -and -not (Test-ProxyRoute $Route -Fast).Usable){throw '所选上游检测未通过，未保存切换成功状态。请先检查这个代理入口。'}
         # A program action never replaces the saved global default during cold start.
-        Ensure-ManagedGateway|Out-Null
-        if($adapter -ne 'chromium'){
+        if($adapter -eq 'qtwebengine'){Ensure-ManagedGateway -PreserveWindowsSettings|Out-Null}else{Ensure-ManagedGateway|Out-Null}
+        if($adapter -notin @('chromium','qtwebengine')){
             $result=Set-ApplicationRoute $executable $Route
             $result.Message+=' 此程序没有可核验的原生代理启动适配；仍指向已退出旧代理的进程，需要在程序内改为流向入口或自行重开。'
             return $result

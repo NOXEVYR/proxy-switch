@@ -54,6 +54,8 @@ function Set-ProgramRouteAccess($Plan,[switch]$Confirmed){
  if(-not $Confirmed){throw 'Fixture requires explicit confirmation'}
  $script:Applies++;[pscustomobject]@{Message='Fixture confirmed application';Path=$Plan.Path;Route=$Plan.Route;Backup='fixture-only'}
 }
+function Get-QtProgramAccessPlan($Path,$Route){$script:Plans++;[pscustomobject]@{Version=1;Kind='qtwebengine';CanApply=$true;Path=$Path;Route=$Route;Message='Fixture Qt component-only preview'}}
+function Set-QtProgramAccess($Plan,[switch]$Confirmed){if(-not $Confirmed){throw 'Qt needs confirmation'};$script:Applies++;[pscustomobject]@{Message='Fixture Qt applied';Backup='fixture-only'}}
 function Set-ApplicationRoute {throw 'Unexpected legacy direct writer'}
 function Set-SystemSnapshot {throw 'Must not write Windows'}
 function Set-UserProxyEnv {throw 'Must not write Windows'}
@@ -126,4 +128,10 @@ Reset-Fixture;$script:Adapter='chromium';$script:HasEngine=$true;$script:SavedEn
 Check ($reply.OK -and $reply.Kind -eq 'ProgramAccessPlan' -and $script:Plans -eq 1 -and $script:ManagedWrites -eq 0 -and $script:EquivalenceReads -eq 1) 'Saved hardlink alias wins over stale observed Chromium row without creating a competing ingress'
 Reset-Fixture;$script:Adapter='chromium';$script:HasEngine=$true;$script:SavedEnginePath=$alias;$script:AppTarget.Path=$different;$reply=Choose 'Direct'
 Check ($reply.OK -and $reply.Kind -eq 'ManagedAppRoute' -and $script:Plans -eq 0 -and $script:ManagedWrites -eq 1 -and $script:EquivalenceReads -eq 1) 'An unrelated executable with the same bytes remains a separate supported managed program'
+foreach($mode in @('observe','engine','managed')){
+ Reset-Fixture;$script:Adapter='qtwebengine';$script:AppTarget.Mode=$mode;$reply=Choose 'Direct'
+ Check ($reply.OK -and $reply.Kind -eq 'QtAccessPlan' -and $script:Plans -eq 1 -and $script:ManagedWrites -eq 0 -and $script:Applies -eq 0) ('Qt '+$mode+' selection previews component-only access without global takeover')
+ $applied=Run-Worker ([pscustomobject]@{Kind='QtAccessApply';Key=($reply.Result|ConvertTo-Json -Depth 8 -Compress)})
+ Check ($applied.OK -and $applied.Kind -eq 'QtAccessApply' -and $script:Applies -eq 1) 'Separate Qt confirmation reaches the component-only apply contract'
+}
 Write-Output ('PASS: '+$script:Checks+' program route dispatch assertions; actual UI request and worker AST, synthetic backend only, no real Windows or process mutations.')

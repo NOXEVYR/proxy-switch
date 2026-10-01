@@ -807,14 +807,24 @@ function Start-Work([string]$Kind,[string]$Key) {
                         $saved=Get-RoutingSnapshot
                         $adapter=Get-ProgramProxyAdapter $change.path
                         $identityContext=New-ProgramIdentityContext
-                        if($adapter -ne 'chromium' -or @($saved.entries|Where-Object {$_.path -ieq $change.path -or (Test-ProgramPathEquivalent $_.path $change.path $identityContext)}).Count){
+                        if($adapter -eq 'qtwebengine'){
+                            [pscustomobject]@{Kind='QtAccessPlan';Result=(Get-QtProgramAccessPlan -Path $change.path -Route $change.route)}
+                        }elseif($adapter -ne 'chromium' -or @($saved.entries|Where-Object {$_.path -ieq $change.path -or (Test-ProgramPathEquivalent $_.path $change.path $identityContext)}).Count){
                             [pscustomobject]@{Kind='ProgramAccessPlan';Result=(Get-ProgramRouteAccessPlan -Path $change.path -Route $change.route)}
                         }else{[pscustomobject]@{Kind='ManagedAppRoute';Result=(Set-ManagedApplicationRoute $change.path $change.route)}}
                     }
                     $Kind=$dispatch.Kind;$result=$dispatch.Result
                 }
-                'ProgramAccessPlan'{$change=$Key|ConvertFrom-Json;$result=Get-ProgramRouteAccessPlan -Path $change.path -Route $change.route}
+                'ProgramAccessPlan'{
+                    $change=$Key|ConvertFrom-Json
+                    $dispatch=Use-ChangeLock {
+                        if((Get-ProgramProxyAdapter $change.path) -eq 'qtwebengine'){[pscustomobject]@{Kind='QtAccessPlan';Result=(Get-QtProgramAccessPlan -Path $change.path -Route $change.route)}}
+                        else{[pscustomobject]@{Kind='ProgramAccessPlan';Result=(Get-ProgramRouteAccessPlan -Path $change.path -Route $change.route)}}
+                    }
+                    $Kind=$dispatch.Kind;$result=$dispatch.Result
+                }
                 'ProgramAccessApply'{$result=Set-ProgramRouteAccess -Plan ($Key|ConvertFrom-Json) -Confirmed}
+                'QtAccessApply'{$result=Set-QtProgramAccess -Plan ($Key|ConvertFrom-Json) -Confirmed}
                 'WebsiteRules'{$result=Get-WebsiteRules;$result|Add-Member NoteProperty ContextExecutable $Key -Force}
                 'WebsiteRulesSave'{$change=$Key|ConvertFrom-Json;$result=Set-WebsiteRules -Entries @($change.Entries) -ExpectedRevision $change.Revision}
                 'AppSync'{$result=Sync-ApplicationRoutes}
@@ -987,12 +997,20 @@ $timer.Add_Tick({
                         if($reply.Discovery.Added -or $reply.Kind -eq 'Discover'){Write-Activity ('检测到 '+$reply.Discovery.Detected+' 个入口，新增 '+$reply.Discovery.Added+' 个代理。网络设置未更改。')}
                     }
                 }
-                if($reply.Kind -in @('Switch','Restore','AppRoute','ManagedAppRoute','ProgramAccessApply')){$script:ChoiceDirty=$false}
+                if($reply.Kind -in @('Switch','Restore','AppRoute','ManagedAppRoute','ProgramAccessApply','QtAccessApply')){$script:ChoiceDirty=$false}
                 if($reply.State -and $reply.Apps){$script:ObservationStale=$false;Show-State $reply.State;Show-Applications $reply.Apps}
                 elseif($reply.RefreshError){Mark-ObservationStale;Write-Activity $reply.RefreshError}
                 $script:CleanSession=$reply.CleanSession
                 if($reply.CleanSession -and $reply.CleanSession.Status){$notice=$reply.CleanSession.Status.Phase+'|'+$reply.CleanSession.Status.Message;if($notice -cne $script:LastCleanStartNotice){$script:LastCleanStartNotice=$notice;Write-Activity $reply.CleanSession.Status.Message}}
                 if($reply.Kind -eq 'CleanStartPlan'){Show-CleanStartDialog $reply.Result}
+                elseif($reply.Kind -eq 'QtAccessPlan'){
+                    $plan=$reply.Result;$script:DialogOpen=$true
+                    try{
+                        if($plan.CanApply){
+                            if([Windows.Forms.MessageBox]::Show($form,($plan.Message+"`r`n`r`n确认只为此程序配置网页组件独立入口？"),'网页组件独立启动','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='QtAccessApply';Key=($plan|ConvertTo-Json -Depth 16 -Compress)}}
+                        }else{[void][Windows.Forms.MessageBox]::Show($form,$plan.Message,'网页组件适配尚不能应用','OK','Information')}
+                    }finally{$script:DialogOpen=$false}
+                }
                 elseif($reply.Kind -eq 'ProgramAccessPlan'){
                     $plan=$reply.Result
                     if($plan.CanApply){Show-ProgramRouteAccessDialog $plan}else{
@@ -1027,7 +1045,7 @@ $timer.Add_Tick({
                     if($reply.Result.Backup){
                         if($reply.Kind -eq 'AppDesktopMode'){$logBox.AppendText("`r`n桌面入口已保存。解除绑定请在启动方式选择「仅在流向内打开」；线路保留。")}
                         elseif($reply.Kind -eq 'Independent'){$logBox.AppendText("`r`n独立入口迁移备份已保留；请按恢复说明处理服务和设置。")}
-                        elseif($reply.Kind -in @('Switch','AppRoute','ManagedAppRoute','AppLaunchRoute','ProgramAccessApply')){$logBox.AppendText("`r`n线路切换前配置已保存，可用「撤回线路更改」恢复。")}
+                        elseif($reply.Kind -in @('Switch','AppRoute','ManagedAppRoute','AppLaunchRoute','ProgramAccessApply','QtAccessApply')){$logBox.AppendText("`r`n线路切换前配置已保存，可用「撤回线路更改」恢复。")}
                     }
                     if($reply.Result.Test){$logBox.AppendText("`r`n" + (Format-Diagnostics @($reply.Result.Test)))}
                     if($reply.State.Warnings.Count){$logBox.AppendText("`r`n" + ($reply.State.Warnings -join "`r`n"))}
