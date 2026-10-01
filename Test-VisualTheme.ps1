@@ -15,9 +15,10 @@ public static class FlowVisualInput {
 '@
 $qa=Join-Path $env:TEMP ('FlowSwitch-visual-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBackend.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UiGuidance.ps1') -Destination $qa
 $scriptFile=Join-Path $qa 'ProxyWindow.ps1';$source=[IO.File]::ReadAllText($scriptFile)
 $fixture=@'
 if($Demo){Set-DemoCatalog}
@@ -30,16 +31,19 @@ $source=$source.Replace('if($Demo){Set-DemoCatalog}',$fixture)
 $checks=@'
         if($env:FLOW_VISUAL_SCALE){$factor=[single]::Parse($env:FLOW_VISUAL_SCALE,[Globalization.CultureInfo]::InvariantCulture);$form.Scale((New-Object Drawing.SizeF($factor,$factor)));$form.PerformLayout();[Windows.Forms.Application]::DoEvents()}
         if($liveList.Items.Count -ne 120){throw 'Large-list fixture missing.'}
-        foreach($index in @(1,2,0)){
+        foreach($index in @(3,1,2,0)){
             $navigation[$index].PerformClick()
             [Windows.Forms.Application]::DoEvents()
             if($tabs.SelectedIndex -ne $index -or $brand.Text -ne $tabs.SelectedTab.Text -or @($navigation|Where-Object Selected).Count -ne 1){throw 'Navigation, title and selection disagree.'}
         }
-        foreach($dimensions in @(@(1180,790),@(1420,900),@(1260,840))){
+        $visualMinimum=$form.MinimumSize;$visualDefault=$form.Size
+        foreach($dimensions in @(@($visualMinimum.Width,$visualMinimum.Height),@([Math]::Max($visualDefault.Width,1420*$Scale),[Math]::Max($visualDefault.Height,900*$Scale)),@($visualDefault.Width,$visualDefault.Height))){
             $form.Size=New-Object Drawing.Size($dimensions[0],$dimensions[1]);$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
-            if($liveList.Columns[0].Width -lt 140 -or $undo.Right -gt $switchRow.Width -or $unify.Left -le $networkChoice.Right){throw 'Controls overlap or escape the resized window.'}
+            $navigation[3].PerformClick();[Windows.Forms.Application]::DoEvents()
+            if($liveList.Columns[0].Width -lt 140 -or $undo.Right -gt $undo.Parent.ClientSize.Width -or $unify.Left -le $networkChoice.Right){throw 'Controls overlap or escape the resized window.'}
             if($liveList.Items.Count -ne 120){throw 'Resizing lost application rows.'}
             foreach($panel in $panels){if($panel.Bottom -gt $cards.ClientSize.Height){throw 'Summary card clipped'};foreach($label in $panel.Controls){if($label.Right -gt $panel.ClientSize.Width -or $label.Bottom -gt $panel.ClientSize.Height){throw 'Summary label clipped'}}}
+            $navigation[0].PerformClick();[Windows.Forms.Application]::DoEvents()
             $total=($liveList.Columns|Measure-Object Width -Sum).Sum
             if($total -gt $liveList.ClientSize.Width){throw ('Columns overflow: '+$total+' > '+$liveList.ClientSize.Width)}
             if($layout.Right -gt $shellLayout.Width -or $layout.Bottom -gt $shellLayout.Height -or $footer.Bottom -gt $layout.Height){throw 'Workspace or footer clipped.'}
@@ -69,10 +73,10 @@ $checks=@'
         $rail.ScrollTo(0)
         $liveList.Items[0].Selected=$true;$liveList.Items[0].Focused=$true;$liveList.Focus()
         [FlowVisualInput]::Key($liveList,35);[Windows.Forms.Application]::DoEvents()
-        if($liveList.TopItem.Index -lt 100){throw 'Native End key scrolling failed.'}
+        if($liveList.TopItem.Index -lt 100){throw ('Native End key scrolling failed; top='+$liveList.TopItem.Index+' focused='+$liveList.FocusedItem.Index+' selected='+($liveList.SelectedIndices -join ',')+' lastBounds='+$liveList.Items[119].Bounds+' viewport='+$liveList.ClientSize+' maximum='+$rail.Maximum)}
         [FlowVisualInput]::Key($liveList,36);[Windows.Forms.Application]::DoEvents()
         if($liveList.TopItem.Index -ne 0){throw 'Native Home key scrolling failed.'}
-        $navigation[2].PerformClick();$logBox.Text=((1..200|ForEach-Object{'Diagnostic line '+$_}) -join "`r`n");[Windows.Forms.Application]::DoEvents()
+        $navigation[2].PerformClick();$toolsSections.SelectedIndex=2;$logBox.Text=((1..200|ForEach-Object{'Diagnostic line '+$_}) -join "`r`n");[Windows.Forms.Application]::DoEvents()
         $logHost.Rail.ScrollTo($logHost.Rail.Maximum);[Windows.Forms.Application]::DoEvents()
         if($logHost.Rail.Position -lt 100){throw 'Log scrollbar failed.'}
         $navigation[0].PerformClick();[Windows.Forms.Application]::DoEvents()
@@ -88,8 +92,11 @@ $checks=@'
 $source=$source.Replace('$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)', $checks+"`r`n"+'$bitmap=New-Object Drawing.Bitmap($form.Width,$form.Height)')
 [IO.File]::WriteAllText($scriptFile,$source,(New-Object Text.UTF8Encoding($true)))
 $clock=[Diagnostics.Stopwatch]::StartNew()
-$env:FLOW_VISUAL_SCALE=$Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
-$uiResult=@(& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'large-list.png'))
+$priorVisualScale=$env:FLOW_VISUAL_SCALE
+try{
+    $env:FLOW_VISUAL_SCALE=$Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $uiResult=@(& (Join-Path $qa 'ProxySwitch.ps1') -Demo -DataDirectory (Join-Path $qa 'data') -PreviewPath (Join-Path $qa 'large-list.png'))
+}finally{$env:FLOW_VISUAL_SCALE=$priorVisualScale}
 $uiResult|Write-Output
 if(-not ($uiResult -match '^PASS: visual checks')){throw 'Visual UI did not complete its control assertions.'}
 if($OutputDirectory){[void][IO.Directory]::CreateDirectory($OutputDirectory);Copy-Item -LiteralPath (Join-Path $qa 'large-list.png') -Destination (Join-Path $OutputDirectory ('large-list-'+$Scale+'.png'));Copy-Item -LiteralPath (Join-Path $qa 'rail.png') -Destination (Join-Path $OutputDirectory ('rail-'+$Scale+'.png'))}

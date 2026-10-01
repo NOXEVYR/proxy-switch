@@ -5,7 +5,7 @@ Add-Type -AssemblyName System.Windows.Forms
 $qaSource=$PSScriptRoot
 $qaRoot=Join-Path $env:TEMP ('passive-ui-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
 [void][IO.Directory]::CreateDirectory($qaRoot)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','ProxyDiscovery.ps1','ProcessInventory.ps1','ProgramLaunch.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $qaSource $name) -Destination $qaRoot}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','UiGuidance.ps1','Updates.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','ProxyDiscovery.ps1','ProcessInventory.ps1','ProgramLaunch.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $qaSource $name) -Destination $qaRoot}
 [void][IO.Directory]::CreateDirectory((Join-Path $qaRoot 'assets'))
 Copy-Item -LiteralPath (Join-Path $qaSource 'assets/FlowSwitch.ico') -Destination (Join-Path $qaRoot 'assets/FlowSwitch.ico')
 # Isolated Windows fixtures must not contend with the real manager or other test windows.
@@ -60,18 +60,18 @@ $qaTimer.Add_Tick({
         if($canary.Pending()){throw 'Passive status opened a socket'}
         if(Test-Path -LiteralPath (Join-Path $qaRoot 'writes.log')){throw 'Lifecycle wrote network settings'}
         if(Test-Path -LiteralPath (Join-Path $qaRoot 'probes.log')){throw 'Lifecycle ran protocol discovery'}
-        $combo=Find-Type $main ([Windows.Forms.ComboBox]) | Select-Object -First 1
+        $combo=Find-Type $main ([Windows.Forms.ComboBox]) | Where-Object Name -eq 'UnifiedRouteChoice' | Select-Object -First 1
         if($global:qaStep -eq 0 -and $combo.SelectedItem.Id -eq 'beta'){
             if(-not (Find-Control $main 'QA Beta')){throw 'Card does not reflect actual entry'}
             [IO.File]::WriteAllText($global:qaSystemPath,'{"Flags":1,"Server":"127.0.0.1:7897","Bypass":""}')
-            (Find-Control $main '刷新').PerformClick();$global:qaStep=1
+            (Find-Control $main '程序线路').PerformClick();(Find-Control $main '刷新列表').PerformClick();$global:qaStep=1
         }elseif($global:qaStep -eq 1 -and $combo.SelectedItem.Id -eq 'Direct'){
             if(-not (Find-Control $main '直连')){throw 'Disabled stale server misreported as active proxy'}
             for($choice=0;$choice -lt $combo.Items.Count;$choice++){if($combo.Items[$choice].Id -eq $global:qaDesiredChoice){$combo.SelectedIndex=$choice;break}}
             $method=$combo.GetType().GetMethod('OnSelectionChangeCommitted',[Reflection.BindingFlags]'Instance,NonPublic')
             [void]$method.Invoke($combo,@([EventArgs]::Empty))
             [IO.File]::WriteAllText($global:qaSystemPath,'{"Flags":3,"Server":"127.0.0.1:18082","Bypass":""}')
-            (Find-Control $main '刷新').PerformClick();$global:qaStep=2
+            (Find-Control $main '程序线路').PerformClick();(Find-Control $main '刷新列表').PerformClick();$global:qaStep=2
         }elseif($global:qaStep -eq 2 -and (Find-Control $main 'QA Beta')){
             if($combo.SelectedItem.Id -ne $global:qaDesiredChoice){throw 'Refresh overwrote unsubmitted user choice'}
             $global:qaStep=3

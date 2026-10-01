@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -14,6 +14,11 @@ namespace FlowSwitch.UI
         public static readonly Color Text = ColorTranslator.FromHtml("#EBF3FC");
         public static readonly Color Muted = ColorTranslator.FromHtml("#AFBED0");
         public static readonly Color Accent = ColorTranslator.FromHtml("#9EDBFA");
+        public static Color Background(Control parent)
+        {
+            while(parent!=null) { if(parent.BackColor.A==255) return parent.BackColor; parent=parent.Parent; }
+            return Canvas;
+        }
         public static GraphicsPath Round(Rectangle rect, int radius)
         {
             var p = new GraphicsPath(); int d = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height));
@@ -46,7 +51,7 @@ namespace FlowSwitch.UI
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
-            e.Graphics.Clear(Parent==null ? Palette.Canvas : Parent.BackColor);
+            e.Graphics.Clear(Palette.Background(Parent));
             using(var path=Palette.Round(new Rectangle(0,0,Width-1,Height-1),12))
             using(var brush=new SolidBrush(BackColor))
             using(var pen=new Pen(Palette.Border)) { e.Graphics.FillPath(brush,path); e.Graphics.DrawPath(pen,path); }
@@ -68,7 +73,7 @@ namespace FlowSwitch.UI
         protected override void OnEnabledChanged(EventArgs e){Invalidate();base.OnEnabledChanged(e);}
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.SmoothingMode=SmoothingMode.AntiAlias; e.Graphics.Clear(Parent==null ? Palette.Canvas : Parent.BackColor);
+            e.Graphics.SmoothingMode=SmoothingMode.AntiAlias; e.Graphics.Clear(Palette.Background(Parent));
             Color fill=Primary?Palette.Accent:(Selected?ColorTranslator.FromHtml("#28445F"):BackColor);
             if(over && Enabled) fill=ControlPaint.Light(fill,0.12f);
             if(down && Enabled) fill=ControlPaint.Dark(fill,0.1f);
@@ -81,6 +86,7 @@ namespace FlowSwitch.UI
                 using(var pen=new Pen(Selected?Palette.Accent:Palette.Muted,1.8f)) {
                     float x=18,y=Height/2f; pen.StartCap=pen.EndCap=LineCap.Round;
                     if(Glyph==0){e.Graphics.DrawLine(pen,x,y,x+6,y);e.Graphics.DrawLines(pen,new[]{new PointF(x+6,y-7),new PointF(x+6,y+7),new PointF(x+14,y+7)});e.Graphics.DrawLine(pen,x+6,y-7,x+14,y-7);}
+                    else if(Glyph==3){e.Graphics.DrawLines(pen,new[]{new PointF(x,y),new PointF(x+8,y-8),new PointF(x+16,y)});e.Graphics.DrawLines(pen,new[]{new PointF(x+3,y-2),new PointF(x+3,y+8),new PointF(x+13,y+8),new PointF(x+13,y-2)});}
                     else if(Glyph==1){for(int i=0;i<3;i++){float yy=y-7+i*7;e.Graphics.DrawLine(pen,x,yy,x+16,yy);e.Graphics.DrawEllipse(pen,x+3+i*3,yy-2,4,4);}}
                     else{e.Graphics.DrawLines(pen,new[]{new PointF(x,y),new PointF(x+4,y),new PointF(x+7,y-7),new PointF(x+11,y+7),new PointF(x+14,y),new PointF(x+18,y)});}
                 }

@@ -1,0 +1,34 @@
+name: Windows updater candidate checks
+on:
+  push:
+    branches: ['main', 'maintenance/windows-3.9.4']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Full isolated regression
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:TEMP=Join-Path $env:RUNNER_TEMP 'flowswitch-tests'
+          $env:TMP=$env:TEMP
+          [void][IO.Directory]::CreateDirectory($env:TEMP)
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-All.ps1
+          if($LASTEXITCODE -ne 0){throw 'Regression failed'}
+      - name: Routing and visual UI regression
+        run: |
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-RoutingWorkbenchUI.ps1
+          if($LASTEXITCODE -ne 0){throw 'Routing UI failed'}
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-VisualTheme.ps1
+          if($LASTEXITCODE -ne 0){throw 'Visual UI failed'}
+          foreach($scale in @(1,1.25,1.5)){
+            & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-UsabilityUI.ps1 -Scale $scale
+            if($LASTEXITCODE -ne 0){throw ('Usability UI failed at scale '+$scale)}
+          }

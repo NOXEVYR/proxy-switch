@@ -33,8 +33,12 @@ $manifest=Get-Content -LiteralPath (Join-Path $relocated 'manifest.json') -Raw -
 $valid=$true
 foreach($item in $manifest){$file=Join-Path $relocated $item.path;if((Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant() -ne $item.sha256 -or (Get-Item -LiteralPath $file).Length -ne $item.bytes){$valid=$false}}
 Check $valid 'Program package manifest mismatch.'
-Check ((Get-ChildItem -LiteralPath $relocated -Recurse -File).Count -eq ($manifest.Count+1)) 'Unexpected file in program package.'
+Check ((Get-ChildItem -LiteralPath $relocated -Recurse -File).Count -eq ($manifest.Count+2)) 'Unexpected file in program package.'
 $productVersion=[regex]::Match([IO.File]::ReadAllText((Join-Path $relocated 'app\Preferences.ps1')),"ProductVersion='([0-9.]+)'").Groups[1].Value
+$registration=Get-Content -LiteralPath (Join-Path $relocated 'update-install.json') -Raw -Encoding UTF8|ConvertFrom-Json
+Check ($registration.version -ceq $productVersion -and $registration.manifestSha256 -ceq (Get-FileHash (Join-Path $relocated 'manifest.json')).Hash.ToLowerInvariant() -and $registration.build -ceq $registration.manifestSha256) 'Update installation identity must bind the file manifest and current version.'
+$quickStart=[IO.File]::ReadAllText((Join-Path $relocated '使用说明.txt'))
+Check ((($quickStart -split '\r?\n')[0] -ceq ('流向 FlowSwitch '+$productVersion)) -and -not $quickStart.Contains('{{PRODUCT_VERSION}}')) 'Quick-start title must report the package version, with no unresolved template placeholder.'
 Check ([Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion -ceq ($productVersion+'.0')) 'EXE and interface must report the same product version.'
 $verified=Invoke-Fixture '--verify'
 Check ($verified.Code -eq 0 -and $verified.Out -match 'PASS') ('EXE verification failed: '+$verified.Error)

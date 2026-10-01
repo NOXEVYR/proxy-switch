@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Windows.Forms
 $source=$PSScriptRoot
 $qaRoot=Join-Path $env:TEMP ('ProxySwitch-auto-ui-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qaRoot)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','ProxyDiscovery.ps1','ProcessInventory.ps1','ProgramLaunch.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $source $name) -Destination $qaRoot}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','UiGuidance.ps1','Updates.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','ProxyDiscovery.ps1','ProcessInventory.ps1','ProgramLaunch.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $source $name) -Destination $qaRoot}
 [void][IO.Directory]::CreateDirectory((Join-Path $qaRoot 'assets'))
 Copy-Item -LiteralPath (Join-Path $source 'assets/FlowSwitch.ico') -Destination (Join-Path $qaRoot 'assets/FlowSwitch.ico')
 # Isolated Windows fixtures must not contend with the real manager or other test windows.
@@ -44,7 +44,7 @@ $qaTimer.Add_Tick({
         if($clock.Elapsed.TotalSeconds -gt 40){throw 'Automatic UI timed out'}
         $main=[Windows.Forms.Application]::OpenForms|Where-Object Text -like '*FlowSwitch*'|Select-Object -First 1
         if(-not $main){return}
-        $combo=Find-Type $main ([Windows.Forms.ComboBox])|Select-Object -First 1
+        $combo=Find-Type $main ([Windows.Forms.ComboBox])|Where-Object Name -eq 'UnifiedRouteChoice'|Select-Object -First 1
         $lists=@(Find-Type $main ([Windows.Forms.ListView]));$program=$lists|Where-Object {$_.Columns.Count -eq 4}|Select-Object -First 1
         if($global:step -eq 0 -and $combo.Items.Count -eq 2){
             if($program.Items.Count -ne 1 -or $program.Items[0].Text -ne 'CalabiYau'){throw 'Game monitoring disappeared'}
