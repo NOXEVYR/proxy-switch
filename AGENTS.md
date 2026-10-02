@@ -1,4 +1,11 @@
-﻿# 3.9.5 程序接入约定
+﻿# 3.9.9 智能体检约定
+
+- SmartPatrol 独立于 NetworkDiagnostics：只读巡检为默认，-Fix 需显式触发；所有修改先写 patrol 备份快照再执行，机器级清理经提权子进程完成并回传结果文件。
+- 判定沿用三态：本地端口仅在确认无监听时判死；未知与远程入口不动作；bypass 修复恒保内网基础段、游戏/探测域名与 `<local>`，不删除用户自定义条目。
+- TUN 只观察不对抗：与游戏 IP 探测一致性联动判定，hosts 优先于 fake-ip DNS 时为共存正常态；不自动启停其他客户端 TUN 或改写其配置。
+- UI 任务卡仅启动独立控制台进程，不进入 Start-Work 任务框架；新增巡检项须同步更新 SmartPatrol 头部说明与巡检日志字段，改动 manifest 内文件后必须重建清单（启动器校验哈希）。
+
+# 3.9.5 程序接入约定
 
 - 首次未配置程序的worker在ChangeLock内重新读取保存快照和原生适配。已有engine或非Chromium统一返回ProgramAccessPlan，只读预览，经Confirmed才写；不得用陈旧UI模式转换已有专线。支持Chromium继续原managed路径；新增Test-ProgramRouteDispatch纳入Test-All。
 - 恢复归属PreWindowsAction在规则实读/系统变量CAS后持久化，hook后再CAS；PostCommit只核验已认领记录和入口。看门狗初次/每轮读取独占或损坏session为Unknown，有界重试并保留保护，不依据旧session恢复。
