@@ -12,7 +12,7 @@ function Set-SystemSnapshot {throw 'Real Windows writes forbidden'}
 function Set-UserProxyEnv {throw 'Real environment writes forbidden'}
 function Get-ProcessInventory {@()}
 function Get-ManagedProgramIngress($Executable){[pscustomobject]@{id=('a'*32);path=$Executable;port=19998;route=$script:Selected}}
-function Ensure-ManagedGateway {Get-FixtureLive}
+function Ensure-ManagedGateway([switch]$PreserveWindowsSettings){Check $PreserveWindowsSettings 'Every supported fixed-entry launch requests program-only coexistence';Get-FixtureLive}
 function Get-FixtureLive {
     $script:Reads++;$route=$script:Effective
     if($script:Scenario -eq 'fallback' -and $script:Reads -ge 3){$route='b'}

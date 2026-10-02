@@ -176,3 +176,12 @@
 - 新单元测试：Test-ProgramIdentity.ps1、Test-ApplicationObservation.ps1、Test-RuleMaintenance.ps1，均纳入 Test-All；真实控件测试：powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Test-ObservationUI.ps1。完整功能范围见 ACCEPTANCE.md，已执行验证见 TEST_REPORT.md。
 
 - 3.7.1 损坏锁只在 GatewayLock.ps1 持有禁止写入和删除的文件句柄期间核对并接管；不得按时间戳直接删除，也不得终止锁持有进程。锁释放需等待竞争恢复句柄。Test-GatewayLock.cjs 纳入 Test-All，覆盖活跃空锁及八进程恢复竞争；Test-Lifecycle 验证空锁下真实自动接替。
+
+# 3.9.8 维护约定
+
+- 原生 environment 适配必须显式 opt-in，120秒 Plan/Confirmed 绑定文件、配置、选择和 Windows 快照；固定入口与启动记录同事务。CLI 复用必须在锁内 ReuseExisting 核验，撤销后不复建。启动/修复/冷启动白名单须同步。
+- PreserveWindowsSettings 可以与外部 TUN/守卫共存，整机接管仍拒绝明确冲突；直连不保证绕过物理隧道，不代改其他客户端。网卡及同接口 v4/v6 默认路由为证据，未发现不等于关闭，读取失败为 Unknown。
+- 共存 watchdog 必须使用经核验的 OwnGatewayEndpoint，而非保存的第三方 TargetSystem.Server；缺失/非法归属为 Unknown，不能触发入口失效恢复或探测第三方。停止使用同一归属校验。验证 Test-Watchdog（34项），并运行 Test-SupervisorRecovery.ps1 -CorePath <现有内核EXE> -PreserveWindowsSettings（真实隔离内核/守护，Windows文件桩）。
+- 跨目录当前可信后代只扩大只读 ObservationMembers，不扩大写入/孤儿缓存 Members。根退出及身份变动丢弃证据，不归并其他共享运行时实例。精确入口/Controller 证据才能确认线路，不能凭任意代理 TCP 或启动日志确认整组。
+- 状态摘要在选中区及 tooltip 保留完整说明；mixed/unknown 不能称所有新连接生效。ProgramGrid 根据工具栏、详情、两行列表计算最小高度，实际查看小窗口截图。
+- Test-EnvironmentProgramAccess、Test-NetworkTopology、Test-CrossDirectoryObservation 纳入 Test-All/源码白名单。Test-ProgramCoexistence 验证真实隔离父子 A/B/Direct 及停后冷启动，不替代真实 Codex/OAuth/游戏验收。单元夹具隔离拓扑读取，避免自动模块导入覆盖网络桩。

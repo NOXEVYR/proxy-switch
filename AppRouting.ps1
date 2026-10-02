@@ -80,6 +80,13 @@ function Find-EngineConnection($Candidates,[string]$ProcessPath,$TcpConnection=$
 function New-ApplicationCandidate([string]$Path,[string]$Name,[int]$ProcessId=0) {
     [pscustomobject]@{Path=$Path;Name=$Name;PID=$ProcessId;SavedPath='';RowKey=$(if($Path){$Path.ToLowerInvariant()}else{'pid:'+$ProcessId});CoreRule=$null;LaunchRule=$null;Identity=$null;Conflict=$false}
 }
+function ConvertTo-ProgramObservationFamily($Snapshot) {
+    if(-not $Snapshot.PSObject.Properties['ObservationMembers']){return $Snapshot}
+    $observation=$Snapshot|Select-Object *
+    $observation.Members=@($Snapshot.ObservationMembers)
+    $observation.UnknownIds=@($Snapshot.ObservationUnknownIds)
+    return $observation
+}
 function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
     . (Join-Path $PSScriptRoot 'ProgramFamilyTracking.ps1')
     $saved=Get-RoutingSnapshot
@@ -126,15 +133,18 @@ function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
         if(-not $row){$row=New-ApplicationCandidate $current ([IO.Path]::GetFileNameWithoutExtension($current))}
         $row.SavedPath=$record.Path;$row.RowKey='saved:'+$record.Path.ToLowerInvariant();$row.CoreRule=$record.Rule;$row.LaunchRule=$record.Launch;$row.Identity=$identity;$apps[$key]=$row
     }
-    # Fold same-installation helper processes only when they have no explicit rule of their own.
+    # Fold verified helper processes only when they have no explicit rule of their own.
     $familySnapshots=@{}
     foreach($primary in @($apps.Values)){
         if(-not $primary.Path){continue}
-        $snapshot=Get-ProgramFamilyTrackingSnapshot $primary.Path $processes $context $processesAvailable
+        $snapshot=ConvertTo-ProgramObservationFamily (Get-ProgramFamilyTrackingSnapshot $primary.Path $processes $context $processesAvailable)
         $familySnapshots[$primary.RowKey]=$snapshot
         if(-not $primary.SavedPath -and -not @($processes|Where-Object {$_.Path -ieq $primary.Path -and $_.MainWindowHandle -ne [IntPtr]::Zero}).Count){continue}
         foreach($member in @($snapshot.Members)){
             if(-not $member.Path -or $member.Path -ieq $primary.Path){continue}
+            # A shared external shell/runtime path may also belong to other apps.
+            # Never hide that independent row merely because one instance is ours.
+            if(@($snapshot.ObservationOnlyIds) -contains [int]$member.Id -and @($processes|Where-Object {$_.Path -ieq $member.Path -and @($snapshot.Members.Id) -notcontains [int]$_.Id}).Count){continue}
             $memberKey=$member.Path.ToLowerInvariant();if($apps.ContainsKey($memberKey) -and -not $apps[$memberKey].SavedPath){$apps.Remove($memberKey)}
         }
     }
@@ -144,7 +154,7 @@ function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
     $independentApps=@($apps.Values|Where-Object {$_.SavedPath -and $_.Path})
     foreach($app in $apps.Values){
         $family=@();$familySnapshot=$null
-        if($app.Path){$familySnapshot=$familySnapshots[$app.RowKey];if(-not $familySnapshot){$familySnapshot=Get-ProgramFamilyTrackingSnapshot $app.Path $processes $context $processesAvailable};$family=@($familySnapshot.Members)}elseif($app.PID -and $byId.ContainsKey($app.PID)){$family=@($byId[$app.PID])}
+        if($app.Path){$familySnapshot=$familySnapshots[$app.RowKey];if(-not $familySnapshot){$familySnapshot=ConvertTo-ProgramObservationFamily (Get-ProgramFamilyTrackingSnapshot $app.Path $processes $context $processesAvailable)};$family=@($familySnapshot.Members)}elseif($app.PID -and $byId.ContainsKey($app.PID)){$family=@($byId[$app.PID])}
         # A separately saved child rule owns its own observation row and descendant evidence.
         # Compare verified current paths, never display names or obsolete saved path strings.
         if($app.Path -and $family.Count){
@@ -152,12 +162,23 @@ function Get-ApplicationRoutes($TcpRows=$null,[bool]$TcpAvailable=$true) {
             foreach($independent in $independentApps){
                 if(Test-ProgramPathEquivalent $app.Path $independent.Path $context){continue}
                 if(-not @($family|Where-Object {$_.Path -and (Test-ProgramPathEquivalent $_.Path $independent.Path $context)}).Count){continue}
-                foreach($member in @(Get-ProgramFamily $independent.Path $processes $context)){$excluded[[int]$member.Id]=$true}
+                $independentFamily=$familySnapshots[$independent.RowKey]
+                if(-not $independentFamily){$independentFamily=ConvertTo-ProgramObservationFamily (Get-ProgramFamilyTrackingSnapshot $independent.Path $processes $context $processesAvailable)}
+                foreach($member in @($independentFamily.Members)){$excluded[[int]$member.Id]=$true}
             }
             if($excluded.Count){$family=@($family|Where-Object {-not $excluded.ContainsKey([int]$_.Id)})}
         }
         $evidence=Get-ApplicationConnectionEvidence $family $tcp $core.connections $gateway $byId $app.Path $TcpAvailable $managedEntries $familySnapshot
-        $rows+=Get-ApplicationObservationRow $app $family $evidence $core $app.CoreRule $app.LaunchRule $app.Identity $processesAvailable $familySnapshot $entryObservation
+        $row=Get-ApplicationObservationRow $app $family $evidence $core $app.CoreRule $app.LaunchRule $app.Identity $processesAvailable $familySnapshot $entryObservation
+        if($familySnapshot -and $familySnapshot.PSObject.Properties['ObservationMembers']){
+            $visibleIds=@($family|ForEach-Object Id)
+            $row|Add-Member NoteProperty ObservationOnlyPIDs (@($familySnapshot.ObservationOnlyIds|Where-Object {$visibleIds -contains $_}) -join ',')
+            $row|Add-Member NoteProperty CrossDirectoryPIDs (@($familySnapshot.ObservationExternalIds|Where-Object {$visibleIds -contains $_}) -join ',')
+            $row|Add-Member NoteProperty FamilyObservationTruncated ([bool]$familySnapshot.ObservationTruncated)
+            $row.Coverage+=' '+$familySnapshot.ObservationCoverage
+            if($familySnapshot.ObservationTruncated){$row.Loaded=$false;$row.Status+=' · 家族观察达到128成员上限，范围待确认'}
+        }
+        $rows+=$row
     }
     $rulesAvailable=Test-ObservationFlag $core 'rulesAvailable' ([bool]$core.available)
     $connectionsAvailable=Test-ObservationFlag $core 'connectionsAvailable' ([bool]$core.available)

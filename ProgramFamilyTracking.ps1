@@ -25,6 +25,10 @@ namespace LocalProxySwitch {
         public int[] MemberIds=new int[0], UnknownIds=new int[0], RetainedIds=new int[0];
         public int RootSessionCount;
     }
+    public sealed class ProgramFamilyObservationResult {
+        public int[] MemberIds=new int[0], ExternalIds=new int[0], UnknownIds=new int[0];
+        public bool Truncated;
+    }
     public static class ProgramFamilyTracker {
         sealed class Member {public ProgramFamilyEvidence Identity;public long Seen;}
         sealed class Session {
@@ -121,6 +125,35 @@ namespace LocalProxySwitch {
         }
         public static void Clear(string scope) {lock(Gate){Families.Remove(scope);}}
         public static int FamilyCount {get{lock(Gate){return Families.Count;}}}
+        // Independent, current-snapshot observation only. No cross-directory
+        // relationship is stored in Sessions or used by writable family rules.
+        public static ProgramFamilyObservationResult ObserveCurrent(ProgramFamilyEvidence[] snapshot,bool available) {
+            const int limit=128;
+            if(!available)return new ProgramFamilyObservationResult();
+            var rows=(snapshot??new ProgramFamilyEvidence[0]).Where(x=>x!=null&&x.Id>0).ToArray();
+            var groups=rows.GroupBy(x=>x.Id).ToDictionary(x=>x.Key,x=>x.ToArray());
+            var children=rows.Where(x=>x.ParentId>0).GroupBy(x=>x.ParentId).ToDictionary(x=>x.Key,x=>x.OrderBy(y=>y.Id).ToArray());
+            var members=new Dictionary<int,ProgramFamilyEvidence>();var unknown=new HashSet<int>();var queue=new Queue<ProgramFamilyEvidence>();bool truncated=false;
+            Action<int> markUnknown=id=>{if(unknown.Count<limit)unknown.Add(id);else truncated=true;};
+            Func<ProgramFamilyEvidence,bool> verified=x=>x.Verified&&x.StartTicks>0&&!String.IsNullOrEmpty(x.Path)&&!String.IsNullOrEmpty(x.FileId);
+            foreach(var group in groups.Values.Where(x=>x.Any(y=>y.Root)).OrderBy(x=>x[0].Id)) {
+                var root=group[0];
+                if(group.Length!=1||!verified(root)){markUnknown(root.Id);continue;}
+                if(members.Count>=limit){truncated=true;continue;}
+                members[root.Id]=root;queue.Enqueue(root);
+            }
+            while(queue.Count>0) {
+                var parent=queue.Dequeue();ProgramFamilyEvidence[] descendants;
+                if(!children.TryGetValue(parent.Id,out descendants))continue;
+                foreach(var child in descendants) {
+                    if(members.ContainsKey(child.Id))continue;
+                    if(groups[child.Id].Length!=1||!verified(child)||child.StartTicks<parent.StartTicks){markUnknown(child.Id);continue;}
+                    if(members.Count>=limit){truncated=true;continue;}
+                    members[child.Id]=child;queue.Enqueue(child);
+                }
+            }
+            return new ProgramFamilyObservationResult{MemberIds=members.Keys.ToArray(),ExternalIds=members.Values.Where(x=>!x.Inside&&!x.Root).Select(x=>x.Id).ToArray(),UnknownIds=unknown.ToArray(),Truncated=truncated};
+        }
     }
 }
 '@
@@ -161,5 +194,13 @@ function Get-ProgramFamilyTrackingSnapshot([string]$Executable,$Processes,$Ident
     }}
     $result=[LocalProxySwitch.ProgramFamilyTracker]::Observe((Get-ProgramFamilyTrackingScope $Executable),$rows.ToArray(),$observed,$ProcessesAvailable)
     $members=@(foreach($id in $result.MemberIds){if($byId.ContainsKey($id)){$byId[$id]}})
-    [pscustomobject]@{Members=$members;UnknownIds=@($result.UnknownIds);RetainedIds=@($result.RetainedIds);RootSessionCount=$result.RootSessionCount;Available=$ProcessesAvailable;Coverage='本次工具会话内已观察并复核的父子身份；未观察到的孤儿、身份不可读或跨安装目录进程不自动归属'}
+    $observation=[LocalProxySwitch.ProgramFamilyTracker]::ObserveCurrent($rows.ToArray(),$ProcessesAvailable)
+    # Preserve existing same-installation orphan semantics, but extend observation
+    # only through roots and intermediate parents verified in this very snapshot.
+    $observationIds=@(@($result.MemberIds)+@($observation.MemberIds)|Select-Object -Unique)
+    $observationUnknown=@(@($result.UnknownIds)+@($observation.UnknownIds)|Select-Object -Unique)
+    $truncated=$observation.Truncated -or $observationIds.Count -gt 128 -or $observationUnknown.Count -gt 128
+    $observationIds=@($observationIds|Select-Object -First 128);$observationUnknown=@($observationUnknown|Select-Object -First 128)
+    $observationMembers=@(foreach($id in $observationIds){if($byId.ContainsKey($id)){$byId[$id]}})
+    [pscustomobject]@{Members=$members;UnknownIds=@($result.UnknownIds);RetainedIds=@($result.RetainedIds);RootSessionCount=$result.RootSessionCount;Available=$ProcessesAvailable;ObservationMembers=$observationMembers;ObservationOnlyIds=@($observationIds|Where-Object {$result.MemberIds -notcontains $_});ObservationExternalIds=@($observation.ExternalIds|Where-Object {$observationIds -contains $_});ObservationUnknownIds=$observationUnknown;ObservationTruncated=$truncated;ObservationCoverage='跨目录成员仅用于本轮连接观察；须有当前完整父子身份链，最多128成员，不写程序规则或保留跨目录孤儿关系。';Coverage='本次工具会话内已观察并复核的同安装目录父子身份；未观察到的孤儿、身份不可读或跨安装目录进程不自动写入家族规则'}
 }

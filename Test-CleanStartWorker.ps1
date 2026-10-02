@@ -15,6 +15,7 @@ $script:Root=$PSScriptRoot
 function Get-CleanStartRecoveryRoot {Join-Path $script:DataRoot 'r'}
 function Get-SystemSnapshot {Get-Content -LiteralPath (Join-Path $script:DataRoot 'system.json') -Raw -Encoding UTF8|ConvertFrom-Json}
 function Get-CleanStartSystemSnapshot {Get-SystemSnapshot}
+function Get-ClientInterference {[pscustomobject]@{Tun=$false;Guard=$false;SystemProxy=$false}}
 function Get-CleanStartRestoreEndpointState([string]$Endpoint){if([IO.File]::Exists((Join-Path $script:DataRoot 'endpoint-dead'))){return 'dead'};return 'live'}
 function Set-SystemSnapshot($Snapshot){
     if(-not $script:FixtureLock){throw 'Fixture Windows write outside change lock'}

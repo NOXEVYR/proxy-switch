@@ -1,3 +1,19 @@
+﻿# 2026-10-02 / 3.9.8 本地维护候选
+
+已完成多轮修复及独立只读复核；未修改当前用户网络、hosts、NO_PROXY、VPN/TUN开关或正在运行的Codex。
+
+- Test-All完整静态与隔离单元检查通过，包含environment、拓扑与跨目录观察新回归。修正夹具真实拓扑读取，避免模块导入覆盖网络桩。
+- ProgramCoexistence：38项，真实隔离内核和控制台父子A/B/Direct HTTP请求、停后冷启动，以及Chromium固定入口在外部TUN/守卫证据下的独立启动。Windows及保护注册是桩，启动转发就绪目标为本地HTTP夹具，不称生产HTTPS/OAuth验收。
+- Watchdog：34项，包括21项入口归属边界和13个真实PowerShell守护子进程案例；覆盖共存基线直连、第三方入口失效、远程基线、自有入口失效、归属缺失、非法端口与末尾异常换行。网络入口及Windows读写使用桩。
+- SupervisorRecovery：普通会话12项、PreserveWindowsSettings共存会话13项。真实隔离内核/监听/守护、内核重启、supervisor异常退出和孤儿身份校验；Windows设置为本地文件桩。健康共存入口不会因Windows直连基线误停；未模拟45秒全时长或多日运行。
+- EnvironmentProgramAccess：33项，opt-in、固定端口、CLI复用、身份/配置过期、撤销及归属回滚。
+- NetworkTopology22、CrossDirectoryObservation10、RuleMaintenance39、NetworkDiagnostics36。覆盖未知、跨目录/共享实例隔离、Qt/environment路径维护、配置与路由证据区分。
+- UsabilityUI：固定小工作区1/1.25/1.5全部通过，每档82张实际控件截图；布局代理另测fallback1.25及普通尺寸。1/1.25查看选中与Mixed自然视野截图；1.5仍需纵滚。新增环境对话框范围、可滚动说明及取消断言。
+- RoutingWorkbenchUI79、ObservationUI34、ListRefreshUI300轮；摘要保留tooltip完整证据，覆盖观察过期、路径修复、刷新焦点/选择/滚动。布局代理通过VisualTheme1.25。
+- 独立审查修正冷启动白名单遗漏、撤销后复建、Mixed误导、配置误作路由证据，以及共存守护检查第三方入口的P1缺陷。守护只检查经核验的自有入口，归属未知时保留服务和外部设置。实际UI和内核结果由主线程确认，最终审查记录单独保存在本机outputs。
+
+源码候选不等同本机替换或GitHub发布。真实Codex任务、OAuth、Google回调、Gemini及游戏登录仍需目标电脑验收；不采集登录链接、授权码或令牌。
+
 # 3.9.7 预览版交付补充（2026-10-02）
 
 这是下方早期候选记录的后续状态：最终 Final-r2 Windows ZIP 已单独通过19项成品检查，最终完整 Test-All.ps1 退出码为0，本机已从3.9.6替换为3.9.7，并验证编译启动器、原桌面入口和可见窗口。替换保留业务文件与网络设置；被动启动未启动代理服务。

@@ -43,6 +43,39 @@ $otherRoot=Join-Path ([IO.Path]::GetDirectoryName($qa)) ('other-family-'+[Guid]:
 [void][IO.Directory]::CreateDirectory($otherRoot);$externalExe=Join-Path $otherRoot 'worker.exe';[IO.File]::WriteAllText($externalExe,'external fixture')
 $external=ProcessRow 105 100 $externalExe 3
 Check ((Observe @($main,$external)).Members.Id -notcontains 105) 'A real parent relationship cannot claim a worker outside the installation directory'
+
+# Cross-directory connection observation has a separate current-snapshot scope.
+# It cannot enlarge writable Members or retain a cross-directory orphan.
+$shellPath=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$shell=ProcessRow 110 100 $shellPath 1;$cli=ProcessRow 111 110 $externalExe 2
+Reset-Family
+$cross=Observe @($main,$shell,$cli)
+Check ($cross.Members.Count -eq 1 -and $cross.Members.Id -eq 100 -and $cross.ObservationMembers.Id -contains 110 -and $cross.ObservationMembers.Id -contains 111) 'Root to System32 shell to external CLI extends only observation membership'
+Check ($cross.ObservationOnlyIds.Count -eq 2 -and $cross.ObservationExternalIds.Count -eq 2 -and $cross.ObservationCoverage -match '不写程序规则') 'Cross-directory scope is explicit and remains read-only'
+$detached=Observe @($shell,$cli)
+Check ($detached.ObservationMembers.Count -eq 0 -and $detached.Members.Count -eq 0) 'A missing root cannot preserve a cross-directory chain using old parent PIDs'
+$badShell=$shell.PSObject.Copy();$badShell.StartTime=$birth.AddSeconds(-1)
+$invalid=Observe @($main,$badShell,$cli)
+Check ($invalid.ObservationMembers.Id -notcontains 110 -and $invalid.ObservationMembers.Id -notcontains 111 -and $invalid.ObservationUnknownIds -contains 110) 'An intermediate shell predating its parent cannot authorize an external descendant'
+$unknownShell=$shell.PSObject.Copy();$unknownShell.PathStatus='AccessDenied'
+$invalid=Observe @($main,$unknownShell,$cli)
+Check ($invalid.ObservationMembers.Id -notcontains 110 -and $invalid.ObservationMembers.Id -notcontains 111 -and $invalid.ObservationUnknownIds -contains 110) 'Unreadable intermediate process identity breaks cross-directory ancestry'
+$missingFile=$shell.PSObject.Copy();$missingFile.Path=Join-Path $otherRoot 'missing-runtime.exe'
+$invalid=Observe @($main,$missingFile,$cli)
+Check ($invalid.ObservationMembers.Id -notcontains 110 -and $invalid.ObservationUnknownIds -contains 110) 'Unknown intermediate executable file identity remains unknown'
+$invalid=Observe @($main,$shell,$shell.PSObject.Copy(),$cli)
+Check ($invalid.ObservationMembers.Id -notcontains 110 -and $invalid.ObservationMembers.Id -notcontains 111 -and $invalid.ObservationUnknownIds -contains 110) 'A duplicate shell PID never seeds descendant observation'
+$invalid=Observe @($main,$main.PSObject.Copy(),$shell,$cli)
+Check ($invalid.ObservationMembers.Count -eq 0 -and $invalid.ObservationUnknownIds -contains 100) 'Duplicate root PIDs cannot seed an observational family'
+$newRoot=ProcessRow 100 1 $app 20
+$invalid=Observe @($newRoot,$shell,$cli)
+Check ($invalid.ObservationMembers.Count -eq 1 -and $invalid.ObservationMembers.Id -notcontains 110) 'A reused root PID cannot adopt older cross-directory children'
+$many=@($main)+@(1..140|ForEach-Object {ProcessRow (1000+$_) 100 $externalExe 2})
+$bounded=Observe $many
+Check ($bounded.ObservationMembers.Count -eq 128 -and $bounded.ObservationTruncated -and $bounded.Members.Count -eq 1) 'The 128-member observation budget does not change the writable family membership budget'
+$failed=Observe @() $false
+Check (-not $failed.Available -and $failed.ObservationMembers.Count -eq 0) 'Inventory failure cannot reuse a cross-directory observation snapshot'
+Reset-Family
 $noTicks=ProcessRow 106 100 $worker 2;$noTicks.StartTime=[DateTime]::MinValue
 $partial=Observe @($main,$noTicks)
 Check ($partial.Members.Id -notcontains 106 -and $partial.UnknownIds -contains 106) 'A child without creation-time evidence is unknown'

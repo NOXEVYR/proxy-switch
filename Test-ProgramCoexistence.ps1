@@ -46,9 +46,9 @@ Promise.all(['A','B','D'].map(x=>new Promise(resolve=>{const s=http.createServer
   $t=New-Object Net.Sockets.TcpClient
   try{$t.Connect('127.0.0.1',$Port);$s=$t.GetStream();$s.ReadTimeout=4000;$b=[Text.Encoding]::ASCII.GetBytes("GET http://127.0.0.1:$($ports[2])/test HTTP/1.1`r`nHost: 127.0.0.1:$($ports[2])`r`nConnection: close`r`n`r`n");$s.Write($b,0,$b.Length);$r=New-Object IO.StreamReader($s);$v=$r.ReadToEnd();if($v -notmatch '^HTTP/1.[01] 200'){throw 'HTTP request failed'};$v.Substring($v.IndexOf("`r`n`r`n")+4).Trim()}finally{$t.Dispose()}
  }
- $script:Tun=$true;$failed=$false;try{Enable-IndependentGateway -OwnerPID $PID -PreserveWindowsSettings|Out-Null}catch{$failed=$true}
- Check ($failed -and -not (Test-Path (Get-IndependentSessionPath))) 'Known TUN is refused before service startup'
- $script:Tun=$false
+ function Test-ProxyRoute {param($Key,[switch]$Fast);[pscustomobject]@{Usable=((Read-Body (Get-Profile $Key).Port) -in @('A','B','D'))}}
+ $script:Tun=$true;$failed=$false;try{Enable-IndependentGateway -OwnerPID $PID|Out-Null}catch{$failed=$true}
+ Check ($failed -and -not (Test-Path (Get-IndependentSessionPath))) 'Known TUN blocks global takeover before service startup'
  Enable-IndependentGateway -OwnerPID $PID -PreserveWindowsSettings|Out-Null
  $live=Invoke-AppRouter @{action='status'}
  Check ($live.available -and $live.defaultLoaded -and $live.effectiveDefaultRoute -eq 'a') 'Coexisting real core preserves default selector'
@@ -62,6 +62,56 @@ Promise.all(['A','B','D'].map(x=>new Promise(resolve=>{const s=http.createServer
  $before=Get-RoutingSnapshot;$next=Copy-RoutingSnapshot $before;$next.programIngresses[0].route='a';$next|Add-Member NoteProperty resetIngressSelections @('11111111111111111111111111111111')
  Set-RoutingSnapshot $next $before
  Check ((Read-Body $programPort) -eq 'A') 'Same program port switches B to A with a real request'
+ # Real native parent/child use the launch environment, without Chromium flags.
+ # All requests and switches stay on the fixture's loopback servers/core.
+ $native=Join-Path $qa 'NativeFixture.exe';$nativeSource=Join-Path $qa 'NativeFixture.cs'
+ [IO.File]::WriteAllText((Join-Path $qa 'target.txt'),('http://127.0.0.1:'+$ports[2]+'/native'))
+ [IO.File]::WriteAllText($nativeSource,@'
+using System;using System.Diagnostics;using System.IO;using System.Net.Sockets;using System.Reflection;using System.Threading;using System.Text;
+class NativeFixture {
+ // Explicitly read the inherited environment and send a real absolute-form HTTP
+ // request; framework-specific implicit localhost bypass is outside this test.
+ static string Request(){var target=new Uri(File.ReadAllText("target.txt"));var proxy=new Uri(Environment.GetEnvironmentVariable("HTTP_PROXY"));using(var c=new TcpClient(proxy.Host,proxy.Port)){var s=c.GetStream();s.ReadTimeout=5000;var bytes=Encoding.ASCII.GetBytes("GET "+target.AbsoluteUri+" HTTP/1.1\r\nHost: "+target.Authority+"\r\nConnection: close\r\n\r\n");s.Write(bytes,0,bytes.Length);using(var r=new StreamReader(s)){var response=r.ReadToEnd();return response.Substring(response.IndexOf("\r\n\r\n")+4).Trim();}}}
+ static void Main(string[] args){
+  if(args.Length>0){Console.Write(Request());return;}
+  for(int i=0;i<3;i++){
+   var end=DateTime.UtcNow.AddSeconds(20);while(!File.Exists("request-"+i)&&DateTime.UtcNow<end)Thread.Sleep(25);if(!File.Exists("request-"+i))return;
+   var p=new Process();p.StartInfo=new ProcessStartInfo(Assembly.GetExecutingAssembly().Location,"child"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true};p.Start();var child=p.StandardOutput.ReadToEnd();if(!p.WaitForExit(6000)){p.Kill();return;}File.WriteAllText("response-"+i,Request()+"|"+child);p.Dispose();
+  }
+ }
+}
+'@)
+ & (Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe') /nologo /target:exe ('/out:'+$native) $nativeSource
+ if($LASTEXITCODE -ne 0){throw 'Native fixture compilation failed'}
+ Check (Test-ProgramConsoleExecutable $native) 'Actual compiled native console is recognized by PE subsystem'
+ $nativePlan=Get-EnvironmentProgramAccessPlan $native 'a'
+ Check ($nativePlan.CanApply) 'Native environment plan permits explicit coexistence without writing Windows'
+ Set-EnvironmentProgramAccess $nativePlan -Confirmed|Out-Null
+ $nativeEntry=Get-ManagedProgramIngress $native;$nativePort=$nativeEntry.port
+ $launch=Get-ProgramLaunchPlan $native 'a'
+ Check ($launch.Adapter -eq 'environment' -and $launch.Arguments.Count -eq 0) 'Native plan supplies proxy environment only'
+ # The production launch still verifies the real controller and fresh upstream
+ # health. This isolated fixture replaces only its external HTTPS destinations
+ # with an actual HTTP round trip through the same program ingress.
+ function Invoke-ManagedIngressTransportProbe($Ingress,$Urls,$Deadline,$Cancellation){
+  Check ($Ingress.port -eq $nativePort) 'Launch forwarding probe uses the selected fixed program ingress'
+  [pscustomobject]@{Usable=((Read-Body $Ingress.port) -eq 'A');Reason='loopback fixture forwarding'}
+ }
+ Start-ManagedProgram $native|Out-Null
+ function Request-NativeFixture([int]$Index,[string]$Expected){
+  [IO.File]::WriteAllText((Join-Path $qa ('request-'+$Index)),'fixture');$path=Join-Path $qa ('response-'+$Index);$limit=[DateTime]::UtcNow.AddSeconds(10)
+  while(-not [IO.File]::Exists($path) -and [DateTime]::UtcNow -lt $limit){Start-Sleep -Milliseconds 50}
+  Check ([IO.File]::Exists($path)) 'Actual native parent and child finished the request'
+  Check ([IO.File]::ReadAllText($path) -ceq ($Expected+'|'+$Expected)) ('Actual parent and inherited child both reach '+$Expected)
+ }
+ Request-NativeFixture 0 'A'
+ Set-EnvironmentProgramAccess (Get-EnvironmentProgramAccessPlan $native 'b') -Confirmed|Out-Null
+ Check ((Get-ManagedProgramIngress $native).port -eq $nativePort) 'Native A to B reuses fixed port while parent remains alive'
+ Request-NativeFixture 1 'B'
+ Set-EnvironmentProgramAccess (Get-EnvironmentProgramAccessPlan $native 'Direct') -Confirmed|Out-Null
+ Check ((Get-ManagedProgramIngress $native).port -eq $nativePort) 'Native B to Direct reuses fixed port while parent remains alive'
+ Request-NativeFixture 2 'D'
+ Check ((Test-SameSnapshot $originalSystem $script:sys) -and (Test-SameEnv $originalEnv $script:envs)) 'Native launch and all route changes preserve external settings'
  $session=Get-Content (Get-IndependentSessionPath) -Raw -Encoding UTF8|ConvertFrom-Json
  $plan=New-ExitRecoveryPlan $session $script:sys $script:envs
  Check ((Test-SameSnapshot $plan.System $script:sys) -and (Test-SameEnv $plan.Environment $script:envs)) 'Exit does not mistake a third-party baseline for an owned proxy'
@@ -71,6 +121,20 @@ Promise.all(['A','B','D'].map(x=>new Promise(resolve=>{const s=http.createServer
  Restore-IndependentSession -GracefulOnly
  Check (-not (Test-Path (Get-IndependentSessionPath)) -and -not (Test-SessionProcess $owned.supervisor $owned.supervisorStartTicks) -and -not (Test-SessionProcess $owned.core $owned.coreStartTicks)) 'Graceful stop confirms only the isolated supervisor and core stopped'
  Check ((Test-SameSnapshot $originalSystem $script:sys) -and (Test-SameEnv $originalEnv $script:envs)) 'Stopping the program-only service preserves the external proxy and user environment'
+ Enable-IndependentGateway -OwnerPID $PID -PreserveWindowsSettings|Out-Null
+ Check ((Read-Body $nativePort) -eq 'D' -and (Get-ProgramProxyAdapter $native) -eq 'environment') 'Saved native opt-in survives graceful stop and a real cold core startup'
+ Restore-IndependentSession -GracefulOnly
+ # Chromium fixed entries must use the same program-only cold startup even when
+ # the external TUN/guard remains on. The inert EXE is not launched as a browser.
+ $chromeFolder=Join-Path $qa 'chromium';[void][IO.Directory]::CreateDirectory($chromeFolder)
+ $chrome=Join-Path $chromeFolder 'browser.exe';Copy-Item (Join-Path $env:WINDIR 'System32/whoami.exe') $chrome
+ foreach($name in @('resources.pak','chrome_100_percent.pak')){[IO.File]::WriteAllText((Join-Path $chromeFolder $name),'fixture')}
+ Check ((Get-ProgramProxyAdapter $chrome) -eq 'chromium') 'Chromium fixture uses existing structural adapter detection'
+ Set-ManagedApplicationRoute $chrome 'b'|Out-Null
+ $chromeEntry=Get-ManagedProgramIngress $chrome
+ Check ((Read-Body $chromeEntry.port) -eq 'B') 'Actual Chromium fixed ingress cold-starts and forwards through B under external TUN/guard evidence'
+ Check ((Test-SameSnapshot $originalSystem $script:sys) -and (Test-SameEnv $originalEnv $script:envs)) 'Chromium program-only cold startup preserves external Windows and user settings'
+ Restore-IndependentSession -GracefulOnly
  # A later explicit global selection must convert the journal before Windows
  # starts pointing at this core; failed conversion must remain recoverable.
  Enable-IndependentGateway -OwnerPID $PID -PreserveWindowsSettings|Out-Null

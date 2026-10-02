@@ -169,10 +169,12 @@ function Get-NetworkDiagnosis([switch]$Probe) {
         $manual=Get-LocalEndpointObservation $system.Server $tcp $expectedProfile;if($manual){$systemReady=$manual.Ready}
     }
     $client=Get-ClientInterference
-    if($client.Guard -or $client.Tun){$issues+=[pscustomobject]@{Code='external-proxy-control';Message='其他客户端的代理守护或 TUN 正在接管网络，会阻止流向独立接管。请先关闭冲突开关，保留上游代理服务；流向不会循环抢回入口。'}}
+    if($client.Guard -or $client.Tun){$issues+=[pscustomobject]@{Code='external-proxy-control';Message='检测到其他客户端的代理守护或隧道路由，会阻止流向统一接管。支持的程序可用独立启动入口共存；“直连”不保证绕过外部 VPN/TUN。流向不会修改其他客户端开关或循环抢回入口。'}}
+    $topology=Get-ProgramIdentityValue $client 'Topology' $null
+    if($topology -and $topology.State -eq 'Unknown'){$issues+=[pscustomobject]@{Code='topology-unknown';Message='网卡或系统路由证据读取不完整，外部隧道状态未知；未发现证据不能等同 TUN 已关闭。'}}
     if(-not $tcp.Available){$issues+=[pscustomobject]@{Code='observation-unknown';Message='无法读取连接列表，监听状态未知。稍后重新排查；不会据此清空代理。'}}
     if($systemReady -eq $false){$issues+=[pscustomobject]@{Code='system-entry-down';Message='系统代理指向未监听的入口。请在代理管理启动对应代理，或检测并选择其他可用线路。'}}
-    if($systemKey -eq 'Direct'){$issues+=[pscustomobject]@{Code='system-direct';Message='系统当前直连。若目标网站需要代理，请选择并检测可用线路。'}}
+    if($systemKey -eq 'Direct'){$issues+=[pscustomobject]@{Code='system-direct';Message=$(if($topology -and $topology.HasTunnelRouteEvidence){'系统应用代理已关闭，但存在外部隧道路由证据，不代表物理直连。请同时核对 VPN 线路及目标程序是否接入流向。'}elseif($client.Tun){'系统应用代理已关闭，已知客户端的 TUN 配置开启；实际隧道路由仍需核验，不能据此确认物理直连。'}else{'系统应用代理已关闭。若目标网站需要代理，请选择并检测可用线路；此状态不证明没有 VPN 或其他隧道。'})}}
     if($systemKey -eq 'Other'){$issues+=[pscustomobject]@{Code='system-unmanaged';Message='系统代理不在已配置列表中，无法验证其归属。请在代理管理核对并添加入口。'}}
     $mismatched=@();$dead=@();$unknownEnvironment=@();$environmentEndpoints=@()
     foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')){

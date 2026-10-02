@@ -36,7 +36,7 @@ if($RecoverOnly){
     return
 }
 Write-LocalJson (Join-Path $script:DataRoot 'gateway\watchdog-ready.json') ([pscustomobject]@{PID=$PID;StartTicks=(Get-ProcessStartTicks $PID);Session=$session.Started})
-$misses=0;$restoreAttempts=0;$missingSince=$null
+$misses=0;$restoreAttempts=0;$missingSince=$null;$endpointWarning=$false
 while($true){
     $reading=Read-WatchdogSession $path
     if($reading.State -eq 'Missing'){return}
@@ -49,9 +49,17 @@ while($true){
     $session=$current;$readWarning=$false
     # Failure to read process identity is not proof that the UI has exited.
     $alive=(Get-RecoveryOwnerState $session) -ne 'stopped'
-    $listener=Test-RecoveryEndpoint $session.TargetSystem.Server
-    if($session.SupervisorPID -and (Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$session.SupervisorPID;OwnerStart=$session.SupervisorStart})) -eq 'stopped'){$listener=$false}
-    if(-not $listener){$misses++;if(-not $missingSince){$missingSince=[DateTime]::UtcNow}}else{$misses=0;$missingSince=$null}
+    $probe=Get-GatewayWatchdogEndpoint $session
+    if($probe.State -ne 'Ready'){
+        if(-not $endpointWarning){Write-LifecycleEvent 'watchdog-entry-pending' 'owned-entry-unknown';$endpointWarning=$true}
+        $misses=0;$missingSince=$null
+        if($alive){Start-Sleep -Seconds 1;continue}
+    }else{
+        $endpointWarning=$false
+        $listener=Test-RecoveryEndpoint $probe.Endpoint
+        if($session.SupervisorPID -and (Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$session.SupervisorPID;OwnerStart=$session.SupervisorStart})) -eq 'stopped'){$listener=$false}
+        if(-not $listener){$misses++;if(-not $missingSince){$missingSince=[DateTime]::UtcNow}}else{$misses=0;$missingSince=$null}
+    }
     $grace=Test-GatewayRecoveryGrace $session $misses
     if($missingSince -and ([DateTime]::UtcNow-$missingSince).TotalSeconds -ge 45){$grace=$false}
     if(-not $alive -or ($misses -ge 2 -and -not $grace)){

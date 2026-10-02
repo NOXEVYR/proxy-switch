@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$CorePath)
+param([Parameter(Mandatory=$true)][string]$CorePath,[switch]$PreserveWindowsSettings)
 $ErrorActionPreference='Stop'
 $qa=Join-Path $env:TEMP ('FlowSwitch-Supervisor-'+[Guid]::NewGuid().ToString('N'));[void][IO.Directory]::CreateDirectory($qa)
 $env:PROXY_SWITCH_DATA_DIR=$qa
@@ -18,8 +18,12 @@ try{
     $direct=[pscustomobject]@{Flags=1;Server='';Bypass='localhost'};$target=[pscustomobject]@{Flags=3;Server=('127.0.0.1:'+$port);Bypass='localhost'}
     $beforeEnv=[pscustomobject]@{HTTP_PROXY=$null;HTTPS_PROXY=$null;ALL_PROXY=$null;NO_PROXY='localhost'}
     $targetEnv=[pscustomobject]@{HTTP_PROXY=('http://127.0.0.1:'+$port);HTTPS_PROXY=('http://127.0.0.1:'+$port);ALL_PROXY=('http://127.0.0.1:'+$port);NO_PROXY='localhost'}
-    Write-LocalJson (Get-IndependentSessionPath) ([pscustomobject]@{OwnerPID=$PID;OwnerStart=(Get-ProcessStartTicks $PID);CorePID=$owned.core;CoreStart=(Get-ProcessStartTicks $owned.core);SupervisorPID=$owned.supervisor;SupervisorStart=(Get-ProcessStartTicks $owned.supervisor);BeforeSystem=$direct;TargetSystem=$target;BeforeEnv=$beforeEnv;TargetEnv=$targetEnv;Started=[DateTimeOffset]::UtcNow.ToString('o')})
-    Write-LocalJson (Join-Path $qa 'fake-system.json') $target;Write-LocalJson (Join-Path $qa 'fake-env.json') $targetEnv
+    $protectedSystem=if($PreserveWindowsSettings){$direct}else{$target}
+    $protectedEnv=if($PreserveWindowsSettings){$beforeEnv}else{$targetEnv}
+    $session=[pscustomobject]@{OwnerPID=$PID;OwnerStart=(Get-ProcessStartTicks $PID);CorePID=$owned.core;CoreStart=(Get-ProcessStartTicks $owned.core);SupervisorPID=$owned.supervisor;SupervisorStart=(Get-ProcessStartTicks $owned.supervisor);BeforeSystem=$direct;TargetSystem=$protectedSystem;BeforeEnv=$beforeEnv;TargetEnv=$protectedEnv;Started=[DateTimeOffset]::UtcNow.ToString('o')}
+    if($PreserveWindowsSettings){$session|Add-Member NoteProperty PreserveWindowsSettings $true;$session|Add-Member NoteProperty OwnGatewayEndpoint ('127.0.0.1:'+$port)}
+    Write-LocalJson (Get-IndependentSessionPath) $session
+    Write-LocalJson (Join-Path $qa 'fake-system.json') $protectedSystem;Write-LocalJson (Join-Path $qa 'fake-env.json') $protectedEnv
     $body=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'GatewayWatchdog.ps1'));$body=$body.Substring($body.IndexOf('$path=Get-IndependentSessionPath'))
     $mock=@'
 function Use-ChangeLock([scriptblock]$Action){& $Action}
@@ -35,12 +39,18 @@ function Remove-ItemProperty {throw 'Real registry is forbidden'}
     $watch=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "'+$file+'"') -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $qa 'watch-error.txt')
     $deadline=[DateTime]::UtcNow.AddSeconds(10);while(-not (Test-Path (Join-Path $qa 'gateway\watchdog-ready.json')) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
     Check (-not $watch.HasExited) 'real watchdog monitors isolated owner and supervisor'
+    if($PreserveWindowsSettings){
+        Start-Sleep -Seconds 8
+        Check (-not $watch.HasExited -and (Test-Path (Get-IndependentSessionPath)) -and -not (Test-Path (Join-Path $qa 'gateway\stop'))) 'real coexisting watchdog keeps its healthy owned listener with a Direct Windows baseline'
+    }
     Stop-Process -Id $owned.core
     $deadline=[DateTime]::UtcNow.AddSeconds(18)
     do{$life=Get-GatewayLifecycle;if($life.phase -eq 'ready' -and $life.core -ne $owned.core){break};Start-Sleep -Milliseconds 150}while([DateTime]::UtcNow -lt $deadline)
     Check ($life.phase -eq 'ready' -and $life.core -ne $owned.core -and -not $watch.HasExited) 'watchdog allows supervised core recovery instead of racing restoration'
     $sys=Get-Content (Join-Path $qa 'fake-system.json') -Raw|ConvertFrom-Json
-    Check (Test-SameSnapshot $sys $target) 'supervised recovery keeps owned fixed entry settings'
+    Check (Test-SameSnapshot $sys $protectedSystem) 'supervised recovery keeps the protected Windows settings'
+    $envAfter=Get-Content (Join-Path $qa 'fake-env.json') -Raw|ConvertFrom-Json
+    Check (Test-SameEnv $envAfter $protectedEnv) 'supervised recovery preserves the protected user environment'
     $replacement=$life.core;Stop-Process -Id $owned.supervisor
     Check ($watch.WaitForExit(20000)) 'supervisor crash triggers bounded watchdog recovery'
     $sys=Get-Content (Join-Path $qa 'fake-system.json') -Raw|ConvertFrom-Json

@@ -210,6 +210,9 @@ function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launc
     elseif($entryState -eq 'Connected'){$programEntryState='WaitingConnection'}
     if($mode -eq 'managed'){
         $currentIngressObserved=$Evidence.ManagedObserved -gt 0 -and -not @($Evidence.ObservedIngressIds|Where-Object {$_ -ne $Rule.id}).Count
+        $bypassedProxy=@($Evidence.ConnectionDetails|Where-Object {$_.IngressKind -eq 'Proxy'}).Count -gt 0
+        $childIds=@(Get-ApplicationChildProcesses $Family $App.Path|ForEach-Object Id)
+        $managedChildren=@($Evidence.ConnectionDetails|Where-Object {$_.PID -in $childIds -and $_.IngressKind -eq 'Managed' -and $_.IngressId -eq $Rule.id -and $_.EvidenceSource -eq 'Controller' -and $_.State -eq 'Established' -and $_.ActualRoute -notin @('Unknown','Blocked','LocalInternal')})
         $session=$false;if(-not $repair){$session=Test-ManagedProgramSession $App.Path $Family $policy}
         $knownOtherEntry=$Evidence.Counts.Count -gt 0 -and -not $currentIngressObserved
         $needsRelaunch=$ids.Count -gt 0 -and -not $currentIngressObserved -and (-not $session -or $knownOtherEntry)
@@ -217,11 +220,12 @@ function Get-ApplicationObservationRow($App,$Family,$Evidence,$Core,$Rule,$Launc
         if(-not (Test-ObservationFlag $Core 'rulesAvailable' ([bool]$Core.available))){$status='规则读取失败 · 固定程序入口生效状态未知'}
         elseif(-not $ruleLoaded -or $Rule.ready -ne $true){$status='固定程序入口未就绪 · 请启动代理服务或重新应用线路'}
         elseif($needsRelaunch){$status='运行进程尚未接入固定程序入口 · 保存工作并完整退出后，从托管入口重新打开'}
+        elseif($bypassedProxy){$status='固定程序入口已就绪 · 部分连接仍使用其他代理入口，请检查子程序代理设置或保存后完整重开'}
         elseif($Evidence.Outside -or $Evidence.LocalUnknown -or $Evidence.GatewayUnknown){$status='固定程序入口已就绪 · 部分连接仍未确认接管'}
         elseif($Evidence.Pending){$status='固定程序入口已就绪 · TCP 正在建立连接'}
         elseif($Evidence.PolicyMismatch -gt 0){$status='仍有不符合当前线路的连接 · 可预览重连'}
         elseif($Evidence.PolicyUnknown -gt 0){$status='已连接固定程序入口 · 目标选路状态待确认'}
-        elseif($currentIngressObserved){$loaded=$true;$status='已观察到固定程序入口按当前规则选路';if($Evidence.Counts.Count -gt 1){$status+='（含网站分流）'};if($Evidence.ChildProxyObserved){$status+=' · 含已验证子进程'}}
+        elseif($currentIngressObserved){$loaded=$true;$status='已观察到固定程序入口按当前规则选路';if($Evidence.Counts.Count -gt 1){$status+='（含网站分流）'};if($managedChildren.Count){$status+=' · 含已验证子进程'}}
         elseif($ids.Count){$status='固定程序入口已就绪 · 运行中，等待实际连接'}
         else{$status='固定程序入口已就绪 · 从托管入口打开即可使用'}
         if(-not (Test-ObservationFlag $Core 'connectionsAvailable' ([bool]$Core.available))){$loaded=$false;$status='引擎连接读取失败 · 实际出口未知'}

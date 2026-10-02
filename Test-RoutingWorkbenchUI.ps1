@@ -169,7 +169,7 @@ $checks=@'
         try{Check-UI ($unknownEditor.Tag.Status.Text -match '尚未确认' -and $unknownEditor.Tag.Status.Text -notmatch '^网站规则已加载') 'Unavailable website controller cannot be presented as loaded rules'}finally{$unknownEditor.Dispose()}
         $app=[pscustomobject]@{Name='Fixture';Path='C:\Fixtures\editor.exe';Policy='backup';Mode='managed';Managed=$true;NeedsRelaunch=$true;CanLaunch=$true;Loaded=$true;Actual='未观察到 TCP 连接';Status='已保存 B；仍使用旧入口，需要完整重开';HasSavedRule=$true}
         Show-Applications ([pscustomobject]@{Rows=@($app);RuleCount=1;LaunchRuleCount=0;Available=$true;RulesAvailable=$true;TcpAvailable=$true})
-        Check-UI ($liveList.Items[0].SubItems[2].Text -eq '未观察到 TCP 连接' -and $liveList.Items[0].SubItems[3].Text -match '旧入口') 'Loaded route cannot manufacture traffic evidence or hide pending restart status'
+        Check-UI ($liveList.Items[0].SubItems[2].Text -eq '未观察到 TCP 连接' -and $liveList.Items[0].SubItems[3].Text -match '重开' -and $liveList.Items[0].ToolTipText -match '旧入口') 'Loaded route cannot manufacture traffic evidence; compact restart status retains full old-entry evidence in tooltip'
         Check-UI ($ruleMeta.Text -match '已加载线路设置' -and $ruleMeta.Text -notmatch '已观察到目标出口') 'Loaded rule count is never described as observed actual route'
         $engine=[pscustomobject]@{Name='Fixture Qt Launcher';Path='C:\Fixtures\game.exe';Policy='Direct';Mode='engine';CanLaunch=$false;RequiresRepair=$false;Running=$true;PIDs='123';NeedsEntryConnection=$true;HasSavedRule=$true;Actual='外部代理 ×1';Status='入口绕过流向 · 规则尚未接管'}
         Show-Applications ([pscustomobject]@{Rows=@($engine);RuleCount=1;LaunchRuleCount=0;Available=$true;RulesAvailable=$true;TcpAvailable=$true})

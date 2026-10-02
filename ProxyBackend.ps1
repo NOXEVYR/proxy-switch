@@ -213,6 +213,50 @@ function Get-Listener($Profile,[switch]$ProbeRemote,$TcpRows=$null) {
     return $null
 }
 
+function ConvertTo-NetworkTopologyObservation($Adapters,$Routes,[bool]$AdaptersAvailable=$true,[bool]$RoutesAvailable=$true) {
+    # This is route evidence, not proof that a particular application's request
+    # used the interface. Never identify a VPN from a product/process name alone.
+    $states=@{IPv4='NoEvidence';IPv6='NoEvidence'};$indices=@{}
+    if(-not $AdaptersAvailable -or -not $RoutesAvailable){$states.IPv4='Unknown';$states.IPv6='Unknown'}
+    else {
+        $byIndex=@{}
+        foreach($adapter in @($Adapters)){
+            $index=0;if(-not [int]::TryParse([string]$adapter.ifIndex,[ref]$index) -or $index -le 0){continue}
+            if($byIndex.ContainsKey($index)){$byIndex[$index]=$null}else{$byIndex[$index]=$adapter}
+        }
+        foreach($family in @('IPv4','IPv6')){
+            $prefixes=if($family -eq 'IPv4'){@('0.0.0.0/0','0.0.0.0/1','128.0.0.0/1')}else{@('::/0','::/1','8000::/1')}
+            $broad=@($Routes|Where-Object {$_.DestinationPrefix -in $prefixes -and [string]$_.State -ne 'Dead'})
+            $grouped=@($broad|Group-Object InterfaceIndex)
+            foreach($group in $grouped){
+                $covered=@($group.Group|ForEach-Object DestinationPrefix|Select-Object -Unique)
+                if($covered -notcontains $prefixes[0] -and -not ($covered -contains $prefixes[1] -and $covered -contains $prefixes[2])){continue}
+                $index=0
+                if(-not [int]::TryParse([string]$group.Name,[ref]$index) -or -not $byIndex.ContainsKey($index) -or $null -eq $byIndex[$index]){
+                    if($states[$family] -ne 'Evidence'){$states[$family]='Unknown'};continue
+                }
+                $adapter=$byIndex[$index]
+                if([string]$adapter.Status -ne 'Up'){
+                    if($states[$family] -ne 'Evidence'){$states[$family]='Unknown'};continue
+                }
+                $type=[string]$adapter.InterfaceType;if(-not $type){$type=[string]$adapter.ifType}
+                $description=([string]$adapter.InterfaceDescription)+' '+([string]$adapter.Name)
+                $technology=$description -match '(?i)(?:\b(?:tun2socks|wintun|wireguard|tunnel|tun|tap)\b|\b(?:tun|tap)\d+\b)'
+                $tunnel=$type -eq '131' -or ($technology -and $adapter.HardwareInterface -eq $false)
+                if($tunnel){$states[$family]='Evidence';$indices[$index]=$true}
+                elseif($adapter.HardwareInterface -ne $true -and $states[$family] -ne 'Evidence'){$states[$family]='Unknown'}
+            }
+        }
+    }
+    $state=if($states.IPv4 -eq 'Evidence' -or $states.IPv6 -eq 'Evidence'){'Evidence'}elseif($states.IPv4 -eq 'Unknown' -or $states.IPv6 -eq 'Unknown'){'Unknown'}else{'NoEvidence'}
+    [pscustomobject]@{State=$state;IPv4=$states.IPv4;IPv6=$states.IPv6;Available=($AdaptersAvailable -and $RoutesAvailable);HasTunnelRouteEvidence=($state -eq 'Evidence');InterfaceIndices=@($indices.Keys|Sort-Object);ObservedAt=[DateTimeOffset]::UtcNow.ToString('o');Coverage='活动网卡与默认或成对拆分默认路由；不证明特定请求、全部流量或实际出口已由隧道接管。未见证据不等于隧道已关闭。'}
+}
+function Get-NetworkTopologyObservation {
+    $adapters=@();$routes=@();$adaptersAvailable=$true;$routesAvailable=$true
+    try{$adapters=@(Get-NetAdapter -IncludeHidden -ErrorAction Stop)}catch{$adaptersAvailable=$false}
+    try{$routes=@(Get-NetRoute -PolicyStore ActiveStore -ErrorAction Stop|Where-Object {$_.DestinationPrefix -in @('0.0.0.0/0','0.0.0.0/1','128.0.0.0/1','::/0','::/1','8000::/1')})}catch{$routesAvailable=$false}
+    ConvertTo-NetworkTopologyObservation $adapters $routes $adaptersAvailable $routesAvailable
+}
 function Get-ClientInterference {
     $result=[pscustomobject]@{Running=$false;Tun=$false;Guard=$false;SystemProxy=$false}
     $result.Running=[bool](Get-Process -Name 'clash-verge','verge-mihomo' -ErrorAction SilentlyContinue)
@@ -222,6 +266,10 @@ function Get-ClientInterference {
         $result.Guard=[bool](Select-String -LiteralPath $path -Pattern '^enable_proxy_guard:\s*true\s*$' -Quiet)
         $result.SystemProxy=[bool](Select-String -LiteralPath $path -Pattern '^enable_system_proxy:\s*true\s*$' -Quiet)
     }
+    $topology=Get-NetworkTopologyObservation
+    $result|Add-Member NoteProperty Topology $topology
+    $result|Add-Member NoteProperty TunSource $(if($result.Tun){'ClientConfiguration'}elseif($topology.HasTunnelRouteEvidence){'NetworkRoutes'}else{'Unconfirmed'})
+    $result.Tun=$result.Tun -or $topology.HasTunnelRouteEvidence
     return $result
 }
 function Assert-ClientCompatibility([string]$Entrance,[bool]$Managed) {
@@ -239,12 +287,18 @@ function Assert-ClientCompatibility([string]$Entrance,[bool]$Managed) {
     }
     throw 'Clash 的 TUN / 代理守卫正在接管网络。请在代理管理启用固定入口分流，或先关闭 TUN / 代理守卫后使用系统入口切换。'
 }
-function Get-ClientWarnings {
-    $client=Get-ClientInterference
+function Get-ClientWarnings($Client=$null) {
+    $client=$Client;if($null -eq $client){$client=Get-ClientInterference}
     if($client.Tun -or $client.Guard){
-        if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){'固定入口模式：现有 TUN / 代理守卫保留运行，切换在引擎内进行。请勿退出承载入口的 Clash。'}
-        else{'Clash 的 TUN / 代理守卫正在接管网络，系统入口切换会被阻止；请配置固定入口分流。'}
+        if($client.Topology -and $client.Topology.HasTunnelRouteEvidence){
+            $labels=@{Evidence='有路由证据';Unknown='未知';NoEvidence='未见路由证据'}
+            '外部隧道存在广域路由证据（IPv4：'+$labels[$client.Topology.IPv4]+'，IPv6：'+$labels[$client.Topology.IPv6]+'）。流向固定程序入口只选择进入入口的请求；直连出口仍受系统 VPN 路由影响，实际出口和登录需另行验证。'
+            if($client.Guard){'已知客户端的代理守卫仍开启；它可能改写系统代理入口，请在原客户端核对。'}
+        }
+        elseif($script:Profiles.Routing.UnifiedMode -eq 'gateway'){'固定入口模式：已知客户端的 TUN / 代理守卫仍开启；进入引擎的请求在引擎内选路，请保留承载入口的代理服务。'}
+        else{'已知客户端的 TUN / 代理守卫仍开启，系统入口切换会被阻止；请检查当前网络接管方式。'}
     }elseif($client.SystemProxy){'Clash 开着系统代理；启动或退出它可能改写系统入口，请在这里重新应用。'}
+    if($client.Topology -and $client.Topology.State -eq 'Unknown'){'外部隧道拓扑读取不完整或广域路由归属无法确认；未将未知状态视为隧道已关闭。'}
 }
 function Get-OverrideWarnings([string]$Key) {
     foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')){
@@ -287,7 +341,8 @@ function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable
     }
     $ready=$key -eq 'Direct'
     if($key -ne 'Direct'){$entry=$listeners | Where-Object {$_.Key -eq $key} | Select-Object -First 1;$ready=$(if($entry){$entry.Ready}else{$null})}
-    $live=@(Get-LiveConnections -TcpRows $TcpRows);$warnings=@(Get-ClientWarnings)+@(Get-OverrideWarnings $key);if($TcpAvailable){$warnings+=@(Get-EntryLifecycleWarnings $snapshot $envValues $listeners)}else{$warnings+='Windows 连接列表读取失败，入口监听和连接状态未知；这不代表网络已断开。'}
+    $client=Get-ClientInterference
+    $live=@(Get-LiveConnections -TcpRows $TcpRows);$warnings=@(Get-ClientWarnings $client)+@(Get-OverrideWarnings $key);if($TcpAvailable){$warnings+=@(Get-EntryLifecycleWarnings $snapshot $envValues $listeners)}else{$warnings+='Windows 连接列表读取失败，入口监听和连接状态未知；这不代表网络已断开。'}
     if($key -ne 'Direct' -and $null -eq $ready){$warnings+='当前入口监听或归属无法核验，状态未知；不会据此认定入口未监听。'}
     if((Test-BroadProxyBypass $envValues.NO_PROXY) -and ($key -ne 'Direct' -or @($environment|Where-Object Route -ne 'Unset').Count)){$aligned=$false;$envConflict=$true;$warnings+=Get-BroadProxyBypassWarning}
     if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){
@@ -299,7 +354,7 @@ function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable
     # Historical intent is not evidence of the engine's live route.
     $network=$key
     if($key -eq (Get-GatewayKey) -and $RoutingStatus.Available -and $RoutingStatus.DefaultLoaded -and $RoutingStatus.DefaultRoute){$network=$RoutingStatus.DefaultRoute;if($RoutingStatus.EffectiveDefaultRoute){$network=$RoutingStatus.EffectiveDefaultRoute}}
-    [pscustomobject]@{Key=$key;Current=(Get-RouteName $key);NetworkKey=$network;NetworkName=(Get-RouteName $network);Server=(Protect-Endpoint $snapshot.Server);Flags=$snapshot.Flags;Environment=$environment;Aligned=$aligned;EnvConflict=$envConflict;EndpointReady=$ready;Listeners=$listeners;Selected=$selection;Drift=[bool]$drift;Connections=$live;OldConnections=$oldConnections;Warnings=$warnings;TcpAvailable=$TcpAvailable;GatewayKey=(Get-GatewayKey);CheckedAt=(Get-Date).ToString('HH:mm:ss')}
+    [pscustomobject]@{Key=$key;Current=(Get-RouteName $key);NetworkKey=$network;NetworkName=(Get-RouteName $network);Server=(Protect-Endpoint $snapshot.Server);Flags=$snapshot.Flags;Environment=$environment;Aligned=$aligned;EnvConflict=$envConflict;EndpointReady=$ready;Listeners=$listeners;Selected=$selection;Drift=[bool]$drift;Connections=$live;OldConnections=$oldConnections;Warnings=$warnings;NetworkTopology=$client.Topology;TcpAvailable=$TcpAvailable;GatewayKey=(Get-GatewayKey);CheckedAt=(Get-Date).ToString('HH:mm:ss')}
 }
 
 function Start-HttpEndpointProbe($Profile,[string]$Url,[bool]$Fast=$false) {
