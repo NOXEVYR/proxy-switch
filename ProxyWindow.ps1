@@ -199,6 +199,13 @@ $null=New-TaskCard $maintenanceCards 0 0 '重新载入已保存的程序规则' 
 $cleanStopButton=New-TaskCard $maintenanceCards 1 0 '结束临时直连对照' '对照测试最多五分钟。这里提前恢复仍归测试会话的设置；其他软件后续修改会保留。' '结束对照并恢复' {Start-Work 'CleanStartStop' ''}
 $null=New-TaskCard $maintenanceCards 0 1 '启动、托盘与恢复说明' '关闭窗口默认进入系统托盘。停止服务会恢复设置；已运行的应用可能仍需正常重开。' '查看恢复步骤' {Show-Guide 'recovery'}
 $null=New-TaskCard $maintenanceCards 1 1 '备用线路和服务设置' '想在代理退出后自动接替？先登记备用入口，再设置接替顺序。服务设置位于代理入口页。' '前往代理入口' {$tabs.SelectedTab=$proxyPage}
+$maintenanceCards.RowCount=3
+[void]$maintenanceCards.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Absolute,210)))
+$smartPatrolButton=New-TaskCard $maintenanceCards 0 2 '智能体检（游戏/代理环境）' '六项体检：死代理变量（用户级+机器级）、系统代理归属、游戏域名 bypass、IP 一致性地基、网关入口、TUN 共存状态。发现已证实的死配置可一键清理，修复前自动备份、可回滚。' '开始智能体检' {
+    $patrolScript=Join-Path $script:UiRoot 'SmartPatrol.ps1'
+    if(-not (Test-Path -LiteralPath $patrolScript)){Write-Activity '未找到 SmartPatrol.ps1，无法体检。';return}
+    [void](Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$patrolScript`"",'-Fix') -WorkingDirectory $script:UiRoot)
+}
 $recordsGrid=New-Grid $recordsPage 3 @(108,46,-1)
 $clientBar=New-Grid $null 2 @(44,-1);$recordsGrid.Controls.Add($clientBar,0,0)
 $updateActions=New-Object Windows.Forms.FlowLayoutPanel;$updateActions.Dock='Fill';$updateActions.WrapContents=$false;$updateActions.Margin=New-Object Windows.Forms.Padding(0);$clientBar.Controls.Add($updateActions,0,0)
