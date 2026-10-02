@@ -1,8 +1,20 @@
-# 流向 FlowSwitch：3.9.8 本地候选 / 稳定版 3.9.6
+# 流向 FlowSwitch：Windows 3.9.8 预览版 / 稳定版 3.9.6
 
-**3.9.8 当前为本地维护候选，尚未发布。** 本轮修复程序环境接入、跨目录后台观察、外部隧道识别和共存守护误停，并整理程序页状态和操作区。代理环境模式需明确确认，不能透明改写已运行 Codex 或绕过 VPN/TUN。具体路径与边界见 [使用指南](USER_GUIDE.md)。
+**3.9.8 是可选预览版，稳定版和自动更新通道继续使用 3.9.6。** 复用已验证的 Windows 程序包与冻结源码包；修复共存入口误停、停后冷启动和接入状态误导，补齐原生 EXE 的可选环境接入、可信跨目录子进程观察和隧道路由诊断。本轮只做发布收尾，没有重新构建、改变本机网络或安装。
 
-## 已发布的 Windows 3.9.7 预览版
+**[3.9.8 预览版发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.8-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/FlowSwitch-v3.9.8-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/FlowSwitch-v3.9.8-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/BUILD.txt)
+
+使用步骤：先在「代理入口」准备自己的可用代理；在「程序线路」选择准确 EXE，设置线路并核对接入预览。已核验的 Chromium/Electron 或 Qt WebEngine 程序通过「按此线路打开」获得固定入口；明确支持环境代理的原生 EXE 使用「更多设置 → 启动与桌面入口 → 命令行 / 后台代理环境…」预览确认。首次接入前自行保存工作并正常退出目标及其启动源；旧进程不会因保存线路而刷新缓存或继承环境。[完整操作、撤回和限制](USER_GUIDE.md)
+
+**Qt 游戏真实登录、Codex 请求与 OAuth/Antigravity 登录回传、Gemini 对话发送、VPN/TUN 物理出口及长期在线仍未验收。** 只对进入固定入口的连接调配出口；直连选择不保证绕过外部隧道，忽略代理的请求、独立服务与 UDP/QUIC 不保证覆盖。保存线路、观察到 TCP、入口就绪和登录成功是不同状态。
+
+隔离回归、最终包和本机替换后的文件/备份/启动回执已有记录。本次独立复核 175 项固定源码与 54 项运行文件、版本和组件绑定。原验证与缺口见 [验证记录](TEST_REPORT.md)，发布范围见 [3.9.8 预览说明](.github/release-notes-3.9.8-preview.1.md)。固定源码提交为 [`a1333c4`](https://github.com/NOXEVYR/proxy-switch/commit/a1333c4c17412c743d0b313d227a2088ee8658db)。源码 ZIP 保留打包时“本地候选、尚未发布”的记录，后续公开状态以本页、发布页和 BUILD.txt 为准。两份 ZIP 字节不变，本预览不提供稳定差分更新资产。
+
+![3.9.8 程序线路隔离 Demo：1.25 倍布局模拟、备用字体，非实机联网验收](assets/preview-3.9.8/programs-demo.png)
+
+图来自保存的隔离回归，使用演示程序与样例入口；主窗口/主题源摘要对应冻结源码，捕获时有受控测试注入和备用字体替换，并非未经修改的最终 EXE 实机截图。[更多演示图与素材来源](assets/preview-3.9.8/README.md)
+
+## 保留的 Windows 3.9.7 预览版
 
 **3.9.7 是可选预览版，现有稳定更新通道继续使用 3.9.6。** 本次复用已经完成成品检查的 Windows 包和冻结源码包，不替换任何旧版资产。
 
