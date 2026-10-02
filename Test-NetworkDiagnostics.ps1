@@ -106,4 +106,14 @@ Check ($script:attempts -eq 3) 'logon recovery retries two transient failures an
 $session.OwnerPID=$PID;$session.OwnerStart=Get-ProcessStartTicks $PID;Write-LocalJson (Get-IndependentSessionPath) $session
 $script:attempts=0;& ([scriptblock]::Create($watch))
 Check ($script:attempts -eq 0) 'delayed logon recovery does not stop a current live UI'
+$script:sys=[pscustomobject]@{Flags=1;Server='';Bypass='localhost'}
+function Get-ClientInterference {[pscustomobject]@{Tun=$true;Guard=$false;Topology=[pscustomobject]@{State='Evidence';HasTunnelRouteEvidence=$true}}}
+$writes=$script:writes;$d=Get-NetworkDiagnosis
+Check ($d.Issues.Code -contains 'external-proxy-control' -and ($d.Issues|Where-Object Code -eq 'system-direct').Message -match '不代表物理直连' -and $script:writes -eq $writes) 'External tunnel plus disabled application proxy cannot be presented as physical direct access or change Windows'
+function Get-ClientInterference {[pscustomobject]@{Tun=$false;Guard=$false;Topology=[pscustomobject]@{State='Unknown'}}}
+$d=Get-NetworkDiagnosis
+Check ($d.Issues.Code -contains 'topology-unknown') 'Unavailable adapter/route evidence remains unknown in diagnosis'
+function Get-ClientInterference {[pscustomobject]@{Tun=$true;Guard=$false;Topology=[pscustomobject]@{State='NoEvidence';HasTunnelRouteEvidence=$false}}}
+$d=Get-NetworkDiagnosis
+Check (($d.Issues|Where-Object Code -eq 'system-direct').Message -match '配置开启' -and ($d.Issues|Where-Object Code -eq 'system-direct').Message -notmatch '存在外部隧道路由') 'Client TUN configuration alone cannot masquerade as observed system routes'
 Write-Output ('PASS: '+$script:checks+' network diagnosis and repair checks; isolated data and Windows-setting stubs only.')

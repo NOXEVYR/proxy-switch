@@ -49,6 +49,22 @@ $checks=@'
                 if($sibling -ne $Control -and $sibling.Visible -and ($sibling -is [Windows.Forms.Button] -or $sibling -is [Windows.Forms.Label] -or $sibling -is [Windows.Forms.CheckBox] -or $sibling -is [Windows.Forms.ComboBox])){Assert-Usability (-not $Control.Bounds.IntersectsWith($sibling.Bounds)) ($Context+' overlaps '+$Control.Text+' / '+$sibling.Text)}
             }
         }
+        function Assert-ProgramNaturalLayout([string]$Context){
+            $programPage.AutoScrollPosition=New-Object Drawing.Point(0,0);$programGrid.PerformLayout();[Windows.Forms.Application]::DoEvents()
+            Assert-Usability ($programPage.AutoScroll -and -not $programPage.HorizontalScroll.Visible) ($Context+' program page retains scrolling without horizontal overflow')
+            $minimumRows=$liveList.Font.Height+8+2*[Math]::Max($liveList.Font.Height,$liveList.SmallImageList.ImageSize.Height)
+            Assert-Usability ($liveHost.Height -ge $minimumRows) ($Context+' program list retains its header and at least two native rows')
+            [Console]::WriteLine('PROGRAM-NATURAL case='+$Context+' client='+$programPage.ClientSize+' minimum='+$programGrid.MinimumSize+' list='+$liveHost.Size+' footer='+$bottom.Size+' toolbar='+$toolbar.Size+' vertical='+$programPage.VerticalScroll.Visible)
+            if($factor -le 1.25){
+                Assert-Usability (-not $programPage.VerticalScroll.Visible) ($Context+' list and selected details fit the natural program viewport')
+                foreach($control in @($routeButton,$programLaunchButton,$programMoreButton,$programSelectionLabel,$programStateLabel,$programHint)){
+                    $screenRect=$control.RectangleToScreen($control.ClientRectangle)
+                    for($ancestor=$control.Parent;$ancestor;$ancestor=$ancestor.Parent){
+                        Assert-Usability ($ancestor.RectangleToScreen($ancestor.ClientRectangle).Contains($screenRect)) ($Context+' visible at natural scroll position: '+$control.Text+' in '+$ancestor.GetType().Name)
+                    }
+                }
+            }
+        }
         function Write-WindowEvidence([string]$Context){
             $graphics=$form.CreateGraphics()
             try{
@@ -190,6 +206,7 @@ $checks=@'
             Write-WindowEvidence $dimension.Name
             foreach($index in @(3,0,1,2)){
                 $navigation[$index].PerformClick();$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
+                $tabs.SelectedTab.AutoScrollPosition=New-Object Drawing.Point(0,0);[Windows.Forms.Application]::DoEvents()
                 Assert-Usability ($tabs.SelectedIndex -eq $index -and $brand.Text -eq $tabs.SelectedTab.Text -and @($navigation|Where-Object Selected).Count -eq 1) ('Navigation selects '+$pages[$index])
                 Save-UiCapture ($pages[$index]+'-'+$dimension.Name+'-'+$factor)
                 Assert-ActionLayout $form ($dimension.Name+'/'+$pages[$index]+'/'+$factor)
@@ -231,9 +248,16 @@ $checks=@'
         $liveList.Items[0].Selected=$true;$liveList.Items[0].Focused=$true;[Windows.Forms.Application]::DoEvents()
         Assert-Usability ($routeButton.Enabled -and $programMoreButton.Enabled -and $launchAction.Enabled) 'Selecting a valid saved program enables its task actions'
         $selectionText=(@(Get-UiTree $programPage|Where-Object {$_.Visible -and ($_ -is [Windows.Forms.Label] -or $_ -is [Windows.Forms.TextBox])}|ForEach-Object Text) -join "`r`n")
-        Assert-Usability ($selectionText.Contains($fixture.Name) -and $selectionText.Contains($fixture.Path)) 'Selected-program explanation identifies the exact name and executable'
+        Assert-Usability ($selectionText.Contains($fixture.Name) -and $selectionText.Contains([IO.Path]::GetFileName($fixture.Path)) -and $uiTips.GetToolTip($programSelectionLabel) -ceq $fixture.Path) 'Selected-program explanation identifies the exact name and executable; full path remains available in tooltip'
         Save-UiCapture ('programs-selected-'+$factor)
-        foreach($dimension in $dimensions){$form.Size=New-Object Drawing.Size($dimension.Width,$dimension.Height);[Windows.Forms.Application]::DoEvents();Save-UiCapture ('programs-selected-'+$dimension.Name+'-'+$factor);Assert-ActionLayout $form ('selected/'+$dimension.Name);Assert-Instruction $programSelectionLabel ('selected target/'+$dimension.Name);Assert-Instruction $programHint ('selected scope/'+$dimension.Name)}
+        foreach($dimension in $dimensions){$form.Size=New-Object Drawing.Size($dimension.Width,$dimension.Height);$programPage.AutoScrollPosition=New-Object Drawing.Point(0,0);[Windows.Forms.Application]::DoEvents();Assert-ProgramNaturalLayout ('selected/'+$dimension.Name+'/'+$factor);Save-UiCapture ('programs-selected-'+$dimension.Name+'-'+$factor);Assert-ActionLayout $form ('selected/'+$dimension.Name);Assert-Instruction $programSelectionLabel ('selected target/'+$dimension.Name);Assert-Instruction $programStateLabel ('selected state/'+$dimension.Name);Assert-Instruction $programHint ('selected scope/'+$dimension.Name)}
+        $fixture.PIDs='10,11';$fixture.Loaded=$false;$fixture|Add-Member ProgramEntryState 'Partial';$fixture.Actual='旧代理 ×1，流向入口 ×1';$fixture.Status='部分连接未接入';Set-UiActionAvailability
+        Assert-Usability ($programHint.Text -match '不会改写旧进程' -and $programHint.Text -notmatch '新连接按已保存线路生效') 'Mixed old and managed connections cannot receive a blanket effective-route hint'
+        foreach($dimension in $dimensions){$form.Size=New-Object Drawing.Size($dimension.Width,$dimension.Height);Assert-ProgramNaturalLayout ('mixed/'+$dimension.Name+'/'+$factor);Save-UiCapture ('programs-mixed-'+$dimension.Name+'-'+$factor);Assert-Instruction $programStateLabel ('mixed state/'+$dimension.Name);Assert-Instruction $programHint ('mixed scope/'+$dimension.Name)}
+        $fixture.PIDs='';$fixture.Loaded=$true;$fixture.ProgramEntryState='Waiting';Set-UiActionAvailability
+        $pendingBefore=$script:PendingAction
+        Invoke-InformationAcceptance {Show-EnvironmentProgramSettings $fixture} ('environment-settings-'+$factor)
+        Assert-Usability ($script:InfoText -match '已有进程' -and $script:InfoText -match 'VPN/TUN' -and $script:PendingAction -eq $pendingBefore -and -not $script:DialogOpen) 'Native environment dialog shows its scope and cancel never dispatches or changes pending work'
         $form.Size=New-Object Drawing.Size($dimensions[1].Width,$dimensions[1].Height);[Windows.Forms.Application]::DoEvents()
         $script:UsabilityRequest=$null;Scroll-TaskControl $launchAction;$launchAction.PerformClick()
         Assert-Usability ($script:UsabilityRequest.Kind -eq 'AppLaunch' -and $script:UsabilityRequest.Key -ceq $fixture.Path) 'Direct launch dispatches the selected executable without launching a user application'

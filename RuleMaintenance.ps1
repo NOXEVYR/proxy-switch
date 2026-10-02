@@ -79,7 +79,7 @@ function Get-ProgramRuleRepairPlan([string]$SavedPath){
     $resolution=Resolve-ProgramIdentity $path -Processes $processes -Context $context -SavedIdentity $savedIdentity
     if(-not $resolution.CanRepair -or -not $resolution.RequiresRepair -or -not $resolution.CurrentPath){throw '没有唯一、可核对的新程序路径；请先解决路径不可读或多个候选的情况。'}
     if(@(@($snapshot.Engine.entries)+@($snapshot.Engine.programIngresses)+@($snapshot.Launch.entries)|Where-Object {$_.path -ine $path -and (Test-ProgramPathEquivalent $_.path $resolution.CurrentPath $context)}).Count){throw '新程序路径已经存在保存记录，请先处理冲突，未合并线路。'}
-    if($launch.Count -and (Get-ProgramProxyAdapter $resolution.CurrentPath) -ne $launch[0].adapter){throw '新版本不再符合原启动代理适配方式，未迁移记录。'}
+    if($launch.Count -and -not (Test-ProgramLaunchAdapterCompatibility $resolution.CurrentPath $launch[0].adapter)){throw '新版本不再符合原启动代理适配方式，未迁移记录。'}
     $profiles=Get-RuleMaintenanceProfiles $snapshot
     foreach($profile in $profiles.Profiles){if((Test-ProgramPathEquivalent $resolution.CurrentPath $profile.AppPath $context) -or (Test-ProgramPathEquivalent $resolution.CurrentPath $profile.CorePath $context)){throw '不能把代理程序自身的路径作为修复目标。'}}
     $mode=$(if($engine.Count -and $launch.Count){'mixed'}elseif($engine.Count){'engine'}else{'launch'})
@@ -186,7 +186,11 @@ function Invoke-RuleMaintenanceChange($Snapshot,[string]$SavedPath,[string]$Curr
     if($managedEntries.Count -and $Remove){
         Assert-ManagedIngressRemoval $Snapshot $SavedPath $managedEntries
     }
-    if($managedEntries.Count -and -not $Remove -and (Get-ProgramProxyAdapter $CurrentPath) -ne 'chromium'){throw '新程序路径不再支持原固定入口启动适配，未迁移规则。'}
+    if($managedEntries.Count -and -not $Remove){
+        $adapter=Get-ProgramProxyAdapter $CurrentPath
+        $environmentCompatible=$launchEntries.Count -eq 1 -and $launchEntries[0].adapter -ceq 'environment' -and (Test-ProgramLaunchAdapterCompatibility $CurrentPath 'environment')
+        if($adapter -notin @('chromium','qtwebengine') -and -not $environmentCompatible){throw '新程序路径不再支持原固定入口启动适配，未迁移规则。'}
+    }
     if($engineEntries.Count){Assert-RuleMaintenanceEngine $Snapshot}
     $backup=New-RuleMaintenanceBackup $Snapshot $(if($Remove){'remove'}else{'repair'}) $SavedPath $CurrentPath
     $shortcutPlan=New-RuleMaintenanceShortcutChanges $Snapshot $SavedPath $CurrentPath $backup -Remove:$Remove

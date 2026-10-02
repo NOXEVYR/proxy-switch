@@ -34,6 +34,8 @@ function Test-ProgramPathEquivalent($Left,$Right,$Context){
  $script:EquivalenceReads++;& $script:ActualPathEquivalent $Left $Right $Context
 }
 function Get-ProgramProxyAdapter($Path){Check ($script:LockDepth -gt 0) 'Fresh adapter classification holds the shared change lock';$script:AdapterReads++;$script:Adapter}
+function Test-ProgramConsoleExecutable($Path){[bool]$script:ConsoleFixture}
+function Get-EnvironmentProgramAccessPlan($Path,$Route){$script:EnvironmentPlans++;[pscustomobject]@{Kind='environment';Path=$Path;Route=$Route;CanApply=$true}}
 function Get-RoutingSnapshot {
  Check ($script:LockDepth -gt 0) 'Fresh saved-rule classification holds the shared change lock'
  $script:SnapshotReads++;if($script:SnapshotFails){throw 'Fixture rule snapshot unavailable'}
@@ -66,6 +68,7 @@ function Get-ProxyStatus {param($Apps,$TcpRows,$TcpAvailable) [pscustomobject]@{
 '@
 [IO.File]::WriteAllText((Join-Path $qa 'ProxyBackend.ps1'),$backend,(New-Object Text.UTF8Encoding($true)))
 function Reset-Fixture {
+ $script:ConsoleFixture=$false;$script:EnvironmentPlans=0
  $script:Adapter='';$script:AdapterReads=0;$script:SnapshotReads=0;$script:IdentityReads=0;$script:EquivalenceReads=0;$script:DispatchIdentityContext=$null;$script:SavedEnginePath='C:\Fixtures\game.exe';$script:SnapshotFails=$false;$script:LockDepth=0;$script:Plans=0;$script:ManagedWrites=0;$script:Applies=0;$script:HasManaged=$false;$script:HasEngine=$false;$script:RefreshFails=$false;$script:Requests=@();$script:Activity=@()
  $script:AppTarget=[pscustomobject]@{Path='C:\Fixtures\game.exe';Mode='observe';RequiresRepair=$false}
 }
@@ -85,6 +88,12 @@ Check ($script:AdapterReads -eq 1 -and $script:LastPlanPath -eq $script:AppTarge
 Check ($script:SnapshotReads -eq 1 -and $script:LockDepth -eq 0) 'Classification reads current rules once and releases the shared lock'
 Check ($script:IdentityReads -eq 1) 'Classification binds one fresh physical identity context'
 
+Reset-Fixture;$script:ConsoleFixture=$true;$reply=Choose 'proxy-b'
+Check ($reply.OK -and $reply.Kind -eq 'EnvironmentAccessPlan' -and $script:EnvironmentPlans -eq 1 -and $script:ManagedWrites -eq 0 -and $script:Applies -eq 0) 'Unconfigured console EXE receives a read-only environment preview without mutating routes'
+Reset-Fixture;$script:Adapter='environment';$script:HasManaged=$true;$reply=Choose 'Direct'
+Check ($reply.OK -and $reply.Kind -eq 'EnvironmentAccessPlan' -and $script:EnvironmentPlans -eq 1 -and $script:ManagedWrites -eq 0) 'Explicit native environment selection keeps the opt-in preview path'
+Reset-Fixture;$script:ConsoleFixture=$true;$script:HasEngine=$true;$reply=Choose 'Direct'
+Check ($reply.OK -and $reply.Kind -eq 'ProgramAccessPlan' -and $script:EnvironmentPlans -eq 0) 'Existing console engine rules are preserved unless the user explicitly chooses a new launch method'
 Reset-Fixture;$script:Adapter='chromium';$reply=Choose 'proxy-b'
 Check ($reply.OK -and $reply.Kind -eq 'ManagedAppRoute' -and $script:ManagedWrites -eq 1 -and $script:Plans -eq 0 -and $script:Applies -eq 0) 'Supported Chromium keeps the existing managed-route action'
 Check ($reply.Result.Route -eq 'proxy-b') 'Supported managed action receives the requested target unchanged'

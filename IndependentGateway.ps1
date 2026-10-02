@@ -14,6 +14,18 @@ function Get-RecoveryEndpointHost([uri]$Endpoint) {
     }
     $endpointHost
 }
+function Get-GatewayWatchdogEndpoint($Session) {
+    # Program-only protection owns our listener, never the external Windows
+    # baseline. Missing ownership is unknown and cannot authorize retirement.
+    if($Session.PreserveWindowsSettings -eq $true){
+        $endpoint=[string]$Session.OwnGatewayEndpoint;$port=0
+        if($endpoint -notmatch '\A127\.0\.0\.1:([0-9]{1,5})\z' -or -not [int]::TryParse($Matches[1],[ref]$port) -or $port -lt 1 -or $port -gt 65535){
+            return [pscustomobject]@{State='Unknown';Endpoint=''}
+        }
+        return [pscustomobject]@{State='Ready';Endpoint=$endpoint}
+    }
+    [pscustomobject]@{State='Ready';Endpoint=[string]$Session.TargetSystem.Server}
+}
 function Test-RecoveryEndpoint([string]$Endpoint) {
     if(-not $Endpoint){return $false}
     try{
@@ -34,8 +46,9 @@ function Test-SameRecoveryEndpoint([string]$First,[string]$Second) {
 function Get-IndependentRetiringEndpoints($Session) {
     $endpoints=@([string]$Session.TargetSystem.Server)
     if($Session.PreserveWindowsSettings -eq $true){
-        if([string]$Session.OwnGatewayEndpoint -notmatch '^127\.0\.0\.1:[0-9]{1,5}$'){throw '共存入口的停止归属记录不完整，保留后台服务。'}
-        $endpoints=@([string]$Session.OwnGatewayEndpoint)
+        $ownedEndpoint=Get-GatewayWatchdogEndpoint $Session
+        if($ownedEndpoint.State -ne 'Ready'){throw '共存入口的停止归属记录不完整，保留后台服务。'}
+        $endpoints=@($ownedEndpoint.Endpoint)
     }
     $rulesPath=Join-Path $script:DataRoot 'app-rules.json'
     if([IO.File]::Exists($rulesPath)){
@@ -228,14 +241,14 @@ function Enable-IndependentGateway([int]$OwnerPID=0,[string]$InitialRoute='',[sw
         $engine=$migration.Engine
         if(-not $engine.installed -and (@($engine.entries).Count -gt 0 -or @($engine.programIngresses|Where-Object {$_}).Count -gt 0 -or @($engine.siteRules|Where-Object {$_}).Count -gt 0 -or $engine.defaultRoute)){throw '程序规则状态不一致，请先从备份恢复规则文件。'}
         foreach($entry in @($migration.Launch.entries)){
-            if(-not [IO.Path]::IsPathRooted($entry.path) -or $entry.path -notmatch '(?i)\.exe$' -or $entry.path -match '["\r\n\x00]' -or $entry.adapter -notin @('chromium','qtwebengine') -or $entry.route -notin (@('Direct','Follow')+(Get-ProfileKeys))){throw '程序启动代理配置无效，请从备份恢复。'}
+            if(-not [IO.Path]::IsPathRooted($entry.path) -or $entry.path -notmatch '(?i)\.exe$' -or $entry.path -match '["\r\n\x00]' -or $entry.adapter -notin @('chromium','qtwebengine','environment') -or $entry.route -notin (@('Direct','Follow')+(Get-ProfileKeys))){throw '程序启动代理配置无效，请从备份恢复。'}
         }
         $rules=[pscustomobject]@{entries=@($engine.entries);defaultRoute=$engine.defaultRoute;installed=[bool]$engine.installed;programIngresses=@($engine.programIngresses|Where-Object {$_});siteRules=@($engine.siteRules|Where-Object {$_});launchEntries=@($migration.Launch.entries)}
         $originalConfig=$migration.Files['config.json'];$originalState=$migration.Files['app-rules.json'];$originalLaunch=$migration.Files['program-proxies.json']
         $statePath=$originalState.Path
         $before=Get-SystemSnapshot;$beforeEnv=Get-UserProxyEnv;$selection=Get-Selection
         $client=Get-ClientInterference
-        if($client.Tun -or ($client.Guard -and -not $PreserveWindowsSettings)){throw '启用独立入口前，请关闭其他客户端的 TUN 和代理守卫；保留上游代理服务运行。'}
+        if(($client.Tun -or $client.Guard) -and -not $PreserveWindowsSettings){throw '其他客户端的 TUN 或代理守卫正在接管网络，未改系统入口。可为支持的程序设置独立启动入口共存；需要统一接管时，先由你在原客户端调整接管开关。'}
         $upstreams=@($old.Profiles | Where-Object {$_.Id -ne $old.Routing.ProfileId -or $old.Routing.Adapter -ne 'standalone'})
         if(-not $upstreams.Count){throw '请先添加至少一个上游代理入口。'}
         if($UnifiedSwitch -or $RepairEntry){

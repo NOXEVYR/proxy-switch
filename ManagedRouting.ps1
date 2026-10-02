@@ -207,15 +207,22 @@ function Invoke-ManagedRoutingChange($Before,$Next,[scriptblock]$Verify) {
     return $backup
 }
 function Set-ManagedApplicationRoute([string]$Path,[string]$Route) {
+    # An explicit CLI route change can reuse a previously confirmed environment
+    # adapter. First-time native opt-in still requires the dedicated preview.
+    $target=Resolve-ProgramTarget $Path
+    if((Get-ProgramProxyAdapter $target) -eq 'environment'){
+        return Set-EnvironmentProgramAccess (Get-EnvironmentProgramAccessPlan $target $Route) -Confirmed -ReuseExisting
+    }
     Use-ChangeLock {
         $executable=Resolve-ProgramTarget $Path;Assert-ManagedRoute $Route -AllowFollow
         foreach($profile in $script:Profiles.Profiles){if($executable -ieq $profile.CorePath -or $executable -ieq $profile.AppPath){throw '不能给代理程序自身分流，以免形成回路。'}}
         $adapter=Get-ProgramProxyAdapter $executable
+        if($adapter -eq 'environment'){throw '代理环境启动需明确预览确认，请在程序线路中选择线路并确认；原记录保留。'}
         if($adapter -notin @('chromium','qtwebengine') -and (Get-ManagedProgramIngress $executable)){throw '此程序当前版本已无法核验原启动适配，原固定入口和规则保持不变。请检查程序路径及安装是否完整，再修复程序记录。'}
         if($adapter -eq 'qtwebengine' -and -not (Get-ManagedProgramIngress $executable)){throw 'Qt 网页组件首次接入需要明确预览确认；请从程序线路中启用网页组件独立入口。'}
         if($Route -notin @('Direct','Follow') -and -not (Test-ProxyRoute $Route -Fast).Usable){throw '所选上游检测未通过，未保存切换成功状态。请先检查这个代理入口。'}
         # A program action never replaces the saved global default during cold start.
-        if($adapter -eq 'qtwebengine'){Ensure-ManagedGateway -PreserveWindowsSettings|Out-Null}else{Ensure-ManagedGateway|Out-Null}
+        if($adapter -in @('chromium','qtwebengine')){Ensure-ManagedGateway -PreserveWindowsSettings|Out-Null}else{Ensure-ManagedGateway|Out-Null}
         if($adapter -notin @('chromium','qtwebengine')){
             $result=Set-ApplicationRoute $executable $Route
             $result.Message+=' 此程序没有可核验的原生代理启动适配；仍指向已退出旧代理的进程，需要在程序内改为流向入口或自行重开。'
@@ -249,18 +256,19 @@ function Set-ManagedApplicationRoute([string]$Path,[string]$Route) {
         $family=@();$managed=$false;$observationUnknown=$false
         try{
             $family=@(Get-ProgramFamily $executable @(Get-ProcessInventory))
-            $managed=Test-ManagedProgramSession $executable $family $Route
-            if($family.Count -and -not $managed){
+            # A launch journal proves injection, not that every background request
+            # used it. Always read current connections before describing coverage.
+            if($family.Count){
                 $observation=Get-ApplicationRoutes
                 $row=$observation.Rows|Where-Object {$_.Path -ieq $executable -and $_.Mode -eq 'managed'}|Select-Object -First 1
-                if($row -and $row.Loaded -and -not $row.NeedsRelaunch){$managed=$true}
+                if($row -and $row.Loaded -and -not $row.NeedsRelaunch -and $row.ProgramEntryState -ne 'Partial'){$managed=$true}
                 if(-not $observation.ProcessesAvailable -or -not $observation.TcpAvailable){$observationUnknown=$true}
             }
         }catch{$observationUnknown=$true}
         $message='程序固定入口已就绪，新连接的默认出口已核验为「'+(Get-RouteName $Route)+'」。网站例外规则继续生效。'
         if($observationUnknown){$message+=' 线路已提交，但当前程序连接读取失败，生效范围待确认；请刷新查看实际连接。'}
         elseif($family.Count -and -not $managed){$message+=' 当前进程未确认接入固定入口：请保存任务并完整退出，再从流向打开或使用已接入的桌面入口；旧进程记住的代理地址不能通过保存规则修改。'}
-        elseif($family.Count){$message+=' 已接入程序及继承入口的后台进程无需重开；已有长连接保持原状，可预览后单独重连。'}
+        elseif($family.Count){$message+=' 已观察到的连接符合当前入口规则；未发起请求的后台组件仍待核验。已有长连接保持原状，可预览后单独重连。'}
         else{$message+=' 请从流向或已接入的桌面入口打开程序。'}
         [pscustomobject]@{Backup=$backup;Message=($message+$shortcutNotice);Shortcuts=$shortcuts;Managed=$true;IngressId=$entry.id;ShortcutObservationUnknown=$shortcutObservationUnknown;ObservationUnknown=$observationUnknown;NeedsRelaunch=($family.Count -gt 0 -and -not $managed -and -not $observationUnknown)}
     }

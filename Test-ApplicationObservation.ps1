@@ -22,9 +22,9 @@ function Test-ManagedProgramSession {return $true}
 function Socket([int]$Owner,[int]$Source,[string]$Remote,[int]$Port,[string]$State='Established'){
     [pscustomobject]@{OwningProcess=$Owner;LocalAddress='127.0.0.1';LocalPort=$Source;RemoteAddress=$Remote;RemotePort=$Port;State=$State}
 }
-function Observe($Processes,$Connections=@(),$Rule=$null,$Launch=$null,$Core=$script:FixtureCore,$EngineConnections=@(),[bool]$TcpAvailable=$true,[bool]$ProcessesAvailable=$true,$App=$script:FixtureApp,$FamilySnapshot=$null,$EntryObservation=$null){
+function Observe($Processes,$Connections=@(),$Rule=$null,$Launch=$null,$Core=$script:FixtureCore,$EngineConnections=@(),[bool]$TcpAvailable=$true,[bool]$ProcessesAvailable=$true,$App=$script:FixtureApp,$FamilySnapshot=$null,$EntryObservation=$null,$ManagedIngresses=@()){
     $byId=@{};foreach($p in $Processes){$byId[[int]$p.Id]=$p}
-    $evidence=Get-ApplicationConnectionEvidence $Processes $Connections $EngineConnections 'gateway' $byId $App.Path $TcpAvailable @() $FamilySnapshot
+    $evidence=Get-ApplicationConnectionEvidence $Processes $Connections $EngineConnections 'gateway' $byId $App.Path $TcpAvailable $ManagedIngresses $FamilySnapshot
     $row=Get-ApplicationObservationRow $App $Processes $evidence $Core $Rule $Launch $null $ProcessesAvailable $FamilySnapshot $EntryObservation
     [pscustomobject]@{Evidence=$evidence;Row=$row}
 }
@@ -153,6 +153,21 @@ $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.9' 
 Check ($seen.Row.Loaded -and -not $seen.Row.NeedsEntryConnection -and $seen.Row.ProgramEntryState -eq 'Observed') 'A verified external TUN engine is not incorrectly required to use the system entry'
 $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897),(Socket 10 51001 '127.0.0.1' 18082)) -Rule $directRule -EngineConnections @($directEngine) -EntryObservation $systemEntry
 Check ($seen.Row.ProgramEntryState -eq 'Partial' -and -not $seen.Row.NeedsEntryConnection -and -not $seen.Row.Loaded) 'Mixed managed and bypassed traffic stays partial instead of advertising full application'
+
+# Stable program entrances must not promote a child's old registered endpoint
+# to controller evidence or legitimate website policy.
+$private=[pscustomobject]@{id='observation-private';path=$exe;port=22111;route='upstream';managed=$true;loaded=$true;ready=$true}
+$privateEngine=$engine.PSObject.Copy();$privateEngine|Add-Member NoteProperty ingressId $private.id;$privateEngine|Add-Member NoteProperty inboundName ('FS-Program-'+$private.id);$privateEngine|Add-Member NoteProperty policyMatches $true
+$seen=Observe -Processes @($main,$worker) -Connections @((Socket 10 51000 '127.0.0.1' 22111),(Socket 11 51001 '127.0.0.1' 18082)) -Rule $private -EngineConnections @($privateEngine) -ManagedIngresses @($private)
+Check ($seen.Row.ProgramEntryState -eq 'Partial' -and -not $seen.Row.Loaded -and $seen.Row.Status -match '其他代理入口') 'A managed root cannot certify a child still dialing a registered upstream, even when it matches the requested route'
+Check ($seen.Row.Status -notmatch '网站分流|含已验证子进程' -and $seen.Evidence.ChildProxyObserved -eq 1 -and $seen.Row.ConnectionDetails[1].EvidenceSource -eq 'RegisteredEndpoint') 'An observed upstream child is not mislabeled as managed child or website policy'
+$seen=Observe -Processes @($main,$worker) -Connections @((Socket 10 51000 '127.0.0.1' 22111),(Socket 11 51001 '203.0.113.99' 443)) -Rule $private -EngineConnections @($privateEngine) -ManagedIngresses @($private)
+Check (-not $seen.Row.Loaded -and $seen.Row.Status -match '未确认接管' -and $seen.Row.Status -notmatch '含已验证子进程') 'Outside child TCP remains unconfirmed even when the managed root is correctly routed'
+$seen=Observe -Processes @($main,$worker) -Connections @((Socket 10 51000 '127.0.0.1' 22111)) -Rule $private -EngineConnections @($privateEngine) -ManagedIngresses @($private)
+Check ($seen.Row.Loaded -and $seen.Row.Status -notmatch '含已验证子进程') 'Observed root traffic does not invent an idle child connection'
+$privateChild=$privateEngine.PSObject.Copy();$privateChild.path=$helper;$privateChild.sourcePort=51001;$privateChild.route='Direct'
+$seen=Observe -Processes @($main,$worker) -Connections @((Socket 10 51000 '127.0.0.1' 22111),(Socket 11 51001 '127.0.0.1' 22111)) -Rule $private -EngineConnections @($privateEngine,$privateChild) -ManagedIngresses @($private)
+Check ($seen.Row.Loaded -and $seen.Row.Status -match '网站分流.*含已验证子进程' -and $seen.Row.ProgramEntryState -eq 'Observed') 'Controller-confirmed mixed website routes through the same program entrance remain valid'
 $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '127.0.0.1' 7897)) -Rule $directRule -EntryObservation $systemEntry
 Check ($seen.Row.ProgramEntryState -eq 'WaitingConnection' -and -not $seen.Row.NeedsEntryConnection -and -not $seen.Row.Loaded) 'A socket already entering the engine with unknown egress does not falsely demand system entry changes'
 $seen=Observe -Processes @($main) -Connections @((Socket 10 51000 '203.0.113.5' 443)) -Rule $directRule -EntryObservation $systemEntry

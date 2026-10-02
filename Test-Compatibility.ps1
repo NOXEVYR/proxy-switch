@@ -19,6 +19,7 @@ function Get-UserProxyEnv {$script:Environment}
 function Get-Selection {$script:Selection}
 function Get-RoutingSnapshot {$script:Rules}
 function Get-ClientWarnings {}
+function Get-ClientInterference {[pscustomobject]@{Tun=$false;Guard=$false;SystemProxy=$false;Topology=[pscustomobject]@{State='NoEvidence';HasTunnelRouteEvidence=$false}}}
 function Get-OverrideWarnings {}
 function Get-LiveConnections {}
 function Set-SystemSnapshot($Value){$script:Writes++;$script:System=$Value;if($script:InjectSystem){$script:System=$script:Outside;$script:InjectSystem=$false}}

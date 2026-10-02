@@ -12,6 +12,7 @@ function Invoke-AppRouter($Request){[pscustomobject]@{available=$false;entries=@
 function Get-SystemSnapshot {[pscustomobject]@{Flags=1;Server='';Bypass=''}}
 function Get-UserProxyEnv {[pscustomobject]@{HTTP_PROXY=$null;HTTPS_PROXY=$null;ALL_PROXY=$null;NO_PROXY='localhost'}}
 function Get-ClientWarnings {}
+function Get-ClientInterference {[pscustomobject]@{Tun=$false;Guard=$false;SystemProxy=$false;Topology=[pscustomobject]@{State='NoEvidence';HasTunnelRouteEvidence=$false}}}
 function Get-OverrideWarnings {}
 $rows=@([pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=30000;OwningProcess=11})
 foreach($state in @('Established','SynSent','TimeWait')){$rows+=@([pscustomobject]@{State=$state;LocalAddress='127.0.0.1';LocalPort=(50000+$rows.Count);RemoteAddress='127.0.0.1';RemotePort=30000;OwningProcess=10})}

@@ -14,7 +14,7 @@ $checks=@'
         $apps=[pscustomobject]@{Rows=@($row);RuleCount=1;LaunchRuleCount=1;RepairCount=1;Available=$false;RulesAvailable=$false;TcpAvailable=$true}
         Show-Applications $apps
         Check-UI ($liveList.Items.Count -eq 1 -and $liveList.Items[0].SubItems[2].Text -eq '办公网络 ×3') 'Upgraded program must retain observed connections'
-        Check-UI ($liveList.Items[0].SubItems[3].Text -match '路径变更' -and $ruleMeta.Text -match '待修复') 'Repair evidence must not be replaced by generic engine status'
+        Check-UI ($liveList.Items[0].SubItems[3].Text -match '需修复程序路径' -and $liveList.Items[0].ToolTipText -match '路径变更' -and $ruleMeta.Text -match '待修复') 'Compact repair status retains the full path-change evidence in tooltip'
         $liveList.Items[0].Selected=$true;$liveList.Items[0].Focused=$true
         $row.Path='C:\Fixtures\newer\app.exe';Show-Applications $apps
         Check-UI ($liveList.SelectedItems.Count -eq 1) 'Selection must survive current path changes using saved record key'
@@ -43,6 +43,8 @@ $checks=@'
         Check-UI ($noticeLabel.Text -match '出口读取失败' -and $noticeLabel.Text -notmatch '已自动接替') ('Unavailable selector must not claim failover to Unknown: '+$noticeLabel.Text)
         Mark-ObservationStale;Show-Applications $apps
         Check-UI ($liveList.Items[0].SubItems[2].Text -match '过期') 'Searching or filtering must not turn stale evidence into current evidence'
+        $liveList.Items[0].Selected=$true;Set-UiActionAvailability
+        Check-UI ($programStateLabel.Text -match '过期' -and $programHint.Text -match '不能确认当前线路') 'Selecting a stale row does not revive old connection or effective-route evidence'
         $script:ObservationStale=$false;Show-Applications $apps
         Check-UI ($liveList.Items[0].SubItems[2].Text -eq '办公网络 ×3') 'Fresh snapshots replace stale labels'
 

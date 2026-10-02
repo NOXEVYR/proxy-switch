@@ -28,7 +28,29 @@ function Get-ProgramProxyAdapter([string]$Executable) {
         return 'qtwebengine'
     }
     if((Test-Path -LiteralPath (Join-Path $directory 'resources.pak') -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $directory 'chrome_100_percent.pak') -PathType Leaf)){return 'chromium'}
+    # Environment-only adaptation is an explicit per-file opt-in, never inferred
+    # from an EXE name. Do not pass Chromium switches to native CLI processes.
+    if($script:DataRoot -and @((Get-ProgramLaunchEntries)|Where-Object {$_.path -ieq $Executable -and $_.adapter -ceq 'environment'}).Count){return 'environment'}
     return ''
+}
+function Test-ProgramConsoleExecutable([string]$Executable) {
+    $stream=$null;$reader=$null
+    try{
+        $stream=[IO.File]::Open($Executable,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete);$reader=New-Object IO.BinaryReader($stream)
+        if($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5a4d){return $false}
+        $stream.Position=0x3c;$offset=$reader.ReadUInt32()
+        if($offset -gt $stream.Length-94){return $false};$stream.Position=$offset
+        if($reader.ReadUInt32() -ne 0x00004550){return $false}
+        $stream.Position=$offset+24;$magic=$reader.ReadUInt16();if($magic -notin @(0x10b,0x20b)){return $false}
+        $stream.Position=$offset+24+68;return $reader.ReadUInt16() -eq 3
+    }catch{return $false}finally{if($reader){$reader.Dispose()}elseif($stream){$stream.Dispose()}}
+}
+function Test-ProgramLaunchAdapterCompatibility([string]$Executable,[string]$ExpectedAdapter) {
+    $adapter=Get-ProgramProxyAdapter $Executable
+    if($ExpectedAdapter -ne 'environment'){return $adapter -ceq $ExpectedAdapter}
+    if($adapter -notin @('','environment') -or -not (Test-Path -LiteralPath $Executable -PathType Leaf)){return $false}
+    foreach($name in @('Qt5Core.dll','Qt5Network.dll','Qt5WebEngineCore.dll','Qt6Core.dll','Qt6Network.dll','Qt6WebEngineCore.dll')){if(Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($Executable)) $name)){return $false}}
+    return $true
 }
 function Get-ProgramLaunchEntries {
     $path=Join-Path $script:DataRoot 'program-proxies.json'
@@ -36,7 +58,7 @@ function Get-ProgramLaunchEntries {
     $state=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json
     if($state.version -ne 1){throw '程序启动代理配置版本不兼容。'}
     foreach($entry in @($state.entries)){
-        if(-not [IO.Path]::IsPathRooted($entry.path) -or $entry.path -notmatch '(?i)\.exe$' -or $entry.path -match '["\r\n\x00]' -or $entry.adapter -notin @('chromium','qtwebengine') -or $entry.route -notin (@('Direct','Follow')+(Get-ProfileKeys))){throw '程序启动代理配置无效，请从备份恢复。'}
+        if(-not [IO.Path]::IsPathRooted($entry.path) -or $entry.path -notmatch '(?i)\.exe$' -or $entry.path -match '["\r\n\x00]' -or $entry.adapter -notin @('chromium','qtwebengine','environment') -or $entry.route -notin (@('Direct','Follow')+(Get-ProfileKeys))){throw '程序启动代理配置无效，请从备份恢复。'}
     }
     @($state.entries)
 }
@@ -93,13 +115,14 @@ function Set-ProgramLaunchEnvironment([Diagnostics.ProcessStartInfo]$StartInfo,$
 }
 function Get-ProgramLaunchPlan([string]$Executable,[string]$Route) {
     $adapter=Get-ProgramProxyAdapter $Executable
-    if($adapter -notin @('chromium','qtwebengine')){throw '此程序暂不支持启动代理适配；不能把保存设置当作流量已接管。可使用已配置的分流引擎。'}
+    if($adapter -notin @('chromium','qtwebengine','environment')){throw '此程序尚未配置启动方式；可明确选择代理环境启动。仅保存引擎规则不能强制接管流量。'}
     foreach($p in $script:Profiles.Profiles){if($Executable -ieq $p.CorePath -or $Executable -ieq $p.AppPath){throw '不能给代理程序自身设置启动代理，以免形成回路。'}}
     $ingress=Get-ManagedProgramIngress $Executable
     if($ingress){
         $endpoint=Get-ManagedIngressEndpoint $ingress
         $environment=[pscustomobject]@{HTTP_PROXY=$endpoint;HTTPS_PROXY=$endpoint;ALL_PROXY=$endpoint;NO_PROXY='localhost,127.0.0.1,::1'}
         $plan=[pscustomobject]@{Path=$Executable;Route=$ingress.route;Adapter=$adapter;Arguments=@(('--proxy-server='+$endpoint),'--proxy-bypass-list=localhost;127.0.0.1;[::1]');Environment=$environment;Endpoint=$endpoint;IngressId=$ingress.id}
+        if($adapter -eq 'environment'){$plan.Arguments=@()}
         if($adapter -eq 'qtwebengine'){
             $plan|Add-Member NoteProperty QtWebEngineArguments @($plan.Arguments);$plan.Arguments=@()
             $preview=New-Object Diagnostics.ProcessStartInfo;$preview.UseShellExecute=$false;Set-ProgramLaunchEnvironment $preview $plan
@@ -123,11 +146,71 @@ function Get-ProgramLaunchPlan([string]$Executable,[string]$Route) {
         $arguments=@(("--proxy-server="+$endpoint),'--proxy-bypass-list=localhost;127.0.0.1;[::1]')
     }
     $plan=[pscustomobject]@{Path=$Executable;Route=$key;Adapter=$adapter;Arguments=$arguments;Environment=[pscustomobject]$environment;Endpoint=$endpoint}
+    if($adapter -eq 'environment'){throw '代理环境启动缺少固定程序入口，请重新设置此程序线路。'}
     if($adapter -eq 'qtwebengine'){
         $plan|Add-Member NoteProperty QtWebEngineArguments @($plan.Arguments);$plan.Arguments=@()
         $preview=New-Object Diagnostics.ProcessStartInfo;$preview.UseShellExecute=$false;Set-ProgramLaunchEnvironment $preview $plan
     }
     return $plan
+}
+# Native command-line/background programs can opt into a private proxy environment.
+# No binary-name allowlist and no claim that arbitrary sockets obey proxy variables.
+function Get-EnvironmentProgramAccessPlan([string]$Path,[string]$Route) {
+    $plan=[pscustomobject]@{Version=1;Kind='environment';Path=$Path;Route=$Route;CreatedAt=[DateTime]::UtcNow.ToString('o');Revision='';Identity='';CanApply=$false;BlockedReason='';Message=''}
+    try{
+        $script:Profiles=Read-ProfileSettings
+        $path=Resolve-ProgramTarget $Path;$plan.Path=$path;Assert-ManagedRoute $Route -AllowFollow
+        if($script:Profiles.Routing.Adapter -ne 'standalone'){throw '请先在代理入口中配置流向独立内核，保留已有设置。'}
+        if((Get-ProgramProxyAdapter $path) -notin @('','environment')){throw '此程序已有网页组件适配，请使用现有启动方式。'}
+        foreach($name in @('Qt5Core.dll','Qt5Network.dll','Qt5WebEngineCore.dll','Qt6Core.dll','Qt6Network.dll','Qt6WebEngineCore.dll')){if(Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($path)) $name)){throw 'Qt 安装组件不完整或版本不一致，请修复原程序后使用网页组件适配。'}}
+        $context=New-ProgramIdentityContext;$identity=Get-ProgramIdentityDescriptor $path $context
+        if(-not $identity.FileId -or $identity.PathStatus -ne 'Available'){throw '程序文件身份无法核验。'}
+        foreach($profile in $script:Profiles.Profiles){if((Test-ProgramPathEquivalent $path $profile.AppPath $context) -or (Test-ProgramPathEquivalent $path $profile.CorePath $context)){throw '不能给代理程序自身配置代理环境，以免形成回路。'}}
+        $snapshot=Get-RoutingSnapshot
+        if(@(@($snapshot.entries)+@($snapshot.programIngresses)+@($snapshot.launchEntries)|Where-Object {$_.path -ine $path -and (Test-ProgramPathEquivalent $_.path $path $context)}).Count){throw '同一程序存在不同路径记录，请先修复冲突。'}
+        foreach($group in @('entries','programIngresses','launchEntries')){if(@($snapshot.$group|Where-Object {$_.path -ieq $path}).Count -gt 1){throw '此程序记录重复，请先处理冲突。'}}
+        $plan.Revision=Get-NetworkRepairRevision (Get-SystemSnapshot) (Get-UserProxyEnv)
+        $plan.Identity=Get-RuleMaintenanceHash (ConvertTo-RuleMaintenanceBytes @($identity.FileId,$identity.CanonicalPath))
+        $plan.CanApply=$true
+        $plan.Message='为所选 EXE 建立固定代理入口，线路为「'+(Get-RouteName $Route)+'」。仅在流向启动的新进程中设置 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 和本地绕过；不会改系统或用户变量、桌面入口，也不会结束正在运行的程序。原来此 EXE 的引擎规则将替换为启动入口，其他程序、网站及备用线路保留。'+"`r`n`r`n"+'适用于会读取代理变量的命令行和后台程序。保存后先正常退出目标，再按此线路打开；已经运行的 Codex、其他终端启动的命令、忽略变量的 OAuth 或原生网络请求不会被强制改线。外部 VPN/TUN 仍控制系统路由，流向的“直连”表示不经过应用代理，不保证绕过 VPN。'
+    }catch{$plan.BlockedReason=$_.Exception.Message;$plan.Message=$plan.BlockedReason}
+    $plan
+}
+function Set-EnvironmentProgramAccess($Plan,[switch]$Confirmed,[switch]$ReuseExisting) {
+    if(-not $Confirmed){throw '请先预览并确认代理环境启动的适用范围。'}
+    Use-ChangeLock {
+        if($ReuseExisting){
+            $saved=@((Get-ProgramLaunchEntries)|Where-Object {$_.path -ieq $Plan.Path})
+            if($saved.Count -ne 1 -or $saved[0].adapter -cne 'environment' -or -not (Get-ManagedProgramIngress $Plan.Path)){throw '原代理环境接入已撤销或改变，未重新建立入口；请重新预览并确认。'}
+        }
+        $age=([DateTime]::UtcNow-[DateTime]::Parse([string]$Plan.CreatedAt).ToUniversalTime()).TotalSeconds
+        if($Plan.Version -ne 1 -or $Plan.Kind -cne 'environment' -or $age -lt 0 -or $age -gt 120){throw '代理环境预览无效或已过期，请重新预览。'}
+        $fresh=Get-EnvironmentProgramAccessPlan $Plan.Path $Plan.Route
+        if(-not $fresh.CanApply -or $fresh.Revision -cne $Plan.Revision -or $fresh.Identity -cne $Plan.Identity){throw '程序、网络或线路记录已变化，请重新预览；当前设置保留。'}
+        $before=Get-RoutingSnapshot;$windows=Get-SystemSnapshot;$environment=Get-UserProxyEnv
+        Ensure-ManagedGateway -PreserveWindowsSettings|Out-Null
+        $current=Get-RoutingSnapshot;$compare=Copy-RoutingSnapshot $before;$compare.installed=$current.installed
+        if(-not $before.installed -and -not $before.defaultRoute){$compare.defaultRoute=$current.defaultRoute}
+        if(-not (Test-SameRouting $compare $current)){throw '服务启动期间程序或网站规则已变化，未覆盖新记录。'}
+        $id=Get-ProgramIdentityDescriptor $fresh.Path (New-ProgramIdentityContext)
+        if((Get-RuleMaintenanceHash (ConvertTo-RuleMaintenanceBytes @($id.FileId,$id.CanonicalPath))) -cne $fresh.Identity -or (Get-ProgramProxyAdapter $fresh.Path) -notin @('','environment')){throw '启动期间程序文件或适配已变化，未写入入口。'}
+        $next=Copy-RoutingSnapshot $current
+        $entry=$current.programIngresses|Where-Object {$_.path -ieq $fresh.Path}|Select-Object -First 1
+        if($entry){$entry=Copy-RoutingSnapshot $entry;$entry.route=$fresh.Route}
+        else{if(@($current.programIngresses).Count -ge 64){throw '程序入口已达上限。'};$entry=[pscustomobject]@{id=[Guid]::NewGuid().ToString('N');path=$fresh.Path;port=(New-ManagedIngressPort $current);route=$fresh.Route;identity=$id}}
+        $next.entries=@($current.entries|Where-Object {$_.path -ine $fresh.Path})
+        $next.programIngresses=@($current.programIngresses|Where-Object {$_.path -ine $fresh.Path})+@($entry)
+        $next.launchEntries=@($current.launchEntries|Where-Object {$_.path -ine $fresh.Path})+@([pscustomobject]@{path=$fresh.Path;route='Follow';adapter='environment';identity=$id})
+        $next|Add-Member NoteProperty resetIngressSelections @($entry.id) -Force
+        $verify={
+            $live=Invoke-AppRouter @{action='status'};$loaded=$live.programIngresses|Where-Object {$_.id -ceq $entry.id -and $_.path -ieq $entry.path -and [int]$_.port -eq [int]$entry.port}|Select-Object -First 1
+            $wanted=$fresh.Route;if($wanted -eq 'Follow'){$wanted=$live.effectiveDefaultRoute}
+            if(-not $live.available -or -not $loaded.ready -or -not $loaded.loaded -or $loaded.effectiveRoute -cne $wanted -or $wanted -in @('Blocked','Unknown','')){throw '固定入口或实际选路尚未就绪，不能确认完成。'}
+            if(-not (Test-SameSnapshot $windows (Get-SystemSnapshot)) -or -not (Test-SameEnv $environment (Get-UserProxyEnv))){throw '外部网络设置已变化，未确认此次接入。'}
+        }.GetNewClosure()
+        $backup=Invoke-ManagedRoutingChange $current $next $verify
+        [pscustomobject]@{Backup=$backup;Managed=$true;IngressId=$entry.id;Message='代理环境启动入口已保存并载入，系统代理和用户变量保留。请先正常退出所选程序，再点击“按此线路打开”。只对遵循代理变量的新进程及子进程生效；实际连接和登录仍需核验。'}
+    }
 }
 function Get-ProgramShortcutRecords {
     $path=Join-Path $script:DataRoot 'program-shortcuts.json'
@@ -238,12 +321,12 @@ function Start-ManagedProgram([string]$Executable,$Cancellation=$null) {
     $entry=$ingress;if(-not $entry){$entry=Get-ProgramLaunchEntries|Where-Object {$_.path -ieq $Executable}|Select-Object -First 1}
     if(-not $entry){throw '此程序尚未配置启动代理，请先在管理器中指定线路。'}
     $launchAdapter=Get-ProgramProxyAdapter $Executable
-    if($launchAdapter -notin @('chromium','qtwebengine') -or ($entry.adapter -and $entry.adapter -cne $launchAdapter)){throw '程序启动适配已改变，原设置保持不变。请重新检查程序路径和线路。'}
+    if($launchAdapter -notin @('chromium','qtwebengine','environment') -or ($entry.adapter -and $entry.adapter -cne $launchAdapter)){throw '程序启动适配已改变，原设置保持不变。请重新检查程序路径和线路。'}
     if(@(Get-ProgramFamily $Executable @(Get-ProcessInventory)).Count){throw '该程序仍在运行。请先保存任务并完整退出，再从这个入口打开，才能让界面和联网子进程同时使用新线路。没有结束现有进程。'}
     if(Test-ManagedLaunchCancelled $Cancellation){throw '启动检查已取消，未启动程序。'}
     $limitedDirect=$false;$launchNotice=''
     if($ingress){
-        if($launchAdapter -eq 'qtwebengine'){Ensure-ManagedGateway -PreserveWindowsSettings|Out-Null}else{Ensure-ManagedGateway|Out-Null}
+        Ensure-ManagedGateway -PreserveWindowsSettings|Out-Null
         $ready=Wait-ManagedProgramIngressReady $ingress -Cancellation $Cancellation
         if($ready.LimitedDirect){
             $limitedDirect=$true;$launchNotice=' 默认代理出口已暂停，仅匹配直连网站例外的请求可用；其他请求仍会失败，请切换到可用代理后重试。'
@@ -260,6 +343,7 @@ function Start-ManagedProgram([string]$Executable,$Cancellation=$null) {
     $plan=Get-ProgramLaunchPlan $Executable $entry.route
     if($launchAdapter -cne $plan.Adapter){throw '启动检查期间程序适配已改变，未启动程序。请重新检查程序路径和线路。'}
     if($plan.Adapter -eq 'qtwebengine'){$launchNotice+=' 已设置受支持的 Qt 网页组件；其他独立联网组件、系统隧道及登录结果仍需验证。'}
+    if($plan.Adapter -eq 'environment'){$launchNotice+=' 仅本次启动及继承环境的子进程使用代理变量；忽略变量的请求、外部终端启动和 VPN/TUN 出口仍待核验。'}
     $psi=New-Object Diagnostics.ProcessStartInfo;$psi.FileName=$Executable;$psi.WorkingDirectory=[IO.Path]::GetDirectoryName($Executable)
     $psi.UseShellExecute=$false;$psi.CreateNoWindow=$false;$psi.Arguments=(@($plan.Arguments|ForEach-Object {ConvertTo-ProgramArgument $_}) -join ' ')
     Set-ProgramLaunchEnvironment $psi $plan
@@ -317,7 +401,7 @@ function Set-ProgramDesktopMode([string]$Executable,[ValidateSet('InApp','Separa
         $snapshot=Get-RuleMaintenanceSnapshot $executable
         if(-not $ExpectedRevision -or $snapshot.Fingerprint -cne $ExpectedRevision){throw '程序设置已变化，请重新打开启动方式。'}
         if($Mode -ne 'InApp'){
-            if((Get-ProgramProxyAdapter $executable) -notin @('chromium','qtwebengine') -or -not @(@($snapshot.Launch.entries)+@($snapshot.Engine.programIngresses)|Where-Object {$_.path -ieq $executable}).Count){throw '请先为受支持的程序指定线路，再设置代理启动入口。'}
+            if((Get-ProgramProxyAdapter $executable) -notin @('chromium','qtwebengine','environment') -or -not @(@($snapshot.Launch.entries)+@($snapshot.Engine.programIngresses)|Where-Object {$_.path -ieq $executable}).Count){throw '请先为受支持的程序指定线路，再设置代理启动入口。'}
         }
         Initialize-ProgramShortcutSupport
         $backup=New-RuleMaintenanceBackup $snapshot 'desktop-mode' $executable $executable

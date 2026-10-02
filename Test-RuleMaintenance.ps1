@@ -36,7 +36,7 @@ function Invoke-AppRouter($Request){
     $script:ReplaceCalls++
     $file=Read-RuleMaintenanceFile (Join-Path $script:DataRoot 'app-rules.json');$settings=Read-RuleMaintenanceFile (Join-Path $script:DataRoot 'config.json')
     if($Request.expectedStateHash -cne $file.TextHash -or $Request.expectedSettingsHash -cne $settings.TextHash){throw 'Stale engine compare and swap rejected'}
-    $state=[pscustomobject]@{version=2;installed=$true;entries=@($Request.entries);defaultRoute=$Request.defaultRoute;changedAt=[DateTime]::UtcNow.ToString('o')}
+    $state=[pscustomobject]@{version=3;installed=$true;entries=@($Request.entries);defaultRoute=$Request.defaultRoute;programIngresses=@($Request.programIngresses);siteRules=@($Request.siteRules);changedAt=[DateTime]::UtcNow.ToString('o')}
     $text=$state|ConvertTo-Json -Depth 16;[IO.File]::WriteAllText($file.Path,$text,(New-Object Text.UTF8Encoding($false)))
     [pscustomobject]@{ok=$true;stateHash=(Get-RuleMaintenanceHash ([Text.Encoding]::UTF8.GetBytes($text)))}
 }
@@ -136,6 +136,26 @@ try{
     Throws {Repair-ProgramRule (Get-ProgramRuleRepairPlan $oldExe)} '保留外部修改'
     $engine=Get-Content -LiteralPath (Join-Path $script:DataRoot 'app-rules.json') -Raw|ConvertFrom-Json
     Check ($engine.external -eq 'preserve' -and $script:ReplaceCalls -eq 1) 'Mixed rollback never overwrites an engine state edited after the successful replace'
+    # A verified upgrade must migrate both the stable ingress and the explicitly
+    # saved native adapter, while preserving the port and unrelated site policy.
+    $realAdapter=${function:Get-ProgramProxyAdapter};$realCompatibility=${function:Test-ProgramLaunchAdapterCompatibility}
+    function Get-ProgramProxyAdapter($Path){$script:RepairAdapter}
+    function Test-ProgramLaunchAdapterCompatibility($Path,$Adapter){$Adapter -ceq $script:RepairAdapter -or ($Adapter -eq 'environment' -and $script:RepairAdapter -eq '')}
+    foreach($adapter in @('qtwebengine','environment')){
+        New-TestCase ('managed-'+$adapter) -Engine
+        $script:RepairAdapter=$(if($adapter -eq 'environment'){''}else{$adapter})
+        $engine=Get-Content (Join-Path $script:DataRoot 'app-rules.json') -Raw|ConvertFrom-Json
+        $engine.entries=@();$engine|Add-Member programIngresses @(@{id=('3'*32);path=$oldExe;port=19080;route='upstream'})
+        $engine|Add-Member siteRules @(@{id=('4'*32);domain='example.invalid';type='domain';scope=('3'*32);route='Direct'})
+        Write-LocalJson (Join-Path $script:DataRoot 'app-rules.json') $engine
+        Write-LocalJson (Join-Path $script:DataRoot 'program-proxies.json') @{version=1;entries=@(@{path=$oldExe;adapter=$adapter;route='Follow'})}
+        Repair-ProgramRule (Get-ProgramRuleRepairPlan $oldExe)|Out-Null
+        $engine=Get-Content (Join-Path $script:DataRoot 'app-rules.json') -Raw|ConvertFrom-Json
+        $launch=Get-ProgramLaunchEntries
+        Check ($engine.programIngresses[0].path -ieq $newExe -and $engine.programIngresses[0].port -eq 19080 -and $engine.programIngresses[0].route -eq 'upstream') ($adapter+' repair retains the stable ingress and route')
+        Check ($launch[0].adapter -ceq $adapter -and $launch[0].path -ieq $newExe -and $engine.siteRules[0].scope -ceq ('3'*32)) ($adapter+' repair retains the explicit adapter and site scope')
+    }
+    ${function:Get-ProgramProxyAdapter}=$realAdapter;${function:Test-ProgramLaunchAdapterCompatibility}=$realCompatibility
     Write-Output ('PASS: '+$script:Pass+' rule maintenance checks; isolated files, real temporary shortcuts, and a conditional engine fixture.')
 }finally{
     $resolved=[IO.Path]::GetFullPath($qa);$prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'

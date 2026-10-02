@@ -136,6 +136,48 @@ namespace FlowSwitch.UI
             } finally {adjusting=false;}
         }
     }
+    // Reserve measured toolbar/details space while the native list keeps its own scroll.
+    public sealed class ProgramGrid : TableLayoutPanel
+    {
+        private bool adjusting;
+        private int ContentHeight(Control control,int width)
+        {
+            if(control==null || !control.Visible)return 0;
+            var table=control as TableLayoutPanel;
+            if(table==null)return control.GetPreferredSize(new Size(Math.Max(1,width),0)).Height+control.Margin.Vertical;
+            int height=table.Padding.Vertical;
+            int inner=Math.Max(1,width-table.Padding.Horizontal);
+            for(int row=0;row<table.RowCount;row++) {
+                int required=0;
+                foreach(Control child in table.Controls) if(table.GetRow(child)==row)
+                    required=Math.Max(required,ContentHeight(child,Math.Max(1,inner-child.Margin.Horizontal)));
+                if(row<table.RowStyles.Count && table.RowStyles[row].SizeType==SizeType.Absolute)
+                    required=Math.Max(required,(int)Math.Ceiling(table.RowStyles[row].Height));
+                height+=required;
+            }
+            return height+control.Margin.Vertical;
+        }
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            if(adjusting) {base.OnLayout(e);return;}
+            adjusting=true;
+            try {
+                int width=Math.Max(1,ClientSize.Width-Padding.Horizontal);
+                int minimum=Padding.Vertical;
+                foreach(Control child in Controls) {
+                    if(GetRow(child)==1) {
+                        var host=child as ListHost;
+                        // Header plus two real native item rows, using the current scaled font.
+                        minimum+=(host==null?Font.Height+8:host.List.Font.Height+8)
+                            +(host==null?Font.Height*2:Math.Max(host.List.Font.Height,host.List.SmallImageList.ImageSize.Height)*2)
+                            +child.Margin.Vertical;
+                    } else minimum+=ContentHeight(child,Math.Max(1,width-child.Margin.Horizontal));
+                }
+                if(MinimumSize.Height!=minimum)MinimumSize=new Size(0,minimum);
+                base.OnLayout(e);
+            } finally {adjusting=false;}
+        }
+    }
     public sealed class ScrollablePage : TabPage
     {
         private bool adjusting;
