@@ -1,24 +1,24 @@
-# 3.9.9 本机维护候选（2026-10-04）
+# 流向 FlowSwitch：Windows 3.9.9 预览版 / 稳定版 3.9.6
 
-本轮基于独立 patrol-3.9.9 分支 （历史来源已重写，修订对应关系见发布页 BUILD.txt） 校正并交付本机候选；不是 GitHub 正式发行。原方案未增加自动测试且漏打包白名单，本轮补安全修复与测试。智能体检默认被动只读，明确修复使用现有网络诊断事务；机器级、hosts、游戏绕过及第三方 TUN 不自动修改。实际测试见 TEST_REPORT.md，用法见 USER_GUIDE.md 和「智能体检-使用说明.md」。
+**3.9.9 是可选预览版，稳定版和自动更新通道继续使用 3.9.6。** 本次新增被动只读体检，收紧修复事务和隐私边界，修正维护页第三排的布局，并补齐测试与成品包。它管理你已有的代理，不提供 VPN 服务、订阅或节点。
 
-下文保留上一阶段 3.9.8 发布准备文档；其 Release 仍因计费网络预算处于草稿且附件未上传，链接不能当作已公开下载的证明。本轮不恢复该上传，不发布 3.9.9。
+**[3.9.9 预览版发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.9-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/FlowSwitch-v3.9.9-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/FlowSwitch-v3.9.9-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/BUILD.txt)
 
-# 流向 FlowSwitch：Windows 3.9.8 预览版 / 稳定版 3.9.6
+## 这版怎么用
 
-**3.9.8 是可选预览版，稳定版和自动更新通道继续使用 3.9.6。** 复用已验证的 Windows 程序包与冻结源码包；修复共存入口误停、停后冷启动和接入状态误导，补齐原生 EXE 的可选环境接入、可信跨目录子进程观察和隧道路由诊断。本轮只做发布收尾，没有重新构建、改变本机网络或安装。
+- 全局选线：在「代理入口」准备可用代理，再到「网络切换」选择线路并明确应用。
+- 单程序选线：在「程序线路」选择准确 EXE，设置线路并核对接入预览。支持启动适配的程序通过「按此线路打开」接入固定入口；环境适配在「更多设置 → 启动与桌面入口 → 命令行 / 后台代理环境…」中预览。首次接入前保存工作并正常退出目标程序及启动源。
+- 网络排查：在「检查与维护 → 维护与恢复 → 只读体检」检查设置；需要修复时到「连接检查」查看并确认修复计划。机器级变量、hosts、游戏绕过和第三方 TUN 只检查，不自动改写或提权。
 
-**[3.9.8 预览版发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.8-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/FlowSwitch-v3.9.8-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/FlowSwitch-v3.9.8-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.8-preview.1/BUILD.txt)
+[完整操作与撤回](USER_GUIDE.md) · [体检说明](智能体检-使用说明.md) · [3.9.9 更新与验收范围](.github/release-notes-3.9.9-preview.1.md)
 
-使用步骤：先在「代理入口」准备自己的可用代理；在「程序线路」选择准确 EXE，设置线路并核对接入预览。已核验的 Chromium/Electron 或 Qt WebEngine 程序通过「按此线路打开」获得固定入口；明确支持环境代理的原生 EXE 使用「更多设置 → 启动与桌面入口 → 命令行 / 后台代理环境…」预览确认。首次接入前自行保存工作并正常退出目标及其启动源；旧进程不会因保存线路而刷新缓存或继承环境。[完整操作、撤回和限制](USER_GUIDE.md)
+新增 40 项智能体检隔离测试；完整 47 组 PowerShell、7 组 Node 回归、86 项实际控件检查、24 项 Windows 成品检查通过。小工作区 100% / 125% / 150% 布局与字体模拟各 82 张控件截图通过可达性和文字边界检查。曾出现一次离线撤回查询间歇失败，原因尚未确定；原测试复测及最终完整回归通过，保留失败记录。[详细验证记录](TEST_REPORT.md)
 
-**Qt 游戏真实登录、Codex 请求与 OAuth/OAuth 登录回传、目标程序请求发送、VPN/TUN 物理出口及长期在线仍未验收。** 只对进入固定入口的连接调配出口；直连选择不保证绕过外部隧道，忽略代理的请求、独立服务与 UDP/QUIC 不保证覆盖。保存线路、观察到 TCP、入口就绪和登录成功是不同状态。
+**真实目标程序请求、OAuth 回传、目标程序请求、游戏登录及长期在线仍需目标电脑验收。** 保存线路不会刷新旧进程的环境和缓存；只调配进入固定入口的连接。直连不保证绕过外部 VPN/TUN，独立服务、UDP/QUIC 不保证覆盖。规则保存、TCP 观察、入口就绪和登录成功是不同状态。
 
-隔离回归与最终程序包已有验证记录；目标环境安装与联网须独立验收。本次独立复核 175 项固定源码与 54 项运行文件、版本和组件绑定。原验证与缺口见 [验证记录](TEST_REPORT.md)，发布范围见 [3.9.8 预览说明](.github/release-notes-3.9.8-preview.1.md)。固定源码提交为 [修订来源说明](https://github.com/NOXEVYR/proxy-switch/releases)。源码 ZIP 保留打包时“本地候选、尚未发布”的记录，后续公开状态以本页、发布页和 BUILD.txt 为准。历史交付记录中的 ZIP 字节对应当时版本；去个人化修订后的摘要以 BUILD.txt 为准，本预览不提供稳定差分更新资产。
+程序包包含 57 项运行文件，源码清单包含 179 项文件，源码冻结提交为 [修订来源说明](https://github.com/NOXEVYR/proxy-switch/releases)。历史交付记录中的 ZIP 对应当时版本；去个人化修订后的摘要以 BUILD.txt 为准；源码 ZIP 内 README/TEST_REPORT 是打包时的「本机候选」记录。之后仅公开说明更新，发布状态及对应关系以本页、发布页和 BUILD.txt 为准。本预览不提供稳定差分更新资产。
 
-![3.9.8 程序线路隔离 Demo：1.25 倍布局模拟、备用字体，非实机联网验收](assets/preview-3.9.8/programs-demo.png)
-
-图来自保存的隔离回归，使用演示程序与样例入口；主窗口/主题源摘要对应冻结源码，捕获时有受控测试注入和备用字体替换，并非未经修改的最终 EXE 实机截图。[更多演示图与素材来源](assets/preview-3.9.8/README.md)
+3.9.8 发布准备记录继续保留，其 Release 仍为未上传附件的草稿，不能作为公开下载入口。下方保留 3.9.7 预览版和 3.9.6 稳定版。
 
 ## 保留的 Windows 3.9.7 预览版
 
