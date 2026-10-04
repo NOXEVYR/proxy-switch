@@ -247,11 +247,12 @@ function Get-NetworkDiagnosis([switch]$Probe) {
     $report.Message=$lines -join "`r`n"
     $report
 }
-function Repair-NetworkDiagnosis([string]$Revision) {
+function Repair-NetworkDiagnosis([string]$Revision,[string]$ExpectedAction='') {
     if(-not $Revision){throw '请先排查网络，再修复。'}
     $result=Use-ChangeLock {
         $plan=Get-NetworkDiagnosis
         if($plan.Revision -cne $Revision){throw '网络配置已变化，未执行旧修复方案。请重新排查。'}
+        if($ExpectedAction -and $plan.RepairAction -cne $ExpectedAction){throw '入口或守护状态已变化，修复动作与已确认计划不同；请重新排查。'}
         switch($plan.RepairAction){
             'repair-dead-entry'{Repair-DeadSystemEntry $Revision}
             'clear-dead-environment'{Repair-DeadProxyEnvironment $Revision}

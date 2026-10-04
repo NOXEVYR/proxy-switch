@@ -9,6 +9,7 @@ foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBacke
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UiGuidance.ps1') -Destination $qa
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'SmartPatrol.ps1') -Destination $qa
 $checks=@'
         $script:Checks=0
         function Check-UI($Value,[string]$Message){if(-not $Value){throw $Message};$script:Checks++}
@@ -21,13 +22,21 @@ $checks=@'
         }
         $tabs.SelectedTab=$toolsPage;[Windows.Forms.Application]::DoEvents()
         Reveal-Control $networkDiagnoseButton
+        $realRoot=$script:DataRoot
+        function Start-Process {param($FilePath,$ArgumentList,$WorkingDirectory);$script:PatrolDispatch=[pscustomobject]@{File=$FilePath;Args=$ArgumentList;Directory=$WorkingDirectory}}
+        Reveal-Control $smartPatrolButton
+        $smartPatrolButton.PerformClick()
+        Check-UI ($script:PatrolDispatch.Args -notmatch '-Fix' -and $script:PatrolDispatch.Args.Contains('"'+$realRoot+'"')) 'Actual patrol control dispatches read-only console with current data root'
+        Check-UI ($script:PatrolDispatch.File -ceq (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')) 'Patrol control uses absolute Windows shell'
+        Check-UI ($script:DataRoot -ceq $realRoot) 'Loading patrol library preserves active UI data root'
+        Reveal-Control $networkDiagnoseButton
         $networkDiagnoseButton.PerformClick()
         Check-UI ($script:Requested.Kind -eq 'NetworkDiagnose') 'Network diagnosis button dispatches the read-only diagnostic worker'
         $script:Requested=$null;$script:NetworkDiagnosis=$null;$networkRepairButton.PerformClick()
         Check-UI ($null -eq $script:Requested) 'Repair without a diagnosis cannot change settings'
         $script:CleanSession=[pscustomobject]@{Status=[pscustomobject]@{Phase='active';Message='Isolated comparison fixture'}};Set-UiActionAvailability
         $priorSize=$form.Size;$form.Size=$form.MinimumSize;[Windows.Forms.Application]::DoEvents()
-        foreach($control in @($networkDiagnoseButton,$networkRepairButton,$cleanStopButton,$updateButton,$automaticUpdates)){
+        foreach($control in @($networkDiagnoseButton,$networkRepairButton,$cleanStopButton,$updateButton,$automaticUpdates,$smartPatrolButton)){
             Reveal-Control $control
             Check-UI ($control.Left -ge 0 -and $control.Top -ge 0 -and $control.Right -le $control.Parent.ClientSize.Width -and $control.Bottom -le $control.Parent.ClientSize.Height) ('Grouped tools action fits at minimum width and height: '+$control.Text)
         }

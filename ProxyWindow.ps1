@@ -201,10 +201,11 @@ $null=New-TaskCard $maintenanceCards 0 1 '启动、托盘与恢复说明' '关�
 $null=New-TaskCard $maintenanceCards 1 1 '备用线路和服务设置' '想在代理退出后自动接替？先登记备用入口，再设置接替顺序。服务设置位于代理入口页。' '前往代理入口' {$tabs.SelectedTab=$proxyPage}
 $maintenanceCards.RowCount=3
 [void]$maintenanceCards.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Absolute,210)))
-$smartPatrolButton=New-TaskCard $maintenanceCards 0 2 '智能体检（游戏/代理环境）' '六项体检：死代理变量（用户级+机器级）、系统代理归属、游戏域名 bypass、IP 一致性地基、网关入口、TUN 共存状态。发现已证实的死配置可一键清理，修复前自动备份、可回滚。' '开始智能体检' {
+$smartPatrolButton=New-TaskCard $maintenanceCards 0 2 '智能体检：先查原因' '只读检查代理变量、系统入口、绕过设置、hosts 记录、配置入口和双栈路由。不会改机器变量、游戏绕过或第三方 TUN；需要处理时，到「连接检查」确认修复计划。' '只读体检' {
     $patrolScript=Join-Path $script:UiRoot 'SmartPatrol.ps1'
     if(-not (Test-Path -LiteralPath $patrolScript)){Write-Activity '未找到 SmartPatrol.ps1，无法体检。';return}
-    [void](Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$patrolScript`"",'-Fix') -WorkingDirectory $script:UiRoot)
+    . $patrolScript -Library
+    Start-SmartPatrolConsole -DataDirectory $script:DataRoot -ScriptPath $patrolScript
 }
 $recordsGrid=New-Grid $recordsPage 3 @(108,46,-1)
 $clientBar=New-Grid $null 2 @(44,-1);$recordsGrid.Controls.Add($clientBar,0,0)

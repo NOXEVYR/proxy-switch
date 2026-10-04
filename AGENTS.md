@@ -1,8 +1,9 @@
 ﻿# 3.9.9 智能体检约定
 
-- SmartPatrol 独立于 NetworkDiagnostics：只读巡检为默认，-Fix 需显式触发；所有修改先写 patrol 备份快照再执行，机器级清理经提权子进程完成并回传结果文件。
-- 判定沿用三态：本地端口仅在确认无监听时判死；未知与远程入口不动作；bypass 修复恒保内网基础段、游戏/探测域名与 `<local>`，不删除用户自定义条目。
-- TUN 只观察不对抗：与游戏 IP 探测一致性联动判定，hosts 优先于 fake-ip DNS 时为共存正常态；不自动启停其他客户端 TUN 或改写其配置。
+- SmartPatrol 独立控制台默认被动只读，-Fix 需显式触发并确认本次共享网络诊断计划，120秒内重新核验 revision/动作后调用 Repair-NetworkDiagnosis 的锁、备份与归属事务。机器级只读，拒绝 MachineOnly；不自动提权。
+- 判定复用 Get-LocalEndpointObservation 与结构化 TCP 三态，不把查询失败或地址族不明确视为死亡；日志仅存计数/固定状态，不写原变量、地址、凭据、IP或现场路径。自定义 DataDirectory 必须传给控制台。
+- 不默认补个人游戏/IP域名，不主动进行HTTP回显，不改hosts或第三方TUN。双栈路由只报证据；未见证据不等于TUN关闭，监听或任意IP回应不证明实际出口/账号/游戏可用。
+- Test-SmartPatrol 纳入 Test-All、源码清单；脚本、cmd和使用说明纳入Windows清单。历史人工演练文字不是自动测试收据；交付必须重新绑定EXE、脚本版本、非自引用manifest与登记摘要。
 - UI 任务卡仅启动独立控制台进程，不进入 Start-Work 任务框架；新增巡检项须同步更新 SmartPatrol 头部说明与巡检日志字段，改动 manifest 内文件后必须重建清单（启动器校验哈希）。
 
 # 3.9.5 程序接入约定

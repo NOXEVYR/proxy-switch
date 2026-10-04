@@ -123,14 +123,16 @@ namespace FlowSwitch.UI
             if(adjusting) {base.OnLayout(e);return;}
             adjusting=true;
             try {
-                if(RowStyles.Count>=2) {
+                if(RowStyles.Count>=RowCount && RowCount>0) {
                     int minimum=(int)Math.Ceiling(minimumCardHeight);
                     int available=Math.Max(0,ClientSize.Height-Padding.Vertical);
-                    int first=Math.Max(minimum,available/2);
-                    int second=Math.Max(minimum,available-first);
-                    RowStyles[0].SizeType=RowStyles[1].SizeType=SizeType.Absolute;
-                    RowStyles[0].Height=first; RowStyles[1].Height=second;
-                    AutoScrollMinSize=new Size(0,minimum*2+Padding.Vertical);
+                    int rows=RowCount;
+                    int height=Math.Max(minimum,available/rows);
+                    for(int row=0;row<rows;row++) {
+                        RowStyles[row].SizeType=SizeType.Absolute;
+                        RowStyles[row].Height=row==rows-1 ? Math.Max(minimum,available-height*(rows-1)) : height;
+                    }
+                    AutoScrollMinSize=new Size(0,minimum*rows+Padding.Vertical);
                 }
                 base.OnLayout(e);
             } finally {adjusting=false;}

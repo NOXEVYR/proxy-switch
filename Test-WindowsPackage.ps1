@@ -14,6 +14,12 @@ $config=@{Version=3;Profiles=@(@{Id='qa';Name='QA explicit directory';Protocol='
 [IO.File]::WriteAllText((Join-Path $dataRoot 'config.json'),($config|ConvertTo-Json -Depth 6),$utf8)
 $script:Pass=0
 function Check($Value,$Message){if(-not $Value){throw $Message};$script:Pass++}
+$packageManifest=@(Get-Content -LiteralPath (Join-Path $relocated 'manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json)
+Check ($packageManifest.path -notcontains 'manifest.json' -and $packageManifest.path -notcontains 'update-install.json') 'Manifest excludes its own hash and installation registration.'
+foreach($required in @('app/SmartPatrol.ps1','智能体检.cmd','智能体检-使用说明.md')){Check ($packageManifest.path -contains $required -and (Test-Path -LiteralPath (Join-Path $relocated $required))) ('Patrol delivered and registered: '+$required)}
+. (Join-Path $relocated 'app/SmartPatrol.ps1') -Library
+$patrolPlan=Get-SmartPatrolLaunchPlan -DataDirectory $dataRoot -ScriptPath (Join-Path $relocated 'app/SmartPatrol.ps1')
+Check ($patrolPlan.Arguments.Contains('"'+$dataRoot+'"') -and $patrolPlan.Arguments -notmatch '-Fix') 'Relocated package patrol uses explicit data directory and defaults read-only.'
 function Invoke-Fixture([string]$Arguments){
     $psi=New-Object Diagnostics.ProcessStartInfo
     $psi.FileName=$exe;$psi.Arguments=$Arguments;$psi.WorkingDirectory=$qaRoot

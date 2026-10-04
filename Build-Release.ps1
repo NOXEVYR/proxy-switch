@@ -6,6 +6,7 @@ if($productVersion -notmatch '^\d+\.\d+\.\d+$'){throw '产品版本无效'}
 $destinationPath=[IO.Path]::GetFullPath($Destination)
 if(Test-Path -LiteralPath $destinationPath){throw '输出目录已存在，请使用一个新目录，以保留原发布包。'}
 $files=@(
+    'SmartPatrol.ps1','Test-SmartPatrol.ps1','智能体检.cmd','智能体检-使用说明.md',
     '.github/workflows/windows-update-checks.yml','Test-UpdateEngine.cjs','Test-UpdateTransport.cjs','Test-UpdateInstall.ps1','Test-UpdateLifecycle.ps1','Test-UpdateIntegration.cjs',
     'UiGuidance.ps1','Updates.ps1','UpdateEngine.cjs','UpdateInstall.ps1','Build-UpdateManifest.cjs',
     'macos/AGENTS.md','macos/Package.swift','macos/README.md','macos/Sources/FlowModel/Model.swift','macos/Sources/FlowSwitch/AppDelegate.swift','macos/Sources/FlowSwitch/Runtime.swift','macos/Sources/FlowSwitch/SystemProxy.swift','macos/Sources/FlowSwitch/SystemTests.swift','macos/Sources/FlowSwitch/Worker.swift','macos/Sources/FlowSwitch/Workspace.swift','macos/Sources/FlowSwitch/WorkspaceTests.swift','macos/Sources/FlowSwitch/main.swift','macos/TEST_REPORT.md','macos/Tests/FlowModelTests/PolicyTests.swift','macos/runtime.lock.json','macos/scripts/build.py','macos/scripts/integration.py',

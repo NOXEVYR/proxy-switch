@@ -8,6 +8,7 @@ if(Test-Path -LiteralPath $destinationPath){throw '输出目录已存在，请�
 $compiler=Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if(-not (Test-Path -LiteralPath $compiler)){throw '构建需要 Windows x64 与 .NET Framework C# 编译器；程序不会下载依赖。'}
 $runtime=@(
+    'SmartPatrol.ps1',
     'UiGuidance.ps1','Updates.ps1','UpdateInstall.ps1','UpdateEngine.cjs','ProxySwitch.ps1','ProxyWindow.ps1','ProxyBackend.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramRouteAccess.ps1','QtProgramAccess.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1',
     'ProcessInventory.ps1','ProxyDiscovery.ps1','RuntimeSupport.ps1','AppRouting.ps1','AppRouter.cjs','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','GatewayLock.ps1','config.defaults.json','Install-Shortcut.ps1',
     'assets/FlowSwitch.ico','vendor/js-yaml/package.json','vendor/js-yaml/LICENSE','vendor/js-yaml/dist/js-yaml.cjs.js'
@@ -35,7 +36,7 @@ foreach($name in $runtime){
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $target
 }
 [IO.File]::WriteAllText((Join-Path $package '使用说明.txt'),$quickStartText,(New-Object Text.UTF8Encoding($true)))
-foreach($name in @('USER_GUIDE.md','LICENSE','THIRD_PARTY_NOTICES.md')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name)}
+foreach($name in @('USER_GUIDE.md','智能体检.cmd','智能体检-使用说明.md','LICENSE','THIRD_PARTY_NOTICES.md')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name)}
 $exe=Join-Path $package 'FlowSwitch.exe'
 # EXE metadata is generated from the same product version used by the interface.
 $versionSource=Join-Path $destinationPath 'FlowSwitch.Version.cs'

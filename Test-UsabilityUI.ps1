@@ -8,6 +8,7 @@ foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBacke
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UiGuidance.ps1') -Destination $qa
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'SmartPatrol.ps1') -Destination $qa
 [Console]::WriteLine('RUNTIME PowerShell='+$PSVersionTable.PSVersion+' apartment='+[Threading.Thread]::CurrentThread.ApartmentState+'; main-window geometry/font simulation='+$Scale+'; fallback-font='+[bool]$FallbackFont+'; fixed-small-workspace='+[bool]$SmallWorkspace+'; system DPI unchanged; later dialogs use existing actual-control checks')
 foreach($sourceName in @('ProxyWindow.ps1','FlowTheme.cs')){[Console]::WriteLine('SOURCE '+$sourceName+' SHA256='+(Get-FileHash -LiteralPath (Join-Path $qa $sourceName) -Algorithm SHA256).Hash)}
 # Guard every Windows/network/process mutation even if a future UI handler bypasses Start-Work.
@@ -73,7 +74,11 @@ $checks=@'
         }
         function Assert-TaskScrollAccess($Root,[string]$Context){
             foreach($grid in @(Get-UiTree $Root|Where-Object {$_.Visible -and $_.GetType().FullName -eq 'FlowSwitch.UI.TaskGrid'})){
-                Assert-Usability ($grid.AutoScroll -and $grid.ColumnCount -eq 2 -and $grid.RowCount -eq 2) ($Context+' task grid provides two-column scroll access')
+                $expectedRows=if($grid -eq $maintenanceCards){3}else{2}
+                $expectedCards=if($grid -eq $maintenanceCards){5}else{4}
+                Assert-Usability ($grid.AutoScroll -and $grid.ColumnCount -eq 2 -and $grid.RowCount -eq $expectedRows -and $grid.Controls.Count -eq $expectedCards) ($Context+' task grid provides two-column scroll access for every registered task')
+                $rowHeight=0;foreach($style in $grid.RowStyles){$rowHeight+=$style.Height}
+                Assert-Usability ($grid.AutoScrollMinSize.Height -ge $rowHeight+$grid.Padding.Vertical -or $rowHeight -le $grid.ClientSize.Height) ($Context+' scroll range includes every task row')
                 $taskControls=@(Get-UiTree $grid|Where-Object {$_.Visible -and ($_ -is [Windows.Forms.Button] -or $_ -is [Windows.Forms.Label])})
                 Assert-Usability ($taskControls.Count -ge 9) ($Context+' task descriptions and actions are present')
                 $grid.AutoScrollPosition=New-Object Drawing.Point(0,0);[Windows.Forms.Application]::DoEvents()
