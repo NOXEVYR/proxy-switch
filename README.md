@@ -1,10 +1,10 @@
-﻿# 流向 FlowSwitch：Windows 3.10.1 可选预览准备
+﻿# 流向 FlowSwitch：Windows 3.10.1 可选预览
 
-**准备发布目标为 `v3.10.1-preview.1` 可选预览，稳定更新通道保留 3.9.6；发布完成与附件可用性以发布页为准。** 3.10.1 加入旧代理残留检查，并保留 3.10.0 日常代理管理。日常模式显示当前管理方和 Windows 代理视图分歧，通过预览切换已登记的本机 HTTP 入口；保留程序规则，不自动启动独立网关。已登记的代理客户端提供可核验本地 HTTP 入口后，可按需预览选择。它管理你已有的代理，不提供 VPN 服务、订阅或节点。
+**3.10.1 已发布为 `v3.10.1-preview.1` 可选预览，稳定更新通道保留 3.9.6。** 3.10.1 加入旧代理残留检查，并保留 3.10.0 日常代理管理。日常模式显示当前管理方和 Windows 代理视图分歧，通过预览切换已登记的本机 HTTP 入口；保留程序规则，不自动启动独立网关。已登记的代理客户端提供可核验本地 HTTP 入口后，可按需预览选择。它管理你已有的代理，不提供 VPN 服务、订阅或节点。
 
-**[3.10.1 可选预览目标发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.1-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/FlowSwitch-v3.10.1-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/FlowSwitch-v3.10.1-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/BUILD.txt)
+**[3.10.1 可选预览发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.1-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/FlowSwitch-v3.10.1-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/FlowSwitch-v3.10.1-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/BUILD.txt)
 
-以上为本次准备发布的目标链接，附件上传完成前可能不可用。稳定通道仍使用 [3.9.6](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.6)。
+发布附件已完成 GitHub SHA-256 摘要核验。源码包冻结于 [修订来源说明](https://github.com/NOXEVYR/proxy-switch/releases)，本页后续仅更新公开发布状态；包内保留构建时的验证记录。稳定通道仍使用 [3.9.6](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.6)。
 
 ## 这版怎么用
 
