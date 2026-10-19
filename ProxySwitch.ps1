@@ -2,6 +2,7 @@
 param(
     [switch]$Status,
     [switch]$NetworkDiagnostic,
+    [switch]$CheckProxyResidue,
     [switch]$LoginDiagnostic,
     [switch]$Discover,
     [switch]$ConfigureGateway,
@@ -18,7 +19,7 @@ param(
     [string]$PreviewPath,
     [switch]$PreviewMenu,
     [switch]$Demo,
-    [ValidateSet('Programs','Tools','Settings','Proxies')][string]$PreviewView='Programs',
+    [ValidateSet('Programs','Tools','Settings','Proxies','Home')][string]$PreviewView='Programs',
     [string]$ExportReport,
     [string]$DataDirectory='',
     [string]$LaunchProgram='',
@@ -42,7 +43,7 @@ try {
             $notice+="`r`n本地报告："+$failurePath
         }
     }catch{}
-    if(-not $NoUI -and -not ($Status -or $NetworkDiagnostic -or $Check -or $Switch -or $AppStatus -or $ExportReport -or $SmokeTest -or $Independent -or $RecoverNetwork -or $ConfigureGateway -or $Discover -or $AppRoute -or $LoginDiagnostic -or $Restore)){
+    if(-not $NoUI -and -not ($Status -or $NetworkDiagnostic -or $CheckProxyResidue -or $Check -or $Switch -or $AppStatus -or $ExportReport -or $SmokeTest -or $Independent -or $RecoverNetwork -or $ConfigureGateway -or $Discover -or $AppRoute -or $LoginDiagnostic -or $Restore)){
         try{Add-Type -AssemblyName System.Windows.Forms;[void][Windows.Forms.MessageBox]::Show($notice,'流向启动失败','OK','Error')}catch{}
     }
     Write-Error $notice -ErrorAction Continue
@@ -68,6 +69,7 @@ if($LaunchProgram){
     }
     return
 }
+if($CheckProxyResidue){. (Join-Path $PSScriptRoot 'StaleProxy.ps1');Get-StaleProxyReport -Path $Program | ConvertTo-Json -Depth 10;return}
 if($NoUI){return}
 if($NetworkDiagnostic){Get-NetworkDiagnosis -Probe | ConvertTo-Json -Depth 8;return}
 if($Independent){Enable-IndependentGateway $OwnerPID | ConvertTo-Json -Depth 6;return}

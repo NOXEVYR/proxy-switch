@@ -64,7 +64,7 @@ async function healthCheck(id,o){const p=o.Profiles.find(p=>p.Id===id);if(!p)ret
  const endpoint=(p.Protocol==='socks5'?'socks5h':'http')+'://'+host+':'+p.Port;
  const r=await Promise.all(urls.map(url=>new Promise(resolve=>{
   // CONNECT also checks HTTP proxy tunnel support, as used by the owned core.
-  execFile(fs.existsSync(systemCurl)?systemCurl:'curl.exe',['--silent','--output','NUL','--write-out','%{http_code}','--connect-timeout','3','--max-time','6','--noproxy','','--proxy',endpoint,...(p.Protocol==='http'?['--proxytunnel']:[]),url],{windowsHide:true,timeout:7000,maxBuffer:1024},(error,out)=>resolve({healthy:!error&&/^(200|204)$/.test(out.trim()),unavailable:!!error&&typeof error.code!=='number',timeout:error?.code===28}));
+  execFile(fs.existsSync(systemCurl)?systemCurl:'curl.exe',['--silent','--output','NUL','--write-out','%{http_code}','--connect-timeout','6','--max-time','10','--noproxy','','--proxy',endpoint,...(p.Protocol==='http'?['--proxytunnel']:[]),url],{windowsHide:true,timeout:12000,maxBuffer:1024},(error,out)=>resolve({healthy:!error&&/^(200|204)$/.test(out.trim()),unavailable:!!error&&typeof error.code!=='number',timeout:error?.code===28}));
  })));
  if(r.some(x=>x.healthy))return {healthy:true,reason:'probe-ok'};
  if(r.some(x=>x.unavailable))return {healthy:null,reason:'probe-unavailable'};
@@ -140,6 +140,27 @@ async function releaseLock(file,owner){
   catch(e){if(e.code==='ENOENT')return;if(!['EACCES','EPERM','EBUSY'].includes(e.code)||Date.now()>=deadline)throw e;await new Promise(r=>setTimeout(r,50));}}
 }
 async function lock(action,name='mutation.lock'){fs.mkdirSync(ROOT,{recursive:true});const file=path.join(ROOT,name),owner=await claimLock(file);try{return await action();}finally{await releaseLock(file,owner);}}
+async function repairOfflineRecord(plan){
+ if(!plan||plan.Version!==2||plan.Execution!=='saved-only'||!['repair-path','release-system'].includes(plan.Action)||typeof plan.DataDirectory!=='string'||path.resolve(plan.DataDirectory).toLowerCase()!==path.resolve(DATA).toLowerCase()||options().Routing.Adapter!=='standalone')throw Error('离线程序记录预览无效，请重新预览并确认');
+ // Exclude both a pending start and the supervisor's mutation loop for the
+ // entire PS transaction. The worker obtains Use-ChangeLock itself; the
+ // caller must not hold that cross-process mutex while waiting for this child.
+ fs.mkdirSync(ROOT,{recursive:true});const startFile=path.join(ROOT,'start.lock'),mutationFile=path.join(ROOT,'mutation.lock');
+ const startOwner=await claimLock(startFile);let mutationOwner;
+ try{
+  mutationOwner=await claimLock(mutationFile);
+  const request=JSON.stringify({Plan:plan,Locks:{start:startOwner,mutation:mutationOwner}});if(Buffer.byteLength(request)>32768)throw Error('离线程序记录预览过大');
+  const env={...process.env};delete env.PROXY_SWITCH_PROFILES;delete env.NODE_OPTIONS;delete env.NODE_PATH;
+  return await new Promise((resolve,reject)=>{
+   const child=spawn(systemPowerShell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'RuleMaintenance.ps1'),'-OfflineRepairWorker'],{windowsHide:true,stdio:['pipe','pipe','pipe'],env});
+   const chunks=[];let bytes=0,oversized=false;child.stdout.on('data',chunk=>{bytes+=chunk.length;if(bytes>65536)oversized=true;else if(!oversized)chunks.push(chunk);});child.stderr.on('data',()=>{});
+   child.on('error',()=>reject(Error('离线程序记录工作进程未能启动')));child.stdin.on('error',()=>{});
+   child.on('close',code=>{if(oversized)return reject(Error('离线程序记录工作进程返回超限'));let result;try{result=JSON.parse(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/,''));}catch{return reject(Error('离线程序记录工作进程未返回可核验结果，请刷新并检查本机备份'));}if(code!==0||result.ok===false)return reject(Error(result.error||'离线程序记录操作未完成'));resolve(result);});
+   // Never time out/kill a writer or release its locks before it exits.
+   child.stdin.end(request);
+  });
+ }finally{if(mutationOwner)await releaseLock(mutationFile,mutationOwner);await releaseLock(startFile,startOwner);}
+}
 async function replace(entries,defaultRoute,expectedStateHash,expectedSettingsHash,resetDefaultSelection=false,policyChanges={}){return lock(async()=>{
  const o=options(),old=state(),before=read(CONFIG),beforeState=read(STATE),settingsPath=path.join(DATA,'config.json'),beforeSettings=read(settingsPath),router=require('./AppRouter.cjs');
  router.assertExpectedStateHash(expectedStateHash,beforeState);
@@ -345,10 +366,11 @@ async function reconnectPlan(executable){const o=options(),s=state();executable=
  return {path:executable,wanted,createdAt:Date.now(),fingerprint:JSON.stringify(s),connections:all.filter(c=>ingress?c.metadata?.inboundName===routes.ingressName(ingress.id):c.metadata?.processPath?.toLowerCase()===executable.toLowerCase()).map(c=>({id:c.id,start:c.start,route:actualRoute(c.chains||[],o),expectedRoute:effective(routes.connectionPolicy(s,c.metadata,group))})).filter(c=>!['Unknown','Blocked'].includes(c.expectedRoute)&&c.route!==c.expectedRoute)};
 }
 async function main(input){if(input.action==='status')return status();if(input.action==='start')return start();if(input.action==='stop'){lifecycleEvent('stop-request',{reason:'explicit-stop'});write(path.join(ROOT,'stop'),'stop');return {ok:true};}
+ if(input.action==='program-record-offline')return repairOfflineRecord(input.plan);
  if(input.action==='replace')return replace(input.entries,input.defaultRoute,input.expectedStateHash,input.expectedSettingsHash,input.resetDefaultSelection===true,input);if(input.action==='sync'){const s=state();return replace(s.entries,s.defaultRoute);}
  if(input.action==='reconnect-plan')return reconnectPlan(input.path);
  if(input.action==='reconnect')return lock(async()=>{const p=input.plan;if(!p||!Array.isArray(p.connections)||p.connections.length>1024||!Number.isFinite(p.createdAt)||Date.now()-p.createdAt>60000||p.createdAt>Date.now())throw Error('重连预览已失效');const now=await reconnectPlan(p.path);if(now.wanted!==p.wanted||now.fingerprint!==p.fingerprint)throw Error('线路已改变，请重新预览');let closed=0,failed=0;for(const c of now.connections.filter(c=>p.connections.some(x=>x.id===c.id&&x.start===c.start&&x.route===c.route&&x.expectedRoute===c.expectedRoute))){if(/^[a-zA-Z0-9-]{1,100}$/.test(c.id)){try{await api('DELETE','/connections/'+encodeURIComponent(c.id));closed++;}catch{failed++;}}}return {ok:failed===0,closed,failed,Message:'已关闭 '+closed+' 条预览确认的旧连接。'+(failed?' '+failed+' 条未能关闭；请刷新状态后重新预览。':'')};});
  throw Error('独立内核不支持此操作');
 }
 if(require.main===module&&process.argv.includes('--serve'))serve().catch(()=>{process.exitCode=1;});
-module.exports={main,api,makeConfig,actualRoute,decide,policy,candidates,healthCheck,retainedSelections,resumeSelections,status,replace,start,nextRestart,lifecycleEvent,rulesMatch,ingressReadiness,ingressesReady,processStartTicks,claimLock,releaseLock,ROOT,PIPE,CONFIG};
+module.exports={main,api,makeConfig,actualRoute,decide,policy,candidates,healthCheck,retainedSelections,resumeSelections,status,replace,start,nextRestart,lifecycleEvent,rulesMatch,ingressReadiness,ingressesReady,processStartTicks,claimLock,releaseLock,repairOfflineRecord,ROOT,PIPE,CONFIG};

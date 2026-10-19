@@ -1,4 +1,24 @@
-﻿# 3.9.9 智能体检约定
+﻿# 3.10.1 旧代理残留检查（2026-10-20）
+
+- 仅主页或程序页明确点击「检查旧代理残留」，或 CLI `powershell ProxySwitch.ps1 -CheckProxyResidue [-Program <EXE路径>]`，才读取受支持 Chromium/Electron 与显式环境适配目标及已核验后台的代理摘要；不后台持续读取。根与成员均须排除已识别游戏/反作弊目录、Windows 系统目录及已登记代理客户端，未覆盖项保留未知；不得声称已识别所有游戏或代理软件。
+- `ProcessProxyEnvironment` 是显式诊断的只读 VM_READ 例外：仅查询身份、有限 PEB 指针及有界环境块，前后核验 PID、创建时间、路径、同用户/会话，只输出代理白名单摘要，不保存完整环境、凭据或命令行。一般 `ProcessInventory` 的有限查询规则不变，不回退到模块枚举或隐式 VM_READ。
+- PID、代理变量端口、监听与精确 TCP 连接分层展示；未知不按失效，环境快照与连接均不证明登录或请求采用该变量。按当前系统代理启动须保存工作、完整正常退出后预览确认，绑定两分钟计划并重新核验；不结束现有程序、不改持久环境、系统设置或已有专线。专线冲突引导回程序线路核对。
+- 新运行模块加入两个打包白名单，`Test-ProcessProxyEnvironment` / `Test-StaleProxy` / `Test-StaleProxyUI` 纳入源码及 `Test-All`。夹具只操作隔离自有进程，真实账号与网络验收分别记录。
+
+# 程序网络自助排查（2026-10-17）
+
+- 3.10.0 日常模式优先于历史统一切换约定：Routing.Adapter=none 走 DailyProxy 的只读 Plan / Confirmed Apply，禁止自动建立网关、重置程序专线、启动第三方客户端或改 NO_PROXY。高级 standalone / clash-verge 保留明确接管流程。
+- 日常计划两分钟有效，绑定系统、环境、配置、程序记录和入口身份，提交前复核；撤回只使用 daily-proxy-receipt.json 最近成功切换的归属记录，不恢复任意历史网关。收据属于私有数据，不得打包。Test-DailyProxy 与 Test-DailyProxyUI 使用隔离数据；真实 VPN 隧道与目标账号请求仍需分别实测。
+- 首页区分实读管理方、待选目标和程序实际连接。当前入口已核验且正常时不提示重新应用或启动独立入口；备用代理须先连接、检测HTTP入口再预览切换。未监听/未知或仅隧道不能宣称已兼容。
+- 程序诊断先被动刷新上下文；专线仅在唯一配置身份、固定入口和新鲜控制器出口都通过核验后探测自身入口，探测后再次复核。未知、变化、旧启动记录或独立引擎规则不能偷偷改测系统入口；无专线时的系统对照不代表程序已采用它。
+- 保留代理拒绝、CONNECT、TLS、超时和 HTTP 响应的阶段；外层绝对期限必须覆盖 curl 内层预算。真实回环夹具由 `node Test-ProxyProbeBudget.cjs` 验证，`Test-ScopedNetworkDiagnosis.ps1` 验证探测范围与陈旧状态，均纳入 `Test-All.ps1`。
+- 诊断的「处理办法」仅派发固定动作，并重新核对唯一目标身份与当前前提，不复用旧全局选中对象。路径修复、重连和干净启动沿用现有预览/确认，不结束正在运行的程序，不代改第三方 VPN。`Test-NetworkDiagnosisUI.ps1 -Scale 1.5` 覆盖实际控件与错误目标拒绝。
+- VPN 网卡和双栈路由仅是拓扑证据；程序连上外部代理不等于经过流向，也不自动等于故障。帮助、报告与按钮文案需同步，不能把流向 Direct 声称为绕过底层 VPN。
+- ObservedProxyScope 是用户显式程序排查中的独立对照，不替换托管 ProbeScope 或系统结果。仅唯一登记本机外部入口、可信进程家族、精确 TCP 与前后监听归属/文件/配置一致时可探测；歧义或变化保留未知。同路径网络子进程与已核验跨目录后台属于观察范围，不能因父进程不联网而漏掉。家族截断或未知旁支只限制覆盖；参与成员证据齐全时可对其入口独立代测，CoverageLimited 合并旧行和前后快照，报告与建议明确只覆盖已核验成员，不宣称全家族唯一入口。未知参与身份仍禁测；新鲜可信成员出现其他入口仍撤销认证。前检可跳过已结束的旧TCP但须有至少一条精确新鲜连接；后检只绑定实际参与明细，不重新纳入已结束旧连接。未知原因仅用固定ReasonCode和安全文案，不显示原始异常。
+- 监听与 ForwardingState 分开，未收到 CONNECT 成功和 CONNECT 成功后超时分别说明。固定代测全部超时只能说明本轮这些请求未完成，不能唯一归因 VPN 隧道或自动清变量、重启软件。只要存在成功响应就保留部分成功范围，不推广成 models 或账号验收。curl 诊断首参加 --disable，避免继承用户 curl 配置；测试 CA 仅由测试夹具显式传入。
+- Test-ObservedProxyDiagnosis 纳入 Test-All；Test-ForwardingStartup.ps1 经 Test-ProxyProbeBudget.cjs 的真实回环夹具执行，覆盖入口持续监听、fresh health=true 但实际转发停滞时拒绝启动并清理自有探针。保留普通启动不受流向等待管理及 Direct/有限直连的既有边界。
+
+# 3.9.9 智能体检约定
 
 - SmartPatrol 独立控制台默认被动只读，-Fix 需显式触发并确认本次共享网络诊断计划，120秒内重新核验 revision/动作后调用 Repair-NetworkDiagnosis 的锁、备份与归属事务。机器级只读，拒绝 MachineOnly；不自动提权。
 - 判定复用 Get-LocalEndpointObservation 与结构化 TCP 三态，不把查询失败或地址族不明确视为死亡；日志仅存计数/固定状态，不写原变量、地址、凭据、IP或现场路径。自定义 DataDirectory 必须传给控制台。

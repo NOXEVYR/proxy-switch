@@ -10,6 +10,7 @@ $script:Root = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'ProxyDiscovery.ps1')
 . (Join-Path $PSScriptRoot 'IndependentGateway.ps1')
 . (Join-Path $PSScriptRoot 'NetworkDiagnostics.ps1')
+. (Join-Path $PSScriptRoot 'ExternalMihomoObservation.ps1')
 $script:Profiles = Read-ProfileSettings
 $script:StatePath = Join-Path $script:DataRoot 'selection.json'
 $script:BackupDir = Join-Path $script:DataRoot 'backups'
@@ -190,12 +191,48 @@ function Get-SystemKey($Snapshot) {
     return $key
 }
 function Get-GatewayControllerPID {[LocalProxySwitch.Native]::ControllerProcessId()}
+function Get-GatewayServiceIdentity($Profile,$Owner) {
+    if(-not $Owner -or $Owner.Path -or -not $Profile.CorePath){return $null}
+    if($Profile.Id -ne (Get-GatewayKey) -and $script:Profiles.Routing.Adapter -notin @('standalone','none')){return $null}
+    if($Owner.ProcessName -notmatch '^verge-mihomo(?:-alpha)?$' -or [IO.Path]::GetFileNameWithoutExtension($Profile.CorePath) -ine $Owner.ProcessName){return $null}
+    if((Get-GatewayControllerPID) -eq $Owner.Id){return [pscustomobject]@{Method='Pipe';PID=$Owner.Id}}
+    try{
+        # An elevated core may expose neither its image nor its named pipe to us.
+        # Bind its OS parent to this exact running SCM service and sibling image.
+        $core=@(Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$Owner.Id) -Property ProcessId,ParentProcessId,CreationDate -ErrorAction Stop)
+        if($core.Count -ne 1 -or $core[0].ProcessId -ne $Owner.Id -or $core[0].ParentProcessId -le 0 -or $core[0].CreationDate -le [DateTime]::MinValue){return $null}
+        $services=@(Get-CimInstance Win32_Service -Filter "Name = 'clash_verge_service'" -Property Name,State,ProcessId,PathName,StartName,ServiceType -ErrorAction Stop)
+        if($services.Count -ne 1 -or $services[0].Name -cne 'clash_verge_service' -or $services[0].State -ne 'Running' -or $services[0].ProcessId -ne $core[0].ParentProcessId){return $null}
+        if($services[0].StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM') -or $services[0].ServiceType -ne 'Own Process'){return $null}
+        $path=([string]$services[0].PathName).Trim()
+        if($path -match '^"([^"\r\n]+\.exe)"$'){$path=$Matches[1]}
+        elseif($path -notmatch '^[^"\r\n]+\.exe$'){return $null}
+        $expected=Join-Path ([IO.Path]::GetDirectoryName($Profile.CorePath)) 'clash-verge-service.exe'
+        $protectedPath=Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'clash-verge-service\bin\clash-verge-service.exe'
+        $protected=[IO.Path]::GetFullPath($path) -ieq [IO.Path]::GetFullPath($protectedPath)
+        if(-not $protected -and [IO.Path]::GetFullPath($path) -ine [IO.Path]::GetFullPath($expected)){return $null}
+        $serviceProcess=@(Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$services[0].ProcessId) -Property ProcessId,CreationDate -ErrorAction Stop)
+        if($serviceProcess.Count -ne 1 -or $serviceProcess[0].ProcessId -ne $services[0].ProcessId -or $serviceProcess[0].CreationDate -le [DateTime]::MinValue -or $serviceProcess[0].CreationDate -gt $core[0].CreationDate){return $null}
+        $coreFile=[LocalProxySwitch.ProgramFileIdentity]::Read($Profile.CorePath)
+        if($coreFile.Status -ne 'Available' -or -not $coreFile.FileId -or -not $coreFile.CanonicalPath){return $null}
+        if($protected){
+            # Official private service layout is ACL-restricted to SYSTEM/admin.
+            # SCM and OS parent/creation evidence identify this service session.
+            # The readable core file is CONFIGURED identity, not its protected image.
+            return [pscustomobject]@{Method='SCMProtected';PID=$Owner.Id;CoreCreated=([DateTime]$core[0].CreationDate).ToUniversalTime().Ticks.ToString();ServicePID=$services[0].ProcessId;ServiceCreated=([DateTime]$serviceProcess[0].CreationDate).ToUniversalTime().Ticks.ToString();ServicePath=[IO.Path]::GetFullPath($path);ConfiguredCoreFile=$coreFile.FileId;ConfiguredCorePath=$coreFile.CanonicalPath}
+        }
+        $serviceFile=[LocalProxySwitch.ProgramFileIdentity]::Read($path)
+        if($serviceFile.Status -ne 'Available' -or $coreFile.Status -ne 'Available' -or -not $serviceFile.FileId -or -not $coreFile.FileId -or -not $serviceFile.CanonicalPath -or -not $coreFile.CanonicalPath){return $null}
+        if([IO.Path]::GetDirectoryName($serviceFile.CanonicalPath) -ine [IO.Path]::GetDirectoryName($coreFile.CanonicalPath)){return $null}
+        [pscustomobject]@{Method='SCM';PID=$Owner.Id;CoreCreated=([DateTime]$core[0].CreationDate).ToUniversalTime().Ticks.ToString();ServicePID=$services[0].ProcessId;ServiceCreated=([DateTime]$serviceProcess[0].CreationDate).ToUniversalTime().Ticks.ToString();ServiceFile=$serviceFile.FileId;CoreFile=$coreFile.FileId}
+    }catch{return $null}
+}
 function Test-GatewayServiceOwner($Profile,$Owner) {
     # Elevated service image paths may be unreadable. Match the existing controller's OS identity instead.
     if(-not $Owner -or $Owner.Path -or -not $Profile.CorePath){return $false}
-    if($Profile.Id -ne (Get-GatewayKey) -and $script:Profiles.Routing.Adapter -ne 'standalone'){return $false}
+    if($Profile.Id -ne (Get-GatewayKey) -and $script:Profiles.Routing.Adapter -notin @('standalone','none')){return $false}
     if($Owner.ProcessName -notmatch '^verge-mihomo(?:-alpha)?$' -or [IO.Path]::GetFileNameWithoutExtension($Profile.CorePath) -ine $Owner.ProcessName){return $false}
-    return ((Get-GatewayControllerPID) -eq $Owner.Id)
+    return ($null -ne (Get-GatewayServiceIdentity $Profile $Owner))
 }
 function Get-Listener($Profile,[switch]$ProbeRemote,$TcpRows=$null) {
     if($Profile.Host -in @('localhost','127.0.0.1','::1')){
@@ -297,7 +334,7 @@ function Get-ClientWarnings($Client=$null) {
         }
         elseif($script:Profiles.Routing.UnifiedMode -eq 'gateway'){'固定入口模式：已知客户端的 TUN / 代理守卫仍开启；进入引擎的请求在引擎内选路，请保留承载入口的代理服务。'}
         else{'已知客户端的 TUN / 代理守卫仍开启，系统入口切换会被阻止；请检查当前网络接管方式。'}
-    }elseif($client.SystemProxy){'Clash 开着系统代理；启动或退出它可能改写系统入口，请在这里重新应用。'}
+    }elseif($client.SystemProxy){'Clash 开着系统代理；启动或退出它可能改写系统入口。当前已使用 Clash 时无需重新应用；切节点请在原客户端操作，连接异常可运行只读诊断。'}
     if($client.Topology -and $client.Topology.State -eq 'Unknown'){'外部隧道拓扑读取不完整或广域路由归属无法确认；未将未知状态视为隧道已关闭。'}
 }
 function Get-OverrideWarnings([string]$Key) {
@@ -323,14 +360,16 @@ function Get-LiveConnections($TcpRows=$null) {
     foreach($group in ($items | Group-Object PID,Route)){$c=$group.Group[0];[pscustomobject]@{Process=$processes[$c.PID];PID=$c.PID;Route=$c.Route;Count=$group.Count}}
 }
 
-function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable=$true) {
+function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable=$true,$WindowsViews=$null) {
     if($null -eq $TcpRows){$observation=Get-TcpObservationSnapshot;$TcpRows=$observation.Rows;$TcpAvailable=$observation.Available}
     $snapshot=Get-SystemSnapshot;$key=Get-SystemKey $snapshot;$envValues=Get-UserProxyEnv;$selection=Get-Selection
+    if($null -eq $WindowsViews){$WindowsViews=Get-WindowsApplicationProxyViews}
+    $applicationViews=ConvertTo-ApplicationProxyViewSummary $snapshot $WindowsViews
     $aligned=($key -ne 'Other');$envConflict=($key -eq 'Other');$environment=@()
     foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')){
         $route=Get-EndpointKey $envValues.$name
         $environment+=[pscustomobject]@{Name=$name;Value=(Protect-Endpoint $envValues.$name);Route=$route}
-        if(($key -eq 'Direct' -and $route -ne 'Unset') -or ($key -ne 'Direct' -and $route -ne $key)){$aligned=$false}
+        if(($key -eq 'Direct' -and $route -ne 'Unset') -or ($key -ne 'Direct' -and $route -ne $key -and -not ($name -eq 'ALL_PROXY' -and $route -eq 'Unset'))){$aligned=$false}
         if($route -ne 'Unset' -and $route -ne $key){$envConflict=$true}
     }
     $listeners=@();foreach($id in (Get-ProfileKeys)){
@@ -343,6 +382,7 @@ function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable
     if($key -ne 'Direct'){$entry=$listeners | Where-Object {$_.Key -eq $key} | Select-Object -First 1;$ready=$(if($entry){$entry.Ready}else{$null})}
     $client=Get-ClientInterference
     $live=@(Get-LiveConnections -TcpRows $TcpRows);$warnings=@(Get-ClientWarnings $client)+@(Get-OverrideWarnings $key);if($TcpAvailable){$warnings+=@(Get-EntryLifecycleWarnings $snapshot $envValues $listeners)}else{$warnings+='Windows 连接列表读取失败，入口监听和连接状态未知；这不代表网络已断开。'}
+    if($applicationViews.Different){$warnings+='Windows 代理视图不一致；请在网络切换选择当前使用的代理并预览核对，也可在原客户端核对系统代理开关。'}
     if($key -ne 'Direct' -and $null -eq $ready){$warnings+='当前入口监听或归属无法核验，状态未知；不会据此认定入口未监听。'}
     if((Test-BroadProxyBypass $envValues.NO_PROXY) -and ($key -ne 'Direct' -or @($environment|Where-Object Route -ne 'Unset').Count)){$aligned=$false;$envConflict=$true;$warnings+=Get-BroadProxyBypassWarning}
     if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){
@@ -354,14 +394,17 @@ function Get-ProxyStatus($RoutingStatus=$null,$TcpRows=$null,[bool]$TcpAvailable
     # Historical intent is not evidence of the engine's live route.
     $network=$key
     if($key -eq (Get-GatewayKey) -and $RoutingStatus.Available -and $RoutingStatus.DefaultLoaded -and $RoutingStatus.DefaultRoute){$network=$RoutingStatus.DefaultRoute;if($RoutingStatus.EffectiveDefaultRoute){$network=$RoutingStatus.EffectiveDefaultRoute}}
-    [pscustomobject]@{Key=$key;Current=(Get-RouteName $key);NetworkKey=$network;NetworkName=(Get-RouteName $network);Server=(Protect-Endpoint $snapshot.Server);Flags=$snapshot.Flags;Environment=$environment;Aligned=$aligned;EnvConflict=$envConflict;EndpointReady=$ready;Listeners=$listeners;Selected=$selection;Drift=[bool]$drift;Connections=$live;OldConnections=$oldConnections;Warnings=$warnings;NetworkTopology=$client.Topology;TcpAvailable=$TcpAvailable;GatewayKey=(Get-GatewayKey);CheckedAt=(Get-Date).ToString('HH:mm:ss')}
+    [pscustomobject]@{Key=$key;Current=(Get-RouteName $key);NetworkKey=$network;NetworkName=(Get-RouteName $network);Server=(Protect-Endpoint $snapshot.Server);Flags=$snapshot.Flags;Environment=$environment;Aligned=$aligned;EnvConflict=$envConflict;EndpointReady=$ready;Listeners=$listeners;Selected=$selection;Drift=[bool]$drift;Connections=$live;OldConnections=$oldConnections;Warnings=$warnings;ApplicationProxyViews=$applicationViews;NetworkTopology=$client.Topology;TcpAvailable=$TcpAvailable;GatewayKey=(Get-GatewayKey);CheckedAt=(Get-Date).ToString('HH:mm:ss')}
 }
 
 function Start-HttpEndpointProbe($Profile,[string]$Url,[bool]$Fast=$false) {
     $psi=New-Object Diagnostics.ProcessStartInfo
     $psi.FileName=Get-SystemCurlPath
-    $connect=6;$maximum=10;if($Fast){$connect=3;$maximum=5}
-    $psi.Arguments='--silent --show-error --head --output NUL --connect-timeout '+$connect+' --max-time '+$maximum+' --proxy '+$(if($Profile.Protocol -eq 'socks5'){'socks5h://'}else{'http://'})+(Get-EndpointAddress $Profile)+' --noproxy "" --write-out "%{http_code} %{time_total} %{http_connect}" '+$Url
+    # Fast changes concurrency, not the time allowed for a usable slow handshake.
+    # Disable user curl configuration before every other argument: diagnostic
+    # probes must not inherit account headers, cookies or proxy credentials.
+    $connect=6;$maximum=10
+    $psi.Arguments='--disable --silent --show-error --head --output NUL --connect-timeout '+$connect+' --max-time '+$maximum+' --proxy '+$(if($Profile.Protocol -eq 'socks5'){'socks5h://'}else{'http://'})+(Get-EndpointAddress $Profile)+' --noproxy "" --write-out "%{http_code} %{time_total} %{http_connect}" '+$Url
     $psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
     $process=New-Object Diagnostics.Process;$process.StartInfo=$psi
     try{
@@ -390,14 +433,25 @@ function Test-HttpEndpoint($Profile,[string]$Url) {
 }
 function Test-ProxyRoute([string]$Key,[switch]$Fast) {
     $profile=Get-Profile $Key
-    if(-not (Get-Listener $profile -ProbeRemote)){throw ($profile.Name+' 入口未就绪，请启动关联程序或检查地址与端口。未修改代理。')}
+    $entryReady=[bool](Get-Listener $profile -ProbeRemote)
+    $ownerVerified=$(if($profile.Host -in @('localhost','127.0.0.1','::1')){$entryReady}else{$null})
+    if(-not $entryReady){
+        # Full diagnostics may probe a configured local listener with unknown ownership.
+        # Fast is used by mutations and retains the original strict ownership check.
+        $listening=$false
+        if(-not $Fast -and $profile.Host -in @('localhost','127.0.0.1','::1')){
+            $seen=Get-LocalEndpointObservation (Get-EndpointAddress $profile) (Get-TcpObservationSnapshot) $profile
+            $listening=($seen -and $seen.Listening -eq $true)
+        }
+        if(-not $listening){throw ($profile.Name+' 入口未就绪或归属未核验，请启动关联程序或检查地址与端口。未修改代理。')}
+    }
     $urls=@('https://www.google.com/generate_204','https://api.openai.com/v1/models','https://chatgpt.com/')
     $results=@()
     if($Fast){
         $probes=@();$finished=@{};$clock=[Diagnostics.Stopwatch]::StartNew()
         try{
             foreach($url in $urls){$probes+=@(Start-HttpEndpointProbe $profile $url $true)}
-            while($clock.Elapsed.TotalSeconds -lt 7){
+            while($clock.Elapsed.TotalSeconds -lt 12){
                 foreach($probe in $probes){
                     if(-not $finished.ContainsKey($probe.Url) -and $probe.Process.HasExited){$finished[$probe.Url]=$true;$result=Read-HttpEndpointProbe $probe;$results+=@($result)}
                 }
@@ -406,7 +460,7 @@ function Test-ProxyRoute([string]$Key,[switch]$Fast) {
             }
         }finally{foreach($probe in $probes){Close-HttpEndpointProbe $probe}}
     }else{foreach($url in $urls){$results+=@(Test-HttpEndpoint $profile $url)}}
-    [pscustomobject]@{Key=$Key;Name=$profile.Name;Ready=$true;Usable=(@($results | Where-Object Accepted).Count -gt 0);Results=$results}
+    [pscustomobject]@{Key=$Key;Name=$profile.Name;Ready=$true;OwnerVerified=$ownerVerified;Usable=(@($results | Where-Object Accepted).Count -gt 0);Results=$results}
 }
 function Write-OperationProgress([string]$Message) {
     if($script:OperationProgress){$script:OperationProgress.Enqueue($Message)}
@@ -485,14 +539,15 @@ function Set-RoutingSnapshot($Snapshot,$ExpectedBefore=$null) {
         throw
     }
 }
-function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSystem,$BeforeEnv,$TargetRouting=$null,$BeforeRouting=$null,[scriptblock]$VerifyAction=$null,$BackupRouting=$null,[switch]$EnvironmentOnly,[switch]$PreserveSelection,[scriptblock]$PostCommitAction=$null,[scriptblock]$PreWindowsAction=$null) {
+function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSystem,$BeforeEnv,$TargetRouting=$null,$BeforeRouting=$null,[scriptblock]$VerifyAction=$null,$BackupRouting=$null,[switch]$EnvironmentOnly,[switch]$PreserveSelection,[scriptblock]$PostCommitAction=$null,[scriptblock]$PreWindowsAction=$null,[switch]$CheckSelection,$ExpectedSelection=$null,[scriptblock]$SystemRollbackOwnership=$null,[scriptblock]$FinalVerifyAction=$null) {
     if($EnvironmentOnly -and ($null -ne $TargetRouting -or -not (Test-SameSnapshot $TargetSystem $BeforeSystem))){throw '变量修复不能同时改变系统入口或分流规则。'}
     if($null -ne $TargetRouting -and $null -ne $BeforeRouting){foreach($field in @('programIngresses','siteRules')){if($null -eq $TargetRouting.PSObject.Properties[$field]){$TargetRouting|Add-Member NoteProperty $field @($BeforeRouting.$field|Where-Object {$_})}}}
     if(-not (Test-SameSnapshot $BeforeSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $BeforeEnv (Get-UserProxyEnv))){throw '检测期间其他程序改动了代理，请稍后重试。未写入设置。'}
     if($null -ne $BeforeRouting -and -not (Test-SameRouting $BeforeRouting (Get-RoutingSnapshot))){throw '程序规则被其他窗口改动，请刷新后重试。'}
     $beforeSelection=Get-Selection
+    if($CheckSelection -and (Get-DailyProxyHash $beforeSelection) -cne (Get-DailyProxyHash $ExpectedSelection)){throw '选择记录已被其他操作改动，未写入设置。'}
     $backup=Save-Backup ([pscustomobject]@{Version=3;Time=(Get-Date).ToString('o');System=$BeforeSystem;Environment=$BeforeEnv;Selection=$beforeSelection;Routing=$(if($null -ne $BackupRouting){$BackupRouting}else{$BeforeRouting})})
-    $routesWritten=$false;$nativeStarted=$false;$systemStarted=$false
+    $routesWritten=$false;$nativeStarted=$false;$systemStarted=$false;$selectionStarted=$false
     try{
         if($null -ne $TargetRouting){Write-OperationProgress '正在更新程序规则并核对引擎…';Set-RoutingSnapshot $TargetRouting $BeforeRouting;$routesWritten=$true}
         if($VerifyAction){& $VerifyAction | Out-Null}
@@ -509,7 +564,11 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
         if(-not $EnvironmentOnly){$systemStarted=$true;Set-SystemSnapshot $TargetSystem}
         if(-not (Test-SameSnapshot $TargetSystem (Get-SystemSnapshot)) -or -not (Test-SameEnv $TargetEnv (Get-UserProxyEnv))){throw '写入后校验失败，或其他客户端改写了入口。'}
         if($PostCommitAction){& $PostCommitAction | Out-Null}
-        if(-not $EnvironmentOnly -and -not $PreserveSelection){Save-Selection $Selection}
+        if(-not $EnvironmentOnly -and -not $PreserveSelection){
+            if($CheckSelection -and (Get-DailyProxyHash (Get-Selection)) -cne (Get-DailyProxyHash $beforeSelection)){throw '提交期间选择记录已被外部修改，未覆盖最新选择。'}
+            $selectionStarted=$true;Save-Selection $Selection
+        }
+        if($FinalVerifyAction){& $FinalVerifyAction|Out-Null}
         Write-OperationProgress '系统入口与变量已核对，正在刷新实际连接…'
     }catch{
         $errorText=$_.Exception.Message;$rollbackErrors=@();$preserved=@()
@@ -528,11 +587,20 @@ function Invoke-ProxyTransaction($TargetSystem,$TargetEnv,$Selection,$BeforeSyst
             }catch{$rollbackErrors+='环境变量'}
             if($systemStarted){try{
                 $currentSystem=Get-SystemSnapshot
-                if(Test-SameSnapshot $currentSystem $TargetSystem){Set-SystemSnapshot $BeforeSystem}
+                if(Test-SameSnapshot $currentSystem $TargetSystem){
+                    if($SystemRollbackOwnership -and -not (& $SystemRollbackOwnership)){$preserved+='Windows代理视图'}else{Set-SystemSnapshot $BeforeSystem}
+                }
                 elseif(-not (Test-SameSnapshot $currentSystem $BeforeSystem)){$preserved+='系统代理'}
             }catch{$rollbackErrors+='系统代理'}}
             elseif(-not (Test-SameSnapshot (Get-SystemSnapshot) $BeforeSystem)){$preserved+='系统代理'}
-            if(-not $EnvironmentOnly -and -not $PreserveSelection){try{Save-Selection $beforeSelection}catch{$rollbackErrors+='选择记录'}}
+            if(-not $EnvironmentOnly -and -not $PreserveSelection){try{
+                if(-not $CheckSelection){Save-Selection $beforeSelection}
+                elseif($selectionStarted){
+                    $actualSelection=Get-Selection
+                    if((Get-DailyProxyHash $actualSelection) -ceq (Get-DailyProxyHash $Selection)){Save-Selection $beforeSelection}
+                    elseif((Get-DailyProxyHash $actualSelection) -cne (Get-DailyProxyHash $beforeSelection)){$preserved+='选择记录'}
+                }
+            }catch{$rollbackErrors+='选择记录'}}
         }
         if($rollbackErrors.Count){throw ($errorText+'；回滚未完成：'+($rollbackErrors -join '、')+'。备份：'+$backup)}
         if($preserved.Count){throw ($errorText+'；已撤销本次可回滚的更改，保留其他程序的最新设置：'+(($preserved | Select-Object -Unique) -join '、')+'。')}
@@ -662,3 +730,4 @@ function Assert-RestorableEnvironment($Values) {
 . (Join-Path $PSScriptRoot 'ProgramRouteAccess.ps1')
 . (Join-Path $PSScriptRoot 'QtProgramAccess.ps1')
 . (Join-Path $PSScriptRoot 'ProgramCleanStart.ps1')
+. (Join-Path $PSScriptRoot 'DailyProxy.ps1')

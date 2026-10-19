@@ -1,4 +1,5 @@
-﻿# Explicit user actions only. Display refresh must never invoke these writers.
+﻿param([switch]$OfflineRepairWorker)
+# Explicit user actions only. Display refresh must never invoke these writers.
 if(-not ('LocalProxySwitch.RuleFileExchange' -as [type])){
     Add-Type -TypeDefinition @'
 using System;
@@ -68,7 +69,49 @@ function Get-RuleMaintenanceProfiles($Snapshot){
     if($null -eq $value){$value=Get-Content -LiteralPath (Join-Path $script:Root 'config.defaults.json') -Raw -Encoding UTF8|ConvertFrom-Json}
     ConvertTo-ValidProfileSettings (Convert-LegacySettings $value)
 }
-function Get-ProgramRuleRepairPlan([string]$SavedPath){
+function Get-RuleMaintenanceServiceObservation($Snapshot){
+    $profiles=Get-RuleMaintenanceProfiles $Snapshot
+    if($profiles.Routing.Adapter -ne 'standalone'){return [pscustomobject]@{State='unknown';Fingerprint=''}}
+    $images=@{};$parts=@();$states=@();$invalid=$false
+    foreach($name in @('gateway-session.json','gateway\process.json','gateway\supervisor.lock','gateway\runtime.yaml','gateway\generation.json','gateway\health.json','selection.json')){
+        $image=Read-RuleMaintenanceFile (Join-Path $script:DataRoot $name);$images[$name]=$image;$parts+=($name+'='+$image.Hash)
+    }
+    foreach($name in @('gateway-session.json','gateway\process.json','gateway\supervisor.lock')){
+        if(-not $images[$name].Exists){continue}
+        try{
+            $record=Read-RuleMaintenanceJson $images[$name] $null
+            if($name -eq 'gateway-session.json'){$identities=@(,@($record.SupervisorPID,$record.SupervisorStart));if($record.CorePID -or $record.CoreStart){$identities+=,@($record.CorePID,$record.CoreStart)}}
+            elseif($name -eq 'gateway\process.json'){$identities=@(@($record.supervisor,$record.supervisorStartTicks),@($record.core,$record.coreStartTicks))}
+            else{$identities=@(,@($record.pid,$record.startTicks))}
+            foreach($identity in $identities){
+                if([string]$identity[0] -notmatch '^[1-9][0-9]*$' -or [decimal]$identity[0] -gt [int]::MaxValue -or [string]$identity[1] -notmatch '^[1-9][0-9]*$'){$invalid=$true;continue}
+                $states+=Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$identity[0];OwnerStart=$identity[1]})
+            }
+        }catch{$invalid=$true}
+    }
+    $gateway=@($profiles.Profiles|Where-Object Id -eq $profiles.Routing.ProfileId|Select-Object -First 1)[0]
+    if(-not $gateway){$invalid=$true}
+    $ports=@([int]$gateway.Port)+@($Snapshot.Engine.programIngresses|Where-Object {$_}|ForEach-Object {[int]$_.port})
+    try{
+        $tcp=Get-TcpObservationSnapshot
+        if(-not $tcp.Available -or $null -eq $tcp.Rows){$invalid=$true}
+        elseif(@($tcp.Rows|Where-Object {$_.State -eq 'Listen' -and [int]$_.LocalPort -in $ports}).Count -or @($tcp.Rows|Where-Object {$_.State -in @('Established','SynSent') -and ((([int]$_.LocalPort -in $ports) -and (Test-RuleMaintenanceLoopback $_.LocalAddress)) -or (([int]$_.RemotePort -in $ports) -and (Test-RuleMaintenanceLoopback $_.RemoteAddress)))}).Count){$states+='alive'}
+        $processes=@(Get-ProcessInventory);$coreName=[IO.Path]::GetFileNameWithoutExtension([string]$gateway.CorePath)
+        if(-not @($processes|Where-Object Id -eq $PID).Count){$invalid=$true}
+        if(-not $gateway.CorePath){$invalid=$true}
+        foreach($process in $processes){
+            if($process.Path -and (Test-ProgramPathEquivalent $process.Path $gateway.CorePath)){$states+='alive'}
+            elseif($coreName -and $process.ProcessName -ieq $coreName -and (-not $process.Path -or $process.PathStatus -ne 'Available')){$invalid=$true}
+        }
+    }catch{$invalid=$true}
+    foreach($name in $images.Keys){if((Read-RuleMaintenanceFile $images[$name].Path).Hash -cne $images[$name].Hash){$invalid=$true}}
+    $state=if($states -contains 'alive'){'alive'}elseif($invalid -or $states -contains 'unknown'){'unknown'}else{'stopped'}
+    [pscustomobject]@{State=$state;Fingerprint=(Get-RuleMaintenanceHash ([Text.Encoding]::UTF8.GetBytes(($parts -join "`n"))));Images=$images}
+}
+function Assert-RuleMaintenanceOfflineIdentity($Resolution){
+    if($Resolution.Reason -cne 'PackageIdentity' -or $Resolution.Confidence -cne 'Verified' -or -not $Resolution.Identity.PackageVerified -or -not $Resolution.Identity.Exists -or -not $Resolution.Identity.FileId){throw '离线记录操作只接受已保存并重新核验的唯一 Windows 包身份；候选、歧义或不可读路径须先核对，未修改记录。'}
+}
+function Get-ProgramRuleRepairPlan([string]$SavedPath,[switch]$ReleaseOnly){
     $path=ConvertTo-ProgramIdentityPath $SavedPath;if(-not $path -or $path -notmatch '(?i)\.exe$'){throw '请选择有效的已保存程序记录。'}
     $snapshot=Get-RuleMaintenanceSnapshot $path
     $engine=@(@($snapshot.Engine.entries)+@($snapshot.Engine.programIngresses)|Where-Object {$_.path -ieq $path});$launch=@($snapshot.Launch.entries|Where-Object {$_.path -ieq $path})
@@ -77,14 +120,40 @@ function Get-ProgramRuleRepairPlan([string]$SavedPath){
     $savedIdentity=$null;if($engine.Count){$savedIdentity=$engine[0].identity};if(-not $savedIdentity -and $launch.Count){$savedIdentity=$launch[0].identity}
     $processes=@(Get-ProcessInventory);$context=New-ProgramIdentityContext -Processes $processes -RefreshPackages
     $resolution=Resolve-ProgramIdentity $path -Processes $processes -Context $context -SavedIdentity $savedIdentity
-    if(-not $resolution.CanRepair -or -not $resolution.RequiresRepair -or -not $resolution.CurrentPath){throw '没有唯一、可核对的新程序路径；请先解决路径不可读或多个候选的情况。'}
+    if($ReleaseOnly){
+        $currentVerified=$resolution.Reason -in @('ExactPath','NotRunning','SameFile') -and $resolution.Identity.Exists -and $resolution.Identity.FileId -and $resolution.Identity.CanonicalPath -and $resolution.Identity.PathStatus -eq 'Available'
+        if(-not $currentVerified){Assert-RuleMaintenanceOfflineIdentity $resolution}
+        if(-not $resolution.CurrentPath){throw '程序路径或记录身份未知，未取消保存专线。'}
+    }elseif(-not $resolution.CanRepair -or -not $resolution.RequiresRepair -or -not $resolution.CurrentPath){throw '没有唯一、可核对的新程序路径；请先解决路径不可读或多个候选的情况。'}
     if(@(@($snapshot.Engine.entries)+@($snapshot.Engine.programIngresses)+@($snapshot.Launch.entries)|Where-Object {$_.path -ine $path -and (Test-ProgramPathEquivalent $_.path $resolution.CurrentPath $context)}).Count){throw '新程序路径已经存在保存记录，请先处理冲突，未合并线路。'}
     if($launch.Count -and -not (Test-ProgramLaunchAdapterCompatibility $resolution.CurrentPath $launch[0].adapter)){throw '新版本不再符合原启动代理适配方式，未迁移记录。'}
     $profiles=Get-RuleMaintenanceProfiles $snapshot
     foreach($profile in $profiles.Profiles){if((Test-ProgramPathEquivalent $resolution.CurrentPath $profile.AppPath $context) -or (Test-ProgramPathEquivalent $resolution.CurrentPath $profile.CorePath $context)){throw '不能把代理程序自身的路径作为修复目标。'}}
     $mode=$(if($engine.Count -and $launch.Count){'mixed'}elseif($engine.Count){'engine'}else{'launch'})
+    $execution=if($engine.Count){'apply-live'}else{'launch-only'};$serviceFingerprint=''
+    if($engine.Count -and $profiles.Routing.Adapter -eq 'standalone'){
+        $service=Get-RuleMaintenanceServiceObservation $snapshot
+        if($service.State -eq 'unknown'){throw '独立服务停止证据未知；不能把控制接口不可用当作已停止，未修改程序记录。'}
+        if($service.State -eq 'stopped'){
+            if(-not $ReleaseOnly){Assert-RuleMaintenanceOfflineIdentity $resolution}
+            if($launch.Count -or @($snapshot.Shortcuts.entries|Where-Object {$_.program -ieq $path}).Count){throw '离线修复暂不迁移启动代理或快捷方式记录；请核对相关入口，未修改原生快捷方式。'}
+            $execution='saved-only';$serviceFingerprint=$service.Fingerprint
+        }
+    }
     $impact=$(if($engine.Count){'保留线路和默认出口，仅替换该程序路径并核对已运行引擎；新连接生效。'}else{'保留目标线路，更新仍归本工具的代理启动入口；已运行程序需要自行保存任务后重新打开。'})
-    [pscustomobject]@{Version=1;DataDirectory=[IO.Path]::GetFullPath($script:DataRoot);SavedPath=$path;CurrentPath=$resolution.CurrentPath;Mode=$mode;CreatedAt=[DateTime]::UtcNow.ToString('o');SnapshotFingerprint=$snapshot.Fingerprint;IdentityFingerprint=(Get-RuleMaintenanceIdentityFingerprint $resolution);Identity=$resolution.Identity;Message=('将保存记录从 '+$path+' 修复为 '+$resolution.CurrentPath+'。');Impact=$impact}
+    if($execution -eq 'saved-only'){$impact='仅迁移此程序的保存路径与已验证包身份，保留线路、默认出口、固定入口标识/端口和网站规则；独立服务已停止，规则尚未载入。不会启动服务、修改系统代理、重开程序或改写原生快捷方式。'}
+    [pscustomobject]@{Version=2;Action='repair-path';Execution=$execution;ServiceFingerprint=$serviceFingerprint;DataDirectory=[IO.Path]::GetFullPath($script:DataRoot);SavedPath=$path;CurrentPath=$resolution.CurrentPath;Mode=$mode;CreatedAt=[DateTime]::UtcNow.ToString('o');SnapshotFingerprint=$snapshot.Fingerprint;IdentityFingerprint=(Get-RuleMaintenanceIdentityFingerprint $resolution);Identity=$resolution.Identity;Message=('将保存记录从 '+$path+' 修复为 '+$resolution.CurrentPath+'。');Impact=$impact}
+}
+function Get-ProgramOfflineReleasePlan([string]$SavedPath){
+    $plan=Get-ProgramRuleRepairPlan $SavedPath -ReleaseOnly
+    if($plan.Execution -cne 'saved-only' -or $plan.Mode -cne 'engine'){throw '仅能取消已经明确停止的独立服务中的程序专线；在线服务请使用原有移除流程。'}
+    $snapshot=Get-RuleMaintenanceSnapshot $plan.SavedPath
+    $ids=@($snapshot.Engine.programIngresses|Where-Object {$_.path -ieq $plan.SavedPath}|ForEach-Object id)
+    if(@($snapshot.Engine.siteRules|Where-Object {$_.scope -in $ids}).Count){throw '此程序仍有网站例外；请先核对网站规则，未移除程序入口或相关策略。'}
+    if($snapshot.Fingerprint -cne $plan.SnapshotFingerprint){throw '程序记录在预览期间变化，请重新预览。'}
+    $plan.Action='release-system';$plan.Message='仅取消此程序保存在已停止流向服务中的旧专线，使它不再单独设置流向线路。'
+    $plan.Impact='仅移除精确旧路径的程序规则或固定入口记录。保留其他程序、默认出口、网站规则、选择记录与 Windows 系统代理；不会启动服务或重开软件。软件是否采用当前系统代理仍需实际连接核对；这不是“跟随流向统一线路”。'
+    $plan
 }
 function New-RuleMaintenanceBackup($Snapshot,[string]$Action,[string]$SavedPath,[string]$CurrentPath){
     $directory=Join-Path $script:DataRoot ('backups\program-maintenance\'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[Guid]::NewGuid().ToString('N'))
@@ -178,12 +247,12 @@ function Assert-ManagedIngressRemoval($Snapshot,[string]$SavedPath,$Entries){
     })
     if($active.Count){throw '固定入口仍有活动或正在建立的 TCP 连接；未移除入口。请先保存任务并完整退出相关程序，或选择“跟随统一线路”。'}
 }
-function Invoke-RuleMaintenanceChange($Snapshot,[string]$SavedPath,[string]$CurrentPath,$Identity,[switch]$Remove){
+function Invoke-RuleMaintenanceChange($Snapshot,[string]$SavedPath,[string]$CurrentPath,$Identity,[switch]$Remove,$OfflinePlan=$null){
     # Invoke-AppRouter exports this object; bind it to exactly the previewed configuration bytes.
     $script:Profiles=Get-RuleMaintenanceProfiles $Snapshot
     $engineEntries=@(@($Snapshot.Engine.entries)+@($Snapshot.Engine.programIngresses)|Where-Object {$_.path -ieq $SavedPath});$launchEntries=@($Snapshot.Launch.entries|Where-Object {$_.path -ieq $SavedPath})
     $managedEntries=@($Snapshot.Engine.programIngresses|Where-Object {$_.path -ieq $SavedPath})
-    if($managedEntries.Count -and $Remove){
+    if($managedEntries.Count -and $Remove -and -not $OfflinePlan){
         Assert-ManagedIngressRemoval $Snapshot $SavedPath $managedEntries
     }
     if($managedEntries.Count -and -not $Remove){
@@ -191,9 +260,9 @@ function Invoke-RuleMaintenanceChange($Snapshot,[string]$SavedPath,[string]$Curr
         $environmentCompatible=$launchEntries.Count -eq 1 -and $launchEntries[0].adapter -ceq 'environment' -and (Test-ProgramLaunchAdapterCompatibility $CurrentPath 'environment')
         if($adapter -notin @('chromium','qtwebengine') -and -not $environmentCompatible){throw '新程序路径不再支持原固定入口启动适配，未迁移规则。'}
     }
-    if($engineEntries.Count){Assert-RuleMaintenanceEngine $Snapshot}
+    if($engineEntries.Count -and -not $OfflinePlan){Assert-RuleMaintenanceEngine $Snapshot}
     $backup=New-RuleMaintenanceBackup $Snapshot $(if($Remove){'remove'}else{'repair'}) $SavedPath $CurrentPath
-    $shortcutPlan=New-RuleMaintenanceShortcutChanges $Snapshot $SavedPath $CurrentPath $backup -Remove:$Remove
+    $shortcutPlan=if($OfflinePlan){[pscustomobject]@{Changes=@();Records=@($Snapshot.Shortcuts.entries);Preserved=0;RestoredUpdated=0}}else{New-RuleMaintenanceShortcutChanges $Snapshot $SavedPath $CurrentPath $backup -Remove:$Remove}
     $nextLaunch=$Snapshot.Launch|ConvertTo-Json -Depth 16|ConvertFrom-Json;$nextEngine=@()
     foreach($entry in @($Snapshot.Engine.entries)){
         if($entry.path -ine $SavedPath){$nextEngine+=@($entry);continue};if($Remove){continue}
@@ -213,19 +282,29 @@ function Invoke-RuleMaintenanceChange($Snapshot,[string]$SavedPath,[string]$Curr
         $changes+=@([pscustomobject]@{Before=$Snapshot.Files['program-shortcuts.json'];Bytes=(ConvertTo-RuleMaintenanceBytes $nextShortcuts);Remove=$false})
     }
     if($launchEntries.Count){$changes+=@([pscustomobject]@{Before=$Snapshot.Files['program-proxies.json'];Bytes=(ConvertTo-RuleMaintenanceBytes $nextLaunch);Remove=$false})}
+    if($OfflinePlan){
+        $nextState=$Snapshot.Engine|ConvertTo-Json -Depth 16|ConvertFrom-Json;$nextState.entries=@($nextEngine)
+        if($nextState.PSObject.Properties['programIngresses']){$nextState.programIngresses=@($nextIngresses)}
+        $changes=@([pscustomobject]@{Before=$Snapshot.Files['app-rules.json'];Bytes=(ConvertTo-RuleMaintenanceBytes $nextState);Remove=$false})
+    }
     $written=@();$engineHash='';$rollbackProblems=@();$preserved=0
     try{
         if((Get-RuleMaintenanceSnapshot $SavedPath).Fingerprint -cne $Snapshot.Fingerprint){throw '记录或快捷方式在准备期间发生变化，请重新预览。'}
-        if($engineEntries.Count){
+        if($engineEntries.Count -and -not $OfflinePlan){
             $response=Invoke-AppRouter @{action='replace';entries=$nextEngine;defaultRoute=$Snapshot.Engine.defaultRoute;programIngresses=$nextIngresses;siteRules=@($Snapshot.Engine.siteRules|Where-Object {$_});expectedStateHash=$Snapshot.Files['app-rules.json'].TextHash;expectedSettingsHash=$Snapshot.Files['config.json'].TextHash}
             $engineHash=[string](Get-ProgramIdentityValue $response 'stateHash' '')
             if(-not $engineHash){throw '引擎未返回写入归属校验，已保留备份；请刷新核对，不继续改写启动入口。'}
         }
         foreach($change in $changes){
+            if($OfflinePlan){Assert-RuleMaintenanceOfflineState $Snapshot $OfflinePlan.ServiceFingerprint}
             Set-RuleMaintenanceFile $change.Before $change.Bytes $change.Remove
             $written+=@([pscustomobject]@{Before=$change.Before;AfterHash=$(if($change.Remove){'<missing>'}else{Get-RuleMaintenanceHash $change.Bytes})})
         }
         foreach($item in $written){if((Read-RuleMaintenanceFile $item.Before.Path).Hash -cne $item.AfterHash){throw '写入后发现外部更改，保留外部内容。'}}
+        if($OfflinePlan){
+            Assert-RuleMaintenanceOfflineState $Snapshot $OfflinePlan.ServiceFingerprint
+            foreach($name in @('config.json','program-proxies.json','program-shortcuts.json')){if((Read-RuleMaintenanceFile $Snapshot.Files[$name].Path).Hash -cne $Snapshot.Files[$name].Hash){throw '离线记录操作期间配置发生外部修改，未确认完成。'}}
+        }
     }catch{
         $message=$_.Exception.Message
         for($index=$written.Count-1;$index -ge 0;$index--){$item=$written[$index]
@@ -248,18 +327,55 @@ function Invoke-RuleMaintenanceChange($Snapshot,[string]$SavedPath,[string]$Curr
     if($shortcutPlan.Preserved){$message+=' '+$shortcutPlan.Preserved+' 个快捷方式已由其他程序或用户修改，保持原样。'}
     if($shortcutPlan.RestoredUpdated){$message+=' 已将恢复的原入口指向此前确认的新版本；最初备份仍保留。'}
     if(-not $Remove -and $launchEntries.Count){$message+=' 当前运行会话未重启；请自行保存任务并完整退出后，使用修复后的代理入口重开。'}
-    if(-not $Remove -and $engineEntries.Count){$message+=' 引擎规则已核对，新连接生效；已有连接未中断。'}
-    [pscustomobject]@{Message=$message;Backup=$backup.Path;PreservedShortcuts=$shortcutPlan.Preserved;RepairedPath=$CurrentPath;Removed=[bool]$Remove;EngineChanged=($engineEntries.Count -gt 0);LaunchChanged=($launchEntries.Count -gt 0)}
+    if($OfflinePlan){$message=$(if($Remove){'已取消此程序保存在已停止服务中的旧专线；Windows 系统代理保持原样。'}else{'已迁移此程序的保存路径与身份，原线路和固定入口保持；规则尚未载入。'});$message+=' 未启动服务、未重开软件、未改原生快捷方式；实际连接请另行核对。'}
+    elseif(-not $Remove -and $engineEntries.Count){$message+=' 引擎规则已核对，新连接生效；已有连接未中断。'}
+    [pscustomobject]@{Message=$message;Impact=$(if($OfflinePlan){$OfflinePlan.Impact}else{''});Backup=$backup.Path;PreservedShortcuts=$shortcutPlan.Preserved;RepairedPath=$CurrentPath;Removed=[bool]$Remove;EngineChanged=($engineEntries.Count -gt 0);LaunchChanged=($launchEntries.Count -gt 0);RulesLoaded=($engineEntries.Count -gt 0 -and -not $OfflinePlan);Execution=$(if($OfflinePlan){'saved-only'}else{'apply-live'})}
+}
+function Assert-RuleMaintenanceOfflineState($Snapshot,[string]$Fingerprint){
+    $service=Get-RuleMaintenanceServiceObservation $Snapshot
+    if($service.State -cne 'stopped' -or -not $Fingerprint -or $service.Fingerprint -cne $Fingerprint){throw '独立服务状态、入口连接或受保护记录已变化，未执行旧离线方案；请重新预览。'}
+}
+function Assert-RuleMaintenancePlan($Plan,$Fresh){
+    $created=[DateTime]::MinValue
+    if(-not $Plan -or $Plan.Version -notin @(1,2) -or [string]$Plan.DataDirectory -ine [IO.Path]::GetFullPath($script:DataRoot) -or -not [DateTime]::TryParse([string]$Plan.CreatedAt,[ref]$created) -or [DateTime]::UtcNow.Subtract($created.ToUniversalTime()).TotalSeconds -gt 120 -or $created.ToUniversalTime() -gt [DateTime]::UtcNow.AddSeconds(5)){throw '修复预览已过期或来自其他配置目录，请重新预览后确认。'}
+    if($Fresh.SnapshotFingerprint -cne $Plan.SnapshotFingerprint -or $Fresh.IdentityFingerprint -cne $Plan.IdentityFingerprint -or $Fresh.CurrentPath -ine $Plan.CurrentPath -or $Fresh.Mode -ne $Plan.Mode -or ($Plan.Version -eq 2 -and ($Fresh.Action -cne $Plan.Action -or $Fresh.Execution -cne $Plan.Execution -or $Fresh.ServiceFingerprint -cne $Plan.ServiceFingerprint)) -or ($Fresh.Execution -eq 'saved-only' -and $Plan.Version -ne 2)){throw '程序身份、线路、执行范围或快捷方式已经变化，请重新预览后确认。'}
 }
 function Repair-ProgramRule($Plan){
+    if($Plan.Execution -ceq 'saved-only'){
+        if($Plan.Action -cne 'repair-path' -or $Plan.Version -ne 2){throw '请重新预览并确认明确的离线路径修复动作。'}
+        return Invoke-AppRouter @{action='program-record-offline';plan=$Plan}
+    }
     Use-ChangeLock {
-        $created=[DateTime]::MinValue
-        if(-not $Plan -or $Plan.Version -ne 1 -or [string]$Plan.DataDirectory -ine [IO.Path]::GetFullPath($script:DataRoot) -or -not [DateTime]::TryParse([string]$Plan.CreatedAt,[ref]$created) -or [DateTime]::UtcNow.Subtract($created.ToUniversalTime()).TotalSeconds -gt 120 -or $created.ToUniversalTime() -gt [DateTime]::UtcNow.AddSeconds(5)){throw '修复预览已过期或来自其他配置目录，请重新预览后确认。'}
+        Assert-RuleMaintenancePlan $Plan $Plan
         $fresh=Get-ProgramRuleRepairPlan $Plan.SavedPath
-        if($fresh.SnapshotFingerprint -cne $Plan.SnapshotFingerprint -or $fresh.IdentityFingerprint -cne $Plan.IdentityFingerprint -or $fresh.CurrentPath -ine $Plan.CurrentPath -or $fresh.Mode -ne $Plan.Mode){throw '程序身份、线路或快捷方式已经变化，请重新预览后确认。'}
+        Assert-RuleMaintenancePlan $Plan $fresh
         $snapshot=Get-RuleMaintenanceSnapshot $fresh.SavedPath
         if($snapshot.Fingerprint -cne $fresh.SnapshotFingerprint){throw '保存记录已变化，请重新预览后确认。'}
         Invoke-RuleMaintenanceChange $snapshot $fresh.SavedPath $fresh.CurrentPath $fresh.Identity
+    }
+}
+function Remove-ProgramOfflineRule($Plan,[switch]$Confirmed){
+    if(-not $Confirmed -or $Plan.Version -ne 2 -or $Plan.Action -cne 'release-system' -or $Plan.Execution -cne 'saved-only'){throw '请先预览并明确确认仅取消已停止服务中的此程序专线。'}
+    Invoke-AppRouter @{action='program-record-offline';plan=$Plan}
+}
+function Assert-RuleMaintenanceNodeLocks($Locks){
+    $parent=@(Get-ProcessInventory -Id $PID|Select-Object -First 1)[0].ParentId
+    foreach($name in @('start','mutation')){
+        $expected=$Locks.$name;$actual=Read-RuleMaintenanceJson (Read-RuleMaintenanceFile (Join-Path $script:DataRoot ('gateway\'+$name+'.lock'))) $null
+        if(-not $expected.token -or $actual.token -cne $expected.token -or $actual.pid -ne $expected.pid -or [string]$actual.startTicks -cne [string]$expected.startTicks -or $parent -ne $actual.pid -or (Get-RecoveryOwnerState ([pscustomobject]@{OwnerPID=$actual.pid;OwnerStart=$actual.startTicks})) -cne 'alive'){throw '离线操作未持有本次独立服务共享锁，未写入保存记录。'}
+    }
+}
+function Invoke-ProgramOfflineRecordWorker($Plan,$Locks){
+    Assert-RuleMaintenanceNodeLocks $Locks
+    Use-ChangeLock {
+        if($Plan.Version -ne 2 -or $Plan.Execution -cne 'saved-only' -or $Plan.Action -notin @('repair-path','release-system')){throw '离线记录动作不明确，请重新预览。'}
+        Assert-RuleMaintenancePlan $Plan $Plan
+        $fresh=if($Plan.Action -ceq 'release-system'){Get-ProgramOfflineReleasePlan $Plan.SavedPath}else{Get-ProgramRuleRepairPlan $Plan.SavedPath}
+        Assert-RuleMaintenancePlan $Plan $fresh
+        $snapshot=Get-RuleMaintenanceSnapshot $fresh.SavedPath
+        if($snapshot.Fingerprint -cne $fresh.SnapshotFingerprint){throw '保存记录已变化，请重新预览后确认。'}
+        Assert-RuleMaintenanceOfflineState $snapshot $fresh.ServiceFingerprint
+        Invoke-RuleMaintenanceChange $snapshot $fresh.SavedPath $fresh.CurrentPath $fresh.Identity -Remove:($fresh.Action -ceq 'release-system') -OfflinePlan $fresh
     }
 }
 function Remove-SavedProgramRule([string]$SavedPath){
@@ -269,4 +385,14 @@ function Remove-SavedProgramRule([string]$SavedPath){
         if(-not @(@($snapshot.Engine.entries)+@($snapshot.Engine.programIngresses)+@($snapshot.Launch.entries)|Where-Object {$_.path -ieq $path}).Count){throw '该程序没有可移除的保存记录。'}
         Invoke-RuleMaintenanceChange $snapshot $path '' $null -Remove
     }
+}
+if($OfflineRepairWorker){
+    try{
+        $inputText=[Console]::In.ReadToEnd();if($inputText.Length -gt 32768){throw '离线预览过大，未修改记录。'}
+        $offlineBoundRequest=$inputText|ConvertFrom-Json
+        if(-not [IO.Path]::IsPathRooted([string]$offlineBoundRequest.Plan.DataDirectory)){throw '离线配置目录无效。'}
+        . (Join-Path $PSScriptRoot 'ProxyBackend.ps1') -DataDirectory $offlineBoundRequest.Plan.DataDirectory
+        $result=Invoke-ProgramOfflineRecordWorker $offlineBoundRequest.Plan $offlineBoundRequest.Locks
+        [Console]::Out.Write(($result|ConvertTo-Json -Depth 8 -Compress))
+    }catch{[Console]::Out.Write((@{ok=$false;error=$_.Exception.Message}|ConvertTo-Json -Compress));exit 1}
 }

@@ -13,6 +13,7 @@ $script:envs=[pscustomobject]@{HTTP_PROXY='http://127.0.0.1:19001';HTTPS_PROXY='
 $script:ready=@(19002);$script:available=$true;$script:guard=$false;$script:writes=0;$script:usable=$false;$script:probes=@();$script:race='';$script:handoff=$null
 function Get-SystemSnapshot {$script:sys}
 function Get-UserProxyEnv {$script:envs}
+function Get-WindowsApplicationProxyViews {$enabled=[bool]($script:sys.Flags -band 2);[pscustomobject]@{Registry=[pscustomobject]@{Available=$true;Enabled=$enabled;Server=$script:sys.Server};WinHttpIE=[pscustomobject]@{Available=$true;Server=$(if($enabled){$script:sys.Server}else{''});AutoDetect=$false;HasPac=$false}}}
 function Set-SystemSnapshot($Value){$script:writes++;$script:sys=$Value}
 function Set-UserProxyEnv($Value,$ExpectedBefore){$script:writes++;$script:envs=$Value}
 function Get-TcpObservationSnapshot {[pscustomobject]@{Available=$script:available;Rows=@($script:ready|ForEach-Object {[pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=$_;OwningProcess=$PID}})}}
@@ -33,6 +34,24 @@ $script:sys=$savedSystem;$script:envs=$savedEnv;$script:usable=$true;$d=Get-Netw
 $null=Repair-NetworkDiagnosis $d.Revision
 Check ($script:handoff.Route -eq 'b' -and $script:handoff.RepairEntry -and $script:writes -eq $beforeWrites) 'healthy B is delegated to verified gateway migration, not written directly as system proxy'
 Check ($script:probes -notcontains 'owned' -and $script:probes -notcontains 'a') 'does not probe own gateway or known closed port'
+# Daily repair uses the same confirmed external switch, preserving all rules.
+$dailyConfig=$config|ConvertTo-Json -Depth 16|ConvertFrom-Json;$dailyConfig.Routing=[pscustomobject]@{Adapter='none';ProfileId='';UnifiedMode='system'}
+Write-LocalJson $script:ConfigPath $dailyConfig
+$realDailyEndpoint=${function:Get-DailyProxyEndpoint};$realDailyPlan=${function:Get-DailyProxyPlan}
+function Get-DailyProxyEndpoint([string]$Key){[pscustomobject]@{Key=$Key;State=$(if($Key -in @('b','Direct')){'Ready'}else{'Stopped'});Identity=('fixture-'+$Key)}}
+$script:handoff=$null;$script:sys=$savedSystem|ConvertTo-Json|ConvertFrom-Json;$script:envs=$savedEnv|ConvertTo-Json|ConvertFrom-Json
+$d=Get-NetworkDiagnosis;Check ($d.RepairText -match '不启动独立引擎' -and $d.RepairText -match '直接切换') 'daily repair preview explicitly preserves external-client mode'
+$fixed=Repair-NetworkDiagnosis $d.Revision
+Check ($null -eq $script:handoff -and (Get-SystemKey $script:sys) -eq 'b' -and $script:Profiles.Routing.Adapter -eq 'none') 'daily healthy backup switches directly without enabling a gateway'
+Check ([IO.File]::ReadAllText((Join-Path $qa 'app-rules.json')) -ceq $rules -and $script:envs.NO_PROXY -eq $savedEnv.NO_PROXY) 'daily backup repair preserves all program rules and NO_PROXY'
+$script:sys=$savedSystem|ConvertTo-Json|ConvertFrom-Json;$script:envs=$savedEnv|ConvertTo-Json|ConvertFrom-Json;[IO.File]::WriteAllText($script:StatePath,$selection)
+$d=Get-NetworkDiagnosis;$beforeWrites=$script:writes;$script:mutateDailyPlan=$true
+function Get-DailyProxyPlan([string]$Key){if($script:mutateDailyPlan){$script:mutateDailyPlan=$false;Write-LocalJson $script:StatePath @{Key='b';external='changed-before-daily-plan'}};& $realDailyPlan $Key}
+$failed=$false;try{Repair-NetworkDiagnosis $d.Revision|Out-Null}catch{$failed=$true}
+Check ($failed -and $script:writes -eq $beforeWrites -and (Get-Selection).external -eq 'changed-before-daily-plan') 'daily handoff retains the original diagnosis revision and preserves a later external selection'
+Set-Item Function:Get-DailyProxyEndpoint $realDailyEndpoint;Set-Item Function:Get-DailyProxyPlan $realDailyPlan
+Write-LocalJson $script:ConfigPath $config;[IO.File]::WriteAllText($script:StatePath,$selection)
+$script:sys=$savedSystem|ConvertTo-Json|ConvertFrom-Json;$script:envs=$savedEnv|ConvertTo-Json|ConvertFrom-Json;$script:Profiles=Read-ProfileSettings
 $script:sys.Server='localhost:19999';$d=Get-NetworkDiagnosis
 Check ($d.RepairAction -eq 'repair-dead-entry') 'uninstalled and removed profile can still be repaired from simple loopback endpoint'
 $script:ready+=19999;function Test-NetworkTargets {throw 'Unknown endpoint must not be actively probed'};$d=Get-NetworkDiagnosis -Probe

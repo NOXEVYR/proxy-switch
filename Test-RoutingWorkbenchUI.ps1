@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FlowWebsiteVisual{[DllImport("user32.dll")]public static extern int GetWindowLong(IntPtr window,int index);}'
 $qa=Join-Path $env:TEMP ('FlowSwitch-routing-workbench-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($qa)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBackend.ps1','ProgramRouteAccess.ps1','QtProgramAccess.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','Updates.ps1','ProxyBackend.ps1','DailyProxy.ps1','ProgramRouteAccess.ps1','QtProgramAccess.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','ExternalMihomoObservation.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProgramLaunch.ps1','ProcessInventory.ps1','ProgramIdentity.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','ProxyDiscovery.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}
 [void][IO.Directory]::CreateDirectory((Join-Path $qa 'assets'))
 foreach($name in @('ManagedRouting.ps1','ProgramFamilyTracking.ps1','RoutePolicy.ps1')){if(Test-Path -LiteralPath (Join-Path $PSScriptRoot $name)){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $qa}}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets/FlowSwitch.ico') -Destination (Join-Path $qa 'assets/FlowSwitch.ico')
@@ -185,10 +185,37 @@ $checks=@'
         $liveList.Items[0].Selected=$true;Set-UiActionAvailability
         Check-UI ($programLaunchButton.Text -eq '应用线路并检查' -and $programLaunchButton.Enabled) 'Running non-native launcher has an actionable reapply control rather than a disabled launch promise'
         Check-UI ($programHint.Text -match '系统入口绕过流向' -and $programHint.Text -match '保留其他专线') 'Entry bypass is explained next to the actual selected-object control'
+        $script:Requested=$null;$programDiagnoseButton.PerformClick()
+        Check-UI ($script:Requested.Kind -eq 'ProgramNetworkDiagnose' -and $script:Requested.Key -ceq $engine.Path) 'Visible self-service diagnosis checks the selected program without changing its route'
         $script:Requested=$null;$programLaunchButton.PerformClick();$access=$script:Requested.Key|ConvertFrom-Json
         Check-UI ($script:Requested.Kind -eq 'ProgramAccessPlan' -and $access.path -ceq $engine.Path -and $access.route -eq 'Direct') 'Engine primary action previews exact selected game and Direct route without launching or switching all programs'
         $engine.RequiresRepair=$true;Show-Applications ([pscustomobject]@{Rows=@($engine);RuleCount=1;Available=$true;RulesAvailable=$true;TcpAvailable=$true});$liveList.Items[0].Selected=$true;Set-UiActionAvailability
         Check-UI (-not $programLaunchButton.Enabled) 'Changed executable identity cannot reapply an obsolete saved path'
+        Check-UI $programDiagnoseButton.Enabled 'Read-only diagnosis remains available to explain a changed program identity'
+        Check-UI (-not $routeButton.Enabled -and $programHint.Text -match '候选不唯一或无法核验') 'Unknown replacement identity cannot be used for a route edit'
+        $engine|Add-Member NoteProperty CanRepair $true -Force;$engine|Add-Member NoteProperty SavedPath 'C:\Fixtures\old-game.exe' -Force
+        Set-UiActionAvailability
+        Check-UI ($routeButton.Enabled -and $routeButton.Text -eq '修复路径后改线…') 'Verified repairable identity exposes an actionable route-edit recovery control'
+        Check-UI ($programHint.Text -match '旧线路只是保存目标' -and $programHint.Text -match '实际连接') 'Old saved intent is explained independently from observed connections'
+        $script:Requested=$null;$routeButton.PerformClick()
+        Check-UI ($script:Requested.Kind -eq 'AppRepairPlan' -and $script:Requested.Key -ceq $engine.SavedPath) 'Primary route button previews the selected old record instead of changing the live network'
+        Set-RouteMenuItems $routeMenu.Items
+        Check-UI ($routeMenu.Items[0].Text -eq '先修复程序路径记录…' -and $routeMenu.Items[0].Enabled) 'Route menu exposes the same repair path instead of only disabled route choices'
+        $script:Requested=$null;$routeMenu.Items[0].PerformClick()
+        Check-UI ($script:Requested.Kind -eq 'AppRepairPlan' -and $script:Requested.Key -ceq $engine.SavedPath) 'Menu recovery targets exactly the saved program record'
+        $script:Requested=$null;Request-ApplicationRoute 'Direct'
+        Check-UI ($null -eq $script:Requested) 'Repair affordance does not bypass the unchanged route-write identity guard'
+        $appMenu.Show($liveList,(New-Object Drawing.Point(1,1)));$recordsMenu.ShowDropDown();[Windows.Forms.Application]::DoEvents()
+        $script:Requested=$null;$systemFollowItem.PerformClick();$appMenu.Close()
+        Check-UI ($script:Requested.Kind -eq 'ProgramSystemProxyPlan' -and $script:Requested.Key -ceq $engine.SavedPath) ('Use current Windows proxy previews release of exactly the selected saved record; request='+($script:Requested|ConvertTo-Json -Compress)+'; target='+$script:AppTarget.SavedPath+'; enabled='+$systemFollowItem.Enabled+'; available='+$systemFollowItem.Available+'; disposed='+$systemFollowItem.IsDisposed)
+        Check-UI ($systemFollowItem.OwnerItem -eq $recordsMenu -and $systemFollowItem.ToolTipText -match '与“跟随统一线路”不同') 'Current Windows proxy action stays visible in records and distinct from gateway Follow'
+        $script:Requested=$null;@($routeMenu.Items|Where-Object {$_.Text -eq '使用系统代理（取消已停用专线）…'})[0].PerformClick()
+        Check-UI ($script:Requested.Kind -eq 'ProgramSystemProxyPlan') 'Route menu offers explicit stopped-service release without invoking Follow route mutation'
+        $engine.RequiresRepair=$false;$engine.CanRepair=$false;$engine.SavedPath=$engine.Path
+        Show-Applications ([pscustomobject]@{Rows=@($engine);RuleCount=1;Available=$true;RulesAvailable=$true;TcpAvailable=$true})
+        foreach($item in $liveList.Items){$item.Selected=$false}
+        Select-ProgramAfterRecordChange $engine.Path
+        Check-UI ($liveList.SelectedItems.Count -eq 1 -and $liveList.SelectedItems[0].Tag.Path -ceq $engine.Path -and $routeButton.Enabled -and $routeButton.Text -eq '设置此程序线路 ▾') 'Successful record migration reselects the refreshed row and restores its editable route picker'
         $preview=[pscustomobject]@{Path='C:\Fixtures\game.exe';Route='Direct';CanApply=$true;Message='确认后接回流向入口。';Impact='保留其他程序专线、网站规则和有效备用。';FamilyPlan=[pscustomobject]@{Members=@([pscustomobject]@{Name='game';Path='C:\Fixtures\game.exe';State='Conflict';Reason='原先走A'},[pscustomobject]@{Name='child-fixed';Path='C:\Fixtures\fixed.exe';State='Conflict';Reason='子程序专线B'})+@(0..149|ForEach-Object {[pscustomobject]@{Name=('helper-'+$_);State='Missing';Reason='同安装目录、已核验父子关系。'}})}}
         $accessDialog=New-ProgramRouteAccessDialog $preview
         try{

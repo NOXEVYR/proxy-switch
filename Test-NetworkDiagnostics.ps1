@@ -21,11 +21,19 @@ function Test-RecoveryEndpoint($Endpoint){$Endpoint -match ':19001$'}
 function Get-ItemPropertyValue {param($LiteralPath,$Name,$ErrorAction);throw 'No isolated RunOnce registration'}
 function Remove-ItemProperty {throw 'No user registry writes allowed'}
 function Test-NetworkTargets($Profile){$script:probes++;@([pscustomobject]@{Name='Fixture';Stage='https-response';HttpCode=403;AuthenticationVerified=$false})}
+function Get-WindowsApplicationProxyViews {[pscustomobject]@{Registry=[pscustomobject]@{Available=$false};WinHttpIE=[pscustomobject]@{Available=$false}}}
+$script:externalReads=0
+function Get-ExternalMihomoObservation($Tcp){$script:externalReads++;[pscustomobject]@{State='not-configured';Rows=@();ConnectionCount=0}}
 $d=Get-NetworkDiagnosis
 Check ($d.Issues.Code -contains 'environment-entry-down' -and $d.RepairAction -eq 'align-environment') 'dead variables produce an explicit repair plan'
 Check ($script:writes -eq 0 -and $script:probes -eq 0) 'ordinary diagnosis neither mutates settings nor sends site requests'
+Check ($script:externalReads -eq 0 -and $null -eq $d.ExternalMihomo -and $null -eq $d.ApplicationProxyViews) 'passive diagnosis never reads external connection API or proxy-view details'
 $null=Get-NetworkDiagnosis -Probe
 Check ($script:probes -eq 1) 'explicit probe is opt-in'
+Check ($script:externalReads -eq 1) 'external connection API is explicit-probe only'
+$previousEnv=$script:envs;$script:envs=[pscustomobject]@{HTTP_PROXY=$null;HTTPS_PROXY=$null;ALL_PROXY=$null;NO_PROXY='localhost'}
+Check (((Get-NetworkDiagnosis).Issues|Where-Object Code -eq 'environment-mismatch').Message -match '未设置.+不等同于 ChatGPT' -and $script:writes -eq 0) 'unset user variables are distinguished without injecting global proxy variables'
+$script:envs=$previousEnv
 Check ((Get-NetworkDiagnosis -Probe).Message -match '错误响应') 'HTTP 403 is not described as target success'
 $script:available=$false;$unknown=Get-NetworkDiagnosis
 Check ($unknown.Issues.Code -contains 'observation-unknown' -and -not $unknown.RepairAction) 'failed observation cannot authorize alignment'
@@ -107,13 +115,16 @@ $session.OwnerPID=$PID;$session.OwnerStart=Get-ProcessStartTicks $PID;Write-Loca
 $script:attempts=0;& ([scriptblock]::Create($watch))
 Check ($script:attempts -eq 0) 'delayed logon recovery does not stop a current live UI'
 $script:sys=[pscustomobject]@{Flags=1;Server='';Bypass='localhost'}
-function Get-ClientInterference {[pscustomobject]@{Tun=$true;Guard=$false;Topology=[pscustomobject]@{State='Evidence';HasTunnelRouteEvidence=$true}}}
+function Get-ClientInterference {[pscustomobject]@{Tun=$true;Guard=$false;Topology=[pscustomobject]@{State='Evidence';IPv4='Evidence';IPv6='Unknown';Available=$true;ObservedAt='2026-10-17T00:00:00Z';HasTunnelRouteEvidence=$true}}}
 $writes=$script:writes;$d=Get-NetworkDiagnosis
 Check ($d.Issues.Code -contains 'external-proxy-control' -and ($d.Issues|Where-Object Code -eq 'system-direct').Message -match '不代表物理直连' -and $script:writes -eq $writes) 'External tunnel plus disabled application proxy cannot be presented as physical direct access or change Windows'
+Check ($d.TopologySummary.State -eq 'Evidence' -and $d.TopologySummary.IPv4 -eq 'Evidence' -and $d.TopologySummary.IPv6 -eq 'Unknown' -and $d.TopologySummary.Available) 'System report preserves safe dual-stack topology evidence independently of application proxy state'
 function Get-ClientInterference {[pscustomobject]@{Tun=$false;Guard=$false;Topology=[pscustomobject]@{State='Unknown'}}}
 $d=Get-NetworkDiagnosis
 Check ($d.Issues.Code -contains 'topology-unknown') 'Unavailable adapter/route evidence remains unknown in diagnosis'
+Check ($d.TopologySummary.State -eq 'Unknown' -and $d.TopologySummary.IPv4 -eq 'Unknown' -and -not $d.TopologySummary.Available) 'Unknown topology must not be reported as no tunnel evidence or available'
 function Get-ClientInterference {[pscustomobject]@{Tun=$true;Guard=$false;Topology=[pscustomobject]@{State='NoEvidence';HasTunnelRouteEvidence=$false}}}
 $d=Get-NetworkDiagnosis
 Check (($d.Issues|Where-Object Code -eq 'system-direct').Message -match '配置开启' -and ($d.Issues|Where-Object Code -eq 'system-direct').Message -notmatch '存在外部隧道路由') 'Client TUN configuration alone cannot masquerade as observed system routes'
+Check ($d.TopologySummary.State -eq 'NoEvidence') 'No-evidence topology remains distinct from unknown and observed tunnel routes'
 Write-Output ('PASS: '+$script:checks+' network diagnosis and repair checks; isolated data and Windows-setting stubs only.')

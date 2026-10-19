@@ -3,7 +3,7 @@ Add-Type -AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::ThrowException)
 $source=$PSScriptRoot
 $qaRoot=Join-Path $env:TEMP ('ProxySwitch-action-ui-'+[Guid]::NewGuid().ToString('N'));[void][IO.Directory]::CreateDirectory($qaRoot)
-foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','UiGuidance.ps1','Updates.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProxyBackend.ps1','ProgramRouteAccess.ps1','QtProgramAccess.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','ProxyDiscovery.ps1','ProcessInventory.ps1','ProgramLaunch.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $source $name) -Destination $qaRoot}
+foreach($name in @('ProxySwitch.ps1','ProxyWindow.ps1','UiGuidance.ps1','Updates.ps1','DesktopBranding.cs','ShellShortcut.cs','FlowTheme.cs','ProxyBackend.ps1','DailyProxy.ps1','ProgramRouteAccess.ps1','QtProgramAccess.ps1','ProgramFamilyRouting.ps1','ProgramCleanStart.ps1','CleanStartWorker.ps1','ProgramIdentity.ps1','ManagedRouting.ps1','ProgramFamilyTracking.ps1','ApplicationObservation.ps1','RuleMaintenance.ps1','Preferences.ps1','Storage.ps1','RuntimeSupport.ps1','IndependentGateway.ps1','NetworkDiagnostics.ps1','ExternalMihomoObservation.ps1','GatewayWatchdog.ps1','IndependentRouter.cjs','RoutePolicy.cjs','GatewayPortOwnership.ps1','ProxyDiscovery.ps1','ProcessInventory.ps1','ProgramLaunch.ps1','AppRouting.ps1','AppRouter.cjs','config.defaults.json')){Copy-Item -LiteralPath (Join-Path $source $name) -Destination $qaRoot}
 [void][IO.Directory]::CreateDirectory((Join-Path $qaRoot 'assets'))
 Copy-Item -LiteralPath (Join-Path $source 'assets/FlowSwitch.ico') -Destination (Join-Path $qaRoot 'assets/FlowSwitch.ico')
 # Isolated Windows fixtures must not contend with the real manager or other test windows.
@@ -20,15 +20,19 @@ $config=@{Version=3;Routing=@{Adapter='none';ProfileId=''};Profiles=@(@{Id='alph
 
 # This test owns the UI dispatch/priority boundary; managed gateway migration is
 # covered by Test-ManagedRouting and the real-core integration suite.
-function Set-UniversalProxy([string]$Key){
+function Set-DailyProxy($Plan,[switch]$Confirmed){
+    if(-not $Confirmed){throw 'Daily switch bypassed confirmation'}
+    $Key=$Plan.Key
     [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'universal-request'),$Key)
     Set-SelectedProxy $Key
 }
+function Get-DailyProxyPlan([string]$Key){[pscustomobject]@{Key=$Key;CanApply=$true;NoChange=$false;Message='Fixture plan'}}
 function Get-SystemSnapshot {Get-Content -LiteralPath (Join-Path $PSScriptRoot 'system.json') -Raw|ConvertFrom-Json}
 function Get-UserProxyEnv {Get-Content -LiteralPath (Join-Path $PSScriptRoot 'env.json') -Raw|ConvertFrom-Json}
 function Set-SystemSnapshot($Value){Write-LocalJson (Join-Path $PSScriptRoot 'system.json') $Value}
 function Set-UserProxyEnv($Value){Write-LocalJson (Join-Path $PSScriptRoot 'env.json') $Value}
 function Get-Process {param($Name)}
+function Get-ClientInterference {[pscustomobject]@{Running=$false;Tun=$false;Guard=$false;SystemProxy=$false}}
 function Get-ClientWarnings {}
 function Get-OverrideWarnings {}
 function Get-LiveConnections {}
@@ -42,6 +46,13 @@ function Sync-AutomaticProxyDiscovery($Cache,$Cancellation){
     [pscustomobject]@{Detected=0;Added=0;Names=@();Cache=@();CheckedAt='12:00:00'}
 }
 '@,$encoding)
+$windowPath=Join-Path $qaRoot 'ProxyWindow.ps1'
+$windowText=[IO.File]::ReadAllText($windowPath)
+$windowText=$windowText.Replace('$timer.Start();[Windows.Forms.Application]::Run($form)',@'
+function Show-DailyProxyPlan($Plan,[bool]$Undo=$false){$script:PendingAction=[pscustomobject]@{Kind='DailyApply';Key=($Plan|ConvertTo-Json -Compress)}}
+$timer.Start();[Windows.Forms.Application]::Run($form)
+'@)
+[IO.File]::WriteAllText($windowPath,$windowText,$encoding)
 $path=Join-Path $qaRoot 'ProxyWindow.ps1';$text=[IO.File]::ReadAllText($path).Replace('$timer.Start();[Windows.Forms.Application]::Run($form)','$form.Opacity=0;$form.ShowInTaskbar=$false;$timer.Start();[Windows.Forms.Application]::Run($form)');[IO.File]::WriteAllText($path,$text,$encoding)
 function Find-Control($Parent,[string]$Text){foreach($c in $Parent.Controls){if($c.Text -eq $Text){return $c};$found=Find-Control $c $Text;if($found){return $found}}}
 function Find-Type($Parent,[type]$Type){foreach($c in $Parent.Controls){if($c -is $Type){$c};Find-Type $c $Type}}
@@ -55,9 +66,9 @@ $qaTimer.Add_Tick({
         if($global:step -eq 0 -and (Test-Path -LiteralPath (Join-Path $qaRoot 'inspection-started'))){
             $combo.SelectedIndex=2
             [void]$combo.GetType().GetMethod('OnSelectionChangeCommitted',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($combo,@([EventArgs]::Empty))
-            $global:clickedAt=$clock.Elapsed.TotalSeconds;(Find-Control $main '统一切换').PerformClick();$global:step=1
+            $global:clickedAt=$clock.Elapsed.TotalSeconds;(Find-Control $main '预览切换…').PerformClick();$global:step=1
         }elseif($global:step -eq 1 -and (Find-Control $main 'QA Beta')){
-            if((Get-Content -LiteralPath (Join-Path $qaRoot 'universal-request') -Raw) -ne 'beta'){throw 'UI did not dispatch the universal route action'}
+            if((Get-Content -LiteralPath (Join-Path $qaRoot 'universal-request') -Raw) -ne 'beta'){throw 'UI did not dispatch the confirmed daily route action'}
             $system=Get-Content -LiteralPath (Join-Path $qaRoot 'system.json') -Raw|ConvertFrom-Json
             $environment=Get-Content -LiteralPath (Join-Path $qaRoot 'env.json') -Raw|ConvertFrom-Json
             if($system.Server -ne '127.0.0.1:18082' -or $environment.HTTPS_PROXY -ne 'http://127.0.0.1:18082'){throw 'UI changed without applying both settings'}
@@ -70,4 +81,4 @@ $qaTimer.Add_Tick({
 })
 $qaTimer.Start();try{& (Join-Path $qaRoot 'ProxySwitch.ps1')}finally{$qaTimer.Stop();$qaTimer.Dispose()}
 if($global:failure){throw $global:failure};if($global:step -ne 2){throw 'Switch UI incomplete'}
-'PASS: manual switch preempted inspection, used fast checks, dispatched the universal route action, applied simulated system/environment snapshots and displayed progress; gateway migration is a separate test.'
+'PASS: manual daily plan preempted inspection, confirmed apply used fast checks, applied simulated system/environment snapshots and displayed progress; gateway migration is a separate test.'

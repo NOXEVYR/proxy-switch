@@ -1,22 +1,25 @@
-# 流向 FlowSwitch：Windows 3.9.9 预览版 / 稳定版 3.9.6
+﻿# 流向 FlowSwitch：Windows 3.10.1 可选预览准备
 
-**3.9.9 是可选预览版，稳定版和自动更新通道继续使用 3.9.6。** 本次新增被动只读体检，收紧修复事务和隐私边界，修正维护页第三排的布局，并补齐测试与成品包。它管理你已有的代理，不提供 VPN 服务、订阅或节点。
+**准备发布目标为 `v3.10.1-preview.1` 可选预览，稳定更新通道保留 3.9.6；发布完成与附件可用性以发布页为准。** 3.10.1 加入旧代理残留检查，并保留 3.10.0 日常代理管理。日常模式显示当前管理方和 Windows 代理视图分歧，通过预览切换已登记的本机 HTTP 入口；保留程序规则，不自动启动独立网关。已登记的代理客户端提供可核验本地 HTTP 入口后，可按需预览选择。它管理你已有的代理，不提供 VPN 服务、订阅或节点。
 
-**[3.9.9 预览版发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.9-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/FlowSwitch-v3.9.9-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/FlowSwitch-v3.9.9-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.9.9-preview.1/BUILD.txt)
+**[3.10.1 可选预览目标发布页](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.1-preview.1)** · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/FlowSwitch-v3.10.1-Windows-x64.zip) · [冻结源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/FlowSwitch-v3.10.1-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/SHA256SUMS.txt) · [包与源码对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.1-preview.1/BUILD.txt)
+
+以上为本次准备发布的目标链接，附件上传完成前可能不可用。稳定通道仍使用 [3.9.6](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.6)。
 
 ## 这版怎么用
 
-- 全局选线：在「代理入口」准备可用代理，再到「网络切换」选择线路并明确应用。
+- 日常选线：在原代理客户端连接，到「代理入口」检测，再到「网络切换」选择并预览。当前已生效时无需重新应用；返回原入口同样操作。撤回会重新核验最近切换归属，不恢复失效入口或原来的代理视图分歧。
 - 单程序选线：在「程序线路」选择准确 EXE，设置线路并核对接入预览。支持启动适配的程序通过「按此线路打开」接入固定入口；环境适配在「更多设置 → 启动与桌面入口 → 命令行 / 后台代理环境…」中预览。首次接入前保存工作并正常退出目标程序及启动源。
 - 网络排查：在「检查与维护 → 维护与恢复 → 只读体检」检查设置；需要修复时到「连接检查」查看并确认修复计划。机器级变量、hosts、游戏绕过和第三方 TUN 只检查，不自动改写或提权。
+- 旧代理残留：主页或「程序线路」点击「检查旧代理残留」，查看各 PID 的代理端口、监听与连接证据。仅在明确点击时读取支持的 Chromium/Electron、显式环境适配程序及已核验后台的代理摘要；排除已识别游戏/反作弊目录、Windows 系统目录及已登记代理客户端，未知不判失效。出问题时保存工作、完整正常退出整组程序，再预览一次性按当前系统代理启动；运行中拒绝启动，已有专线保留并提示回程序线路处理。CLI：`powershell ProxySwitch.ps1 -CheckProxyResidue [-Program <EXE路径>]`。
 
 [完整操作与撤回](USER_GUIDE.md) · [体检说明](智能体检-使用说明.md) · [3.9.9 更新与验收范围](.github/release-notes-3.9.9-preview.1.md)
 
-新增 40 项智能体检隔离测试；完整 47 组 PowerShell、7 组 Node 回归、86 项实际控件检查、24 项 Windows 成品检查通过。小工作区 100% / 125% / 150% 布局与字体模拟各 82 张控件截图通过可达性和文字边界检查。曾出现一次离线撤回查询间歇失败，原因尚未确定；原测试复测及最终完整回归通过，保留失败记录。[详细验证记录](TEST_REPORT.md)
+3.10.1 已通过完整 Test-All、62 项进程读取、51 项处理逻辑、两档各 30 项新界面和 30 项 Windows 成品检查。日常界面两档各 69 项，普通界面覆盖小工作区与 150% 模拟缩放。Windows 包含 64 文件，源码清单 200 项。真实 VPN 链路、账号请求和长期在线仍需分别验证。[最终验证与历史记录](TEST_REPORT.md)
 
 **真实目标程序请求、OAuth 回传、目标程序请求、游戏登录及长期在线仍需目标电脑验收。** 保存线路不会刷新旧进程的环境和缓存；只调配进入固定入口的连接。直连不保证绕过外部 VPN/TUN，独立服务、UDP/QUIC 不保证覆盖。规则保存、TCP 观察、入口就绪和登录成功是不同状态。
 
-程序包包含 57 项运行文件，源码清单包含 179 项文件，源码冻结提交为 [修订来源说明](https://github.com/NOXEVYR/proxy-switch/releases)。历史交付记录中的 ZIP 对应当时版本；去个人化修订后的摘要以 BUILD.txt 为准；源码 ZIP 内 README/TEST_REPORT 是打包时的「本机候选」记录。之后仅公开说明更新，发布状态及对应关系以本页、发布页和 BUILD.txt 为准。本预览不提供稳定差分更新资产。
+以下为 [3.9.9 历史预览版](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.9.9-preview.1) 的交付记录，不属于 3.10.1：当时程序包包含 57 项运行文件，源码清单包含 179 项文件，源码冻结提交为 [修订来源说明](https://github.com/NOXEVYR/proxy-switch/releases)。该版历史交付记录中的 ZIP 对应当时版本；去个人化修订后的摘要以 BUILD.txt 为准，源码 ZIP 内 README/TEST_REPORT 是打包时的「本机候选」记录。3.9.9 不提供稳定差分更新资产。3.10.1 的最终包、源码提交与摘要以本次发布页及 BUILD.txt 为准。
 
 3.9.8 发布准备记录继续保留，其 Release 仍为未上传附件的草稿，不能作为公开下载入口。下方保留 3.9.7 预览版和 3.9.6 稳定版。
 

@@ -125,7 +125,7 @@ $cards=New-Object Windows.Forms.TableLayoutPanel;$cards.Dock='Fill';$cards.Colum
 for($i=0;$i -lt 3;$i++){[void]$cards.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,33.333)))}
 $homeGrid.Controls.Add($cards,0,0);$panels=@()
 for($i=0;$i -lt 3;$i++){$p=New-Object FlowSwitch.UI.SurfacePanel;$p.Dock='Fill';$p.Margin=New-Object Windows.Forms.Padding(0,0,$(if($i -lt 2){12}else{0}),12);$cards.Controls.Add($p,$i,0);$panels+=$p}
-$cardCaption=New-Label $panels[0] '当前系统出口' 16 10 260 22 9;$cardCaption.ForeColor=$muted
+$cardCaption=New-Label $panels[0] '当前系统代理' 16 10 260 22 9;$cardCaption.ForeColor=$muted
 $entryValue=New-Label $panels[0] '正在读取…' 16 32 280 29 14 $true
 $systemLabel=New-Label $panels[0] 'Windows / 浏览器 / 命令行' 16 61 290 21 8;$systemLabel.ForeColor=$muted
 $cardCaption=New-Label $panels[1] '可选代理入口' 16 10 260 22 9;$cardCaption.ForeColor=$muted
@@ -144,14 +144,14 @@ $switchActions=New-Object Windows.Forms.TableLayoutPanel;$switchActions.Dock='Fi
 for($i=0;$i -lt 2;$i++){[void]$switchActions.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent,50)));[void]$switchActions.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent,50)))};$switchGrid.Controls.Add($switchActions,0,2)
 $networkChoice=New-Object FlowSwitch.UI.RouteChoice;$networkChoice.Name='UnifiedRouteChoice';$networkChoice.DropDownStyle='DropDownList';$networkChoice.DisplayMember='Name';$networkChoice.Dock='Fill';$networkChoice.Margin=New-Object Windows.Forms.Padding(0,3,12,3);$switchActions.Controls.Add($networkChoice,0,0)
 $switchActions.SetColumnSpan($networkChoice,2)
-$networkChoice.Add_SelectionChangeCommitted({$script:ChoiceDirty=$true;$noticeLabel.Text='已选择待应用目标；点击「统一切换」才会更改网络。'})
-$unify=New-Button $switchActions '统一切换' 0 0 146 38 {if($networkChoice.SelectedItem){Start-Work 'Switch' $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}};$unify.Dock='Fill';$unify.Margin=New-Object Windows.Forms.Padding(0,4,12,0);$unify.Primary=$true;$switchActions.SetCellPosition($unify,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
-$undo=New-Button $switchActions '撤回线路更改' 0 0 170 38 {Start-Work 'Restore' ''};$undo.Dock='Fill';$undo.Margin=New-Object Windows.Forms.Padding(0,4,0,0);$switchActions.SetCellPosition($undo,(New-Object Windows.Forms.TableLayoutPanelCellPosition(1,1)))
+$networkChoice.Add_SelectionChangeCommitted({$script:ChoiceDirty=$true;$noticeLabel.Text='下拉框只是待选目标；当前系统代理以上方实读状态为准。';Update-DailyProxyControls})
+$unify=New-Button $switchActions '预览切换…' 0 0 146 38 {if($networkChoice.SelectedItem){Start-Work $(if($script:Profiles.Routing.Adapter -eq 'none'){'DailyPlan'}else{'Switch'}) $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}};$unify.Dock='Fill';$unify.Margin=New-Object Windows.Forms.Padding(0,4,12,0);$unify.Primary=$true;$switchActions.SetCellPosition($unify,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
+$undo=New-Button $switchActions '撤回上次切换…' 0 0 170 38 {Start-Work $(if($script:Profiles.Routing.Adapter -eq 'none'){'DailyUndoPlan'}else{'Restore'}) ''};$undo.Dock='Fill';$undo.Margin=New-Object Windows.Forms.Padding(0,4,0,0);$switchActions.SetCellPosition($undo,(New-Object Windows.Forms.TableLayoutPanelCellPosition(1,1)))
 $homeTasks=New-CardGrid $null;$homeGrid.Controls.Add($homeTasks,0,2)
-$null=New-TaskCard $homeTasks 0 0 '1. 准备代理入口' '先运行你已有的代理软件，再发现或填写地址。这里登记入口，不提供代理节点。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
-$null=New-TaskCard $homeTasks 1 0 '2. 为程序单独选线' '希望某个程序走另一条线路？选择它的 EXE 或快捷方式，再设置线路和打开方式。' '设置程序线路' {$tabs.SelectedTab=$programPage}
-$websiteButton=New-TaskCard $homeTasks 0 1 '网站例外：直连与代理并用' '只填写域名。例如国内网站直连、其他网站走代理；规则只影响经过流向入口的连接。' '设置网站例外…' {Start-Work 'WebsiteRules' ''}
-$null=New-TaskCard $homeTasks 1 1 '连接不通时先检查' '分别检查本地入口、上游和目标网站。端口监听或网页打开都不等于登录成功。' '检查当前网络' {$tabs.SelectedTab=$toolsPage;$toolsSections.SelectedIndex=0;Start-Work 'NetworkDiagnose' ''}
+$null=New-TaskCard $homeTasks 0 0 '备用线路：先连接，再检测' '在代理客户端连接后，到入口列表检测。通过后再预览切换；当前线路可用时，无需重新应用。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
+$staleProxyHomeButton=New-TaskCard $homeTasks 1 0 '后台还在用旧代理？' '只读检查支持的程序与后台代理变量，区分失效入口、专用入口和未知。处理前先保存工作，不会强制退出程序。' '检查旧代理残留' {Start-Work 'StaleProxyScan' ''}
+$websiteButton=New-TaskCard $homeTasks 0 1 '高级功能：程序和网站分流' '独立入口用于专线和网站规则。普通切换无需启用；首次接入会先说明影响，再由你确认。' '设置网站例外…' {Start-Work 'WebsiteRules' ''}
+$null=New-TaskCard $homeTasks 1 1 '整机或后台经常断网？' '先检查当前入口与 HTTPS 通路，再按结果处理。撤回只针对仍属于流向上次切换的设置。' '检查当前网络' {$tabs.SelectedTab=$toolsPage;$toolsSections.SelectedIndex=0;Start-Work 'NetworkDiagnose' ''}
 $programGrid=New-Grid $programPage 3 @(0,-1,0) -ProgramLayout;$programGrid.Padding=New-Object Windows.Forms.Padding(14)
 $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Fill';$toolbar.AutoSize=$true;$toolbar.AutoSizeMode='GrowAndShrink';$toolbar.WrapContents=$true;$toolbar.Margin=New-Object Windows.Forms.Padding(0,0,0,10);$programGrid.Controls.Add($toolbar,0,0)
 $searchLabel=New-Label $toolbar '搜索程序' 0 0 70 26 10;$searchLabel.Margin=New-Object Windows.Forms.Padding(0,6,4,0)
@@ -172,6 +172,8 @@ $programActions=New-Object Windows.Forms.FlowLayoutPanel;$programActions.Dock='F
 $routeButton=New-Button $programActions '设置此程序线路 ▾' 0 0 190 36 {Show-SelectedMenu};$routeButton.Primary=$true
 $programLaunchButton=New-Button $programActions '按此线路打开' 0 0 166 36 {if($liveList.SelectedItems.Count){$app=$liveList.SelectedItems[0].Tag;if($app.Mode -eq 'engine'){Request-ProgramRouteAccess $app $app.Policy}else{Start-Work 'AppLaunch' $app.Path}}}
 $programMoreButton=New-Button $programActions '更多设置 ▾' 0 0 142 36 {if($liveList.SelectedItems.Count){$script:AppTarget=$liveList.SelectedItems[0].Tag;$appMenu.Show($programMoreButton,(New-Object Drawing.Point(0,$programMoreButton.Height)))}}
+$programDiagnoseButton=New-Button $programActions '排查此程序网络' 0 0 174 36 {if($liveList.SelectedItems.Count){Start-Work 'ProgramNetworkDiagnose' $liveList.SelectedItems[0].Tag.Path}}
+$programResidueButton=New-Button $programActions '检查旧代理残留' 0 0 174 36 {if($liveList.SelectedItems.Count){Start-Work 'StaleProxyScan' $liveList.SelectedItems[0].Tag.Path}}
 $programHint=New-Label $bottom '只更改所选程序；网站例外和桌面绑定在更多设置中。空闲时无 TCP 连接不代表断网。' 0 0 900 34 9;$programHint.AutoSize=$true;$programHint.Dock='Fill';$programHint.Margin=New-Object Windows.Forms.Padding(0,6,0,0);$programHint.ForeColor=$muted;$bottom.SetCellPosition($programHint,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,3)))
 $toolsGrid=New-Grid $toolsPage 2 @(0,-1);$toolsGrid.Padding=New-Object Windows.Forms.Padding(14);$toolsGrid.MinimumSize=New-Object Drawing.Size(0,500)
 $toolNavigation=New-Object Windows.Forms.FlowLayoutPanel;$toolNavigation.Dock='Fill';$toolNavigation.AutoSize=$true;$toolNavigation.AutoSizeMode='GrowAndShrink';$toolNavigation.WrapContents=$true;$toolNavigation.Margin=New-Object Windows.Forms.Padding(0,0,0,8);$toolsGrid.Controls.Add($toolNavigation,0,0)
@@ -181,11 +183,9 @@ $toolCategoryButtons=@()
 foreach($spec in @(@('连接检查',0),@('维护与恢复',1),@('软件与记录',2))){$button=New-Button $toolNavigation $spec[0] 0 0 164 36 {$toolsSections.SelectedIndex=[int]$this.Tag};$button.Tag=$spec[1];$toolCategoryButtons+=$button}
 $toolsSections.Add_SelectedIndexChanged({foreach($b in $toolCategoryButtons){$b.Primary=([int]$b.Tag -eq $toolsSections.SelectedIndex);$b.Invalidate()}});$toolCategoryButtons[0].Primary=$true
 $toolsBar=New-CardGrid $checkPage
-$networkDiagnoseButton=New-TaskCard $toolsBar 0 0 '检查当前电脑的网络入口' '读取系统代理、环境变量和入口状态；只检查，不改设置。结果会显示在操作记录中。' '开始网络检查' {Start-Work 'NetworkDiagnose' ''}
+$networkDiagnoseButton=New-TaskCard $toolsBar 0 0 '网络自检：问题在哪一层' '依次检查系统设置、当前入口、代理通路和连接证据，直接给出结论与下一步。某个软件打不开时，也可在程序线路页选中它单独排查。' '开始网络检查' {Start-Work 'NetworkDiagnose' ''}
 $networkRepairButton=New-TaskCard $toolsBar 1 0 '处理检查发现的问题' '先完成左侧检查。有可修复项目时才可操作，并再次确认影响；不会自动结束用户应用。' '查看并修复…' {
-    if(-not $script:NetworkDiagnosis -or -not $script:NetworkDiagnosis.RepairAction){Write-Activity '请先检查当前网络，查看可处理项目。';return}
-    $script:DialogOpen=$true
-    try{if([Windows.Forms.MessageBox]::Show($form,($script:NetworkDiagnosis.RepairText+"`r`n`r`n修复前将重新核验配置。已有应用若仍使用旧入口，需要保存工作后完整重开。"),'修复网络配置','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='NetworkRepair';Key=$script:NetworkDiagnosis.Revision};$script:NetworkDiagnosis=$null}}finally{$script:DialogOpen=$false}
+    Request-NetworkRepair $script:NetworkDiagnosis
 }
 $probeSurface=New-Object FlowSwitch.UI.SurfacePanel;$probeSurface.Dock='Fill';$probeSurface.Margin=New-Object Windows.Forms.Padding(6);$probeSurface.Padding=New-Object Windows.Forms.Padding(16,12,16,12);$toolsBar.Controls.Add($probeSurface,0,1)
 $probeGrid=New-Grid $probeSurface 4 @(32,-1,38,42)
@@ -219,7 +219,7 @@ $logHeading=New-Object Windows.Forms.Panel;$logHeading.Dock='Fill';$recordsGrid.
 $logTitle=New-Label $logHeading '操作记录与检查结果' 0 8 420 30 11 $true
 $exportButton=New-Button $logHeading '导出诊断报告…' 0 0 176 36 {Export-Diagnostics};$exportButton.Anchor='Top,Right';$logHeading.Add_SizeChanged({$exportButton.Left=$logHeading.ClientSize.Width-$exportButton.Width;$logTitle.Width=[Math]::Max(20,$exportButton.Left-16)})
 $logHost=New-Object FlowSwitch.UI.LogHost;$logHost.Dock='Fill';$logBox=$logHost.Log;$logBox.Multiline=$true;$logBox.ReadOnly=$true;$logBox.ScrollBars='Vertical';$logBox.Dock='None';$logBox.BackColor=[Drawing.ColorTranslator]::FromHtml('#1B2A3D');$logBox.ForeColor=$ink;$logBox.BorderStyle='None';$recordsGrid.Controls.Add($logHost,0,2)
-$actionLabel=New-Label $layout '先准备代理入口，再统一切换或为程序单独选线。' 0 0 1000 32 9;$actionLabel.Dock='Fill';$actionLabel.TextAlign='MiddleLeft';$actionLabel.ForeColor=$muted;$layout.SetCellPosition($actionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,3)))
+$actionLabel=New-Label $layout '先看当前管理方；网络正常无需重新应用。遇到问题先检查，再预览具体更改。' 0 0 1000 32 9;$actionLabel.Dock='Fill';$actionLabel.TextAlign='MiddleLeft';$actionLabel.ForeColor=$muted;$layout.SetCellPosition($actionLabel,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,3)))
 $footer=New-Object Windows.Forms.Panel;$footer.Dock='Fill';$footer.Margin=New-Object Windows.Forms.Padding(0);$layout.Controls.Add($footer,0,4)
 $autoRefresh=New-Object Windows.Forms.CheckBox;$autoRefresh.Text='自动刷新';$autoRefresh.Checked=$true;$autoRefresh.SetBounds(0,0,105,24);$autoRefresh.ForeColor=$muted;$footer.Controls.Add($autoRefresh)
 $autoDiscovery=New-Object Windows.Forms.CheckBox;$autoDiscovery.Text='自动发现代理';$autoDiscovery.Checked=$true;$autoDiscovery.SetBounds(110,0,140,24);$autoDiscovery.ForeColor=$muted;$footer.Controls.Add($autoDiscovery);$autoDiscovery.Add_CheckedChanged({$script:NextPoll=[DateTime]::MinValue})
@@ -242,6 +242,7 @@ $launchSettingsItem=New-Object Windows.Forms.ToolStripMenuItem('启动方式与�
 $entryRepairItem=New-Object Windows.Forms.ToolStripMenuItem('修复旧代理启动入口…');$entryRepairItem.Add_Click({if($script:AppTarget){Start-Work 'AppEntryRepair' $script:AppTarget.Path}});[void]$appMenu.Items.Add($entryRepairItem)
 $websiteProgramItem=New-Object Windows.Forms.ToolStripMenuItem('此程序的网站分流…');$websiteProgramItem.Add_Click({if($script:AppTarget){Start-Work 'WebsiteRules' $script:AppTarget.Path}});[void]$appMenu.Items.Add($websiteProgramItem)
 $removeSettingItem=New-Object Windows.Forms.ToolStripMenuItem('移除此程序设置');$removeSettingItem.Add_Click({if($script:AppTarget){$saved=$script:AppTarget.SavedPath;if(-not $saved){$saved=$script:AppTarget.Path};Start-Work 'AppRemove' $saved}});[void]$appMenu.Items.Add($removeSettingItem)
+$systemFollowItem=New-Object Windows.Forms.ToolStripMenuItem('使用系统代理（取消已停用专线）…');$systemFollowItem.Add_Click({Request-ProgramSystemProxy});[void]$appMenu.Items.Add($systemFollowItem)
 $reconnectItem=New-Object Windows.Forms.ToolStripMenuItem('重连此程序的旧线路连接…');$reconnectItem.Add_Click({if($script:AppTarget){Start-Work 'AppReconnectPlan' $script:AppTarget.Path}});[void]$appMenu.Items.Add($reconnectItem)
 $familyRuleItem=New-Object Windows.Forms.ToolStripMenuItem('检查并补齐整组程序规则…');$familyRuleItem.Add_Click({if($script:AppTarget -and -not $script:AppTarget.RequiresRepair){$route=$script:AppTarget.Policy;if($route -eq 'Follow' -or -not $route){Write-Activity '请先为主程序选择明确的直连或代理，再预览整组规则。';return};Start-Work 'FamilyRoutePlan' (@{Path=$script:AppTarget.Path;Route=$route}|ConvertTo-Json -Compress)}});[void]$appMenu.Items.Add($familyRuleItem)
 $cleanStartItem=New-Object Windows.Forms.ToolStripMenuItem('干净环境启动（请先退出整组程序）…');$cleanStartItem.Add_Click({if($script:AppTarget -and -not $script:AppTarget.RequiresRepair){Start-Work 'CleanStartPlan' (@{Path=$script:AppTarget.Path;DirectTest=$false}|ConvertTo-Json -Compress)}});[void]$appMenu.Items.Add($cleanStartItem)
@@ -255,14 +256,15 @@ $savedLineMenu=New-Object Windows.Forms.ToolStripMenuItem('更改此程序线路
 $startupMenu=New-Object Windows.Forms.ToolStripMenuItem('启动与桌面入口')
 $environmentStartItem=New-Object Windows.Forms.ToolStripMenuItem('命令行 / 后台代理环境…');$environmentStartItem.Add_Click({if($script:AppTarget){Show-EnvironmentProgramSettings $script:AppTarget}})
 $connectionMenu=New-Object Windows.Forms.ToolStripMenuItem('连接检查与恢复')
+$programDiagnoseItem=New-Object Windows.Forms.ToolStripMenuItem('排查此程序网络…');$programDiagnoseItem.Add_Click({if($script:AppTarget.Path){Start-Work 'ProgramNetworkDiagnose' $script:AppTarget.Path}})
 $recordsMenu=New-Object Windows.Forms.ToolStripMenuItem('记录与详情')
 $detail=New-Object Windows.Forms.ToolStripMenuItem('程序与连接详情…');$detail.Add_Click({Show-AppDetails $script:AppTarget})
 $launchSettingsButton=$launchSettingsItem
 $programHelpItem=New-Object Windows.Forms.ToolStripMenuItem('此程序怎么设置？');$programHelpItem.Add_Click({Show-Guide 'programs'})
 $appMenu.Items.Clear();[void]$appMenu.Items.Add($menuTitle);[void]$appMenu.Items.Add($savedLineMenu);[void]$appMenu.Items.Add($repairItem)
 $startupMenu.DropDownItems.AddRange(@($launchItem,$environmentStartItem,$launchSettingsItem,$entryRepairItem,$entryItem))
-$connectionMenu.DropDownItems.AddRange(@($websiteProgramItem,$reconnectItem,$familyRuleItem,$cleanStartItem,$directTestItem))
-$recordsMenu.DropDownItems.AddRange(@($detail,$copyItem,$removeSettingItem))
+$connectionMenu.DropDownItems.AddRange(@($programDiagnoseItem,$websiteProgramItem,$reconnectItem,$familyRuleItem,$cleanStartItem,$directTestItem))
+$recordsMenu.DropDownItems.AddRange(@($detail,$copyItem,$systemFollowItem,$removeSettingItem))
 $appMenu.Items.AddRange(@($startupMenu,$connectionMenu,$recordsMenu,$programHelpItem))
 $launchItem.ToolTipText='先保存工作并正常退出整组程序，再按流向中保存的线路打开。不会自动结束应用。'
 $launchSettingsItem.ToolTipText='选择仅从流向内打开、独立代理快捷方式或显式绑定桌面入口；随时可解除绑定。'
@@ -270,12 +272,22 @@ $websiteProgramItem.ToolTipText='只有该程序经过流向专用入口时才�
 $familyRuleItem.ToolTipText='预览经过身份核验的联网子进程；确认后补齐缺失规则，保留冲突和网站例外。'
 $directTestItem.ToolTipText='会临时更改当前电脑系统代理，最多五分钟；确认后才执行。'
 $removeSettingItem.ToolTipText='撤销此程序的线路和流向管理记录，不删除或退出程序。'
+$systemFollowItem.ToolTipText='先确认流向服务与所有自有入口均已停止，再只取消此程序保存专线。保持 Windows 系统代理；与“跟随统一线路”不同。'
 $routeMenu=New-Object Windows.Forms.ContextMenuStrip;$routeMenu.Font=$form.Font;$routeMenu.ShowImageMargin=$false;$routeMenu.Renderer=New-Object FlowSwitch.UI.MenuRenderer
 function Set-RouteMenuItems($Items) {
     foreach($old in @($Items)){$Items.Remove($old);$old.Dispose()}
+    if($script:AppTarget.RequiresRepair){
+        $repair=New-Object Windows.Forms.ToolStripMenuItem('先修复程序路径记录…');$repair.Enabled=([bool]$script:AppTarget.CanRepair -and [bool]$script:AppTarget.SavedPath)
+        $repair.Add_Click({Request-SelectedProgramRecordRepair});[void]$Items.Add($repair)
+        [void]$Items.Add((New-Object Windows.Forms.ToolStripSeparator))
+    }
     $options=@([pscustomobject]@{Name='跟随统一线路';Id='Follow'},[pscustomobject]@{Name='直连';Id='Direct'})
     $options+=@($script:Profiles.Profiles|Where-Object {-not ($script:Profiles.Routing.Adapter -eq 'standalone' -and $_.Id -eq (Get-GatewayKey))})
     foreach($option in $options){$item=New-Object Windows.Forms.ToolStripMenuItem($option.Name);$item.Tag=$option.Id;$item.Checked=($option.Id -eq $script:AppTarget.Policy);$item.Enabled=(-not $script:AppTarget.RequiresRepair);$item.Add_Click({if($script:AppTarget){Request-ApplicationRoute ([string]$this.Tag)}});[void]$Items.Add($item)}
+    if($script:AppTarget.SavedPath -or $script:AppTarget.HasSavedRule){
+        [void]$Items.Add((New-Object Windows.Forms.ToolStripSeparator))
+        $system=New-Object Windows.Forms.ToolStripMenuItem('使用系统代理（取消已停用专线）…');$system.Add_Click({Request-ProgramSystemProxy});[void]$Items.Add($system)
+    }
 }
 function Complete-ProgramMenu {$script:MenuOpen=$false;if($script:DeferredApps){Show-Applications $script:DeferredApps;$script:DeferredApps=$null}}
 $routeMenu.Add_Opening({if(-not $script:AppTarget.Path -or ($script:Worker -and $script:Worker.Kind -ne 'Status')){$_.Cancel=$true;return};$_.Cancel=$false;$script:MenuOpen=$true;Set-RouteMenuItems $routeMenu.Items})
@@ -293,6 +305,7 @@ $appMenu.Add_Opening({
     $websiteProgramItem.Enabled=($script:AppTarget.Mode -eq 'managed' -and -not $script:AppTarget.RequiresRepair)
     $familyRuleItem.Enabled=(-not $script:AppTarget.RequiresRepair);$cleanStartItem.Enabled=(-not $script:AppTarget.RequiresRepair);$directTestItem.Enabled=(-not $script:AppTarget.RequiresRepair)
     $removeSettingItem.Visible=[bool]($script:AppTarget.SavedPath -or $script:AppTarget.HasSavedRule)
+    $systemFollowItem.Visible=[bool]($script:AppTarget.SavedPath -or $script:AppTarget.HasSavedRule)
 })
 $appMenu.Add_Closed({Complete-ProgramMenu})
 $liveList.Add_SelectedIndexChanged({Set-UiActionAvailability})
@@ -311,7 +324,7 @@ $discoveryButton=New-Button $proxyBar '发现后台代理' 0 0 166 36 {Start-Wor
 $proxyServiceButton=New-Button $proxyBar '备用与服务 ▾' 0 0 166 36 {$proxyServiceMenu.Show($proxyServiceButton,(New-Object Drawing.Point(0,$proxyServiceButton.Height)))}
 $proxyServiceMenu=New-Object Windows.Forms.ContextMenuStrip;$proxyServiceMenu.ShowImageMargin=$false;$proxyServiceMenu.Renderer=New-Object FlowSwitch.UI.MenuRenderer;$proxyServiceMenu.Font=$form.Font
 $failoverItem=New-Object Windows.Forms.ToolStripMenuItem('备用线路顺序…');$failoverItem.Add_Click({Show-FailoverEditor});[void]$proxyServiceMenu.Items.Add($failoverItem)
-$independentItem=New-Object Windows.Forms.ToolStripMenuItem('使用流向独立入口…');$independentItem.Add_Click({$script:DialogOpen=$true;try{$serviceMessage=if($script:Profiles.Routing.Adapter -eq 'standalone'){'启动或检查已配置的流向服务，并在启动时接入系统入口；保留程序专线、网站规则和备用设置。不会退出任何程序。是否继续？'}else{'将建立流向固定入口用于程序分流，并迁移当前设置。需要先准备可用的上游代理。是否继续？'};if([Windows.Forms.MessageBox]::Show($form,$serviceMessage,'使用流向独立入口','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='Independent';Key=''}}}finally{$script:DialogOpen=$false}});[void]$proxyServiceMenu.Items.Add($independentItem)
+$independentItem=New-Object Windows.Forms.ToolStripMenuItem('使用流向独立入口（高级）…');$independentItem.Add_Click({$script:DialogOpen=$true;try{$serviceMessage=if($script:Profiles.Routing.Adapter -eq 'standalone'){'启动或检查已配置的流向服务，并在启动时接入系统入口；保留程序专线、网站规则和备用设置。不会退出任何程序。是否继续？'}else{'这是高级接管：将建立流向固定入口并改变系统代理管理方式。日常使用已有代理客户端无需启用。请先准备可用的上游；已有连接可能仍使用原入口。确认改用流向独立入口？'};if([Windows.Forms.MessageBox]::Show($form,$serviceMessage,'高级独立入口','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='Independent';Key=''}}}finally{$script:DialogOpen=$false}});[void]$proxyServiceMenu.Items.Add($independentItem)
 $externalItem=New-Object Windows.Forms.ToolStripMenuItem('配置外部 Clash 引擎（高级）…');$externalItem.Add_Click({Start-Work 'ConfigureGateway' ''});[void]$proxyServiceMenu.Items.Add($externalItem)
 $serviceHelpItem=New-Object Windows.Forms.ToolStripMenuItem('这些设置怎么选？');$serviceHelpItem.Add_Click({Show-Guide 'failover'});[void]$proxyServiceMenu.Items.Add($serviceHelpItem)
 $proxyHost=New-Object FlowSwitch.UI.ListHost;$proxyHost.Dock='Fill';$proxyHost.Margin=New-Object Windows.Forms.Padding(0);$proxyList=$proxyHost.List;$proxyList.View='Details';$proxyList.FullRowSelect=$true;$proxyList.MultiSelect=$false;$proxyList.HideSelection=$false
@@ -333,15 +346,31 @@ function Request-ApplicationRoute([string]$Route) {
     if($script:AppTarget.Mode -eq 'engine'){Request-ProgramRouteAccess $script:AppTarget $Route;return}
     Start-Work 'ManagedAppRoute' (@{path=$script:AppTarget.Path;route=$Route}|ConvertTo-Json -Compress)
 }
+function Request-SelectedProgramRecordRepair {
+    if($script:AppTarget -and $script:AppTarget.RequiresRepair -and $script:AppTarget.CanRepair -and $script:AppTarget.SavedPath){Start-Work 'AppRepairPlan' $script:AppTarget.SavedPath;return}
+    Write-Activity '当前没有唯一、可核对的程序新路径，请在程序详情核对候选；不会把旧线路写到未知程序。'
+}
+function Request-ProgramSystemProxy {
+    if(-not $script:AppTarget -or -not ($script:AppTarget.SavedPath -or $script:AppTarget.HasSavedRule)){Write-Activity '此程序没有可取消的流向专用线路记录。';return}
+    $saved=[string]$script:AppTarget.SavedPath;if(-not $saved){$saved=[string]$script:AppTarget.Path}
+    Start-Work 'ProgramSystemProxyPlan' $saved
+}
 function Request-ProgramRouteAccess($App,[string]$Route) {
     if(-not $App.Path -or $App.RequiresRepair){Write-Activity '请先选择路径可核验的程序。';return}
     if(-not $Route){Write-Activity '请先选择直连、代理或跟随统一线路。';return}
     Start-Work 'ProgramAccessPlan' (@{path=$App.Path;route=$Route}|ConvertTo-Json -Compress)
 }
 function Get-ApplicationDisplayKey($App) {if($App.RowKey){return $App.RowKey};return $App.Path}
+function Select-ProgramAfterRecordChange([string]$Path) {
+    if(-not $Path){return}
+    $match=@($liveList.Items|Where-Object {$_.Tag.Path -ieq $Path})
+    if($match.Count -eq 1){foreach($item in $liveList.Items){$item.Selected=$false};$match[0].Selected=$true;$match[0].EnsureVisible();Set-UiActionAvailability}
+}
 function Show-SelectedMenu {
     if(-not $liveList.SelectedItems.Count){Write-Activity '请先选中一个程序。';return}
-    $script:AppTarget=$liveList.SelectedItems[0].Tag;$routeMenu.Show($routeButton,(New-Object Drawing.Point(0,$routeButton.Height)))
+    $script:AppTarget=$liveList.SelectedItems[0].Tag
+    if($script:AppTarget.RequiresRepair){Request-SelectedProgramRecordRepair;return}
+    $routeMenu.Show($routeButton,(New-Object Drawing.Point(0,$routeButton.Height)))
 }
 function Add-ProgramRule([string]$TargetPath='') {
     if($script:Worker -and $script:Worker.Kind -ne 'Status'){return}
@@ -453,6 +482,159 @@ function Show-ProgramRouteAccessDialog($Plan) {
     try{if($dialog.ShowDialog($form) -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='ProgramAccessApply';Key=($Plan|ConvertTo-Json -Depth 24 -Compress)}}}finally{$script:DialogOpen=$false;$dialog.Dispose()}
 }
 function Show-ToolResults {$tabs.SelectedTab=$toolsPage;$toolsSections.SelectedIndex=2}
+function Request-NetworkRepair($Plan) {
+    if(-not $Plan -or -not $Plan.RepairAction -or -not $Plan.Revision){Write-Activity '当前没有可直接修复的项目，请先检查网络并阅读下一步建议。';return}
+    $wasOpen=$script:DialogOpen;$script:DialogOpen=$true
+    try{
+        if([Windows.Forms.MessageBox]::Show($form,($Plan.RepairText+"`r`n`r`n这是系统网络配置修复。确认后重新核验本次动作与配置，发现变化即停止。"),'查看修复方案','OKCancel','Information') -eq 'OK'){
+            $script:PendingAction=[pscustomobject]@{Kind='NetworkRepair';Key=(@{Revision=$Plan.Revision;ExpectedAction=$Plan.RepairAction}|ConvertTo-Json -Compress)}
+            $script:NetworkDiagnosis=$null
+        }
+    }finally{$script:DialogOpen=$wasOpen}
+}
+function Get-NetworkDiagnosisActions($Report,[string]$TargetPath='') {
+    $actions=New-Object 'Collections.Generic.List[object]'
+    $program=$Report.Program;$path=$TargetPath;$saved=''
+    if($program.ObservedPath){$path=[string]$program.ObservedPath};if($program.SavedPath){$saved=[string]$program.SavedPath}
+    $known=([bool]$TargetPath -and [bool]$program -and $program.ObservationState -notin @('Unknown','Missing') -and [bool]$path)
+    if($TargetPath){
+        $actions.Add([pscustomobject]@{Id='program-settings';Label='回到此程序，设置线路';Enabled=$known;Path=$path;SavedPath=$saved;Description='定位到本次检查的程序，打开已有线路选择菜单。选定后才应用；不会修改其他程序或自动关闭软件。';Reason=$(if(-not $known){'程序身份或路径尚未核验，请先重新检查或重新添加正确的 EXE。'}else{''})})
+        if($program.RecordRequiresReview){$actions.Add([pscustomobject]@{Id='program-record';Label='查看程序路径修复预览';Enabled=([bool]$program.RecordCanRepair -and [bool]$saved);Path=$path;SavedPath=$saved;Description='重新读取保存记录和当前安装身份，先展示修复方案；确认后才修复，保留其他程序设置。';Reason=$(if(-not $program.RecordCanRepair){'当前记录尚无唯一可信的替代路径，请先核对安装位置。'}else{''})})}
+        if($program.CanLaunch -or $program.HasSavedRule){
+            $launchReady=($known -and $program.CanLaunch -eq $true -and $program.Running -eq $false -and -not $program.RecordRequiresReview)
+            $actions.Add([pscustomobject]@{Id='program-launch';Label='按已保存线路打开';Enabled=$launchReady;Path=$path;SavedPath=$saved;Description='检查流向入口就绪后打开这个程序，新启动的受支持子进程继承入口。启动不代表账号或对话验收通过。';Reason=$(if($program.Running -eq $true){'请先保存工作并完整正常退出该程序，再重新检查。正在运行的进程不会因保存线路自动换入口。'}elseif(-not $launchReady){'先核对路径、设置可用的程序启动入口，并确认程序已完整退出。'}else{''})})
+        }
+        if($Report.Evidence.ControllerVerifiedCount -gt 0 -and $program.HasSavedRule){$actions.Add([pscustomobject]@{Id='program-reconnect';Label='预览此程序的旧线路连接';Enabled=($known -and -not $program.RecordRequiresReview);Path=$path;SavedPath=$saved;Description='只预览可核验的此程序旧线路连接。确认后仅关闭仍匹配预览的连接，让程序自行重建；不会关闭其他程序或全局连接。';Reason=''})}
+        $actions.Add([pscustomobject]@{Id='program-clean';Label='查看干净环境启动方案';Enabled=($known -and -not $program.RecordRequiresReview);Path=$path;SavedPath=$saved;Description='先展示方案和前提。此功能只为新进程清除代理环境，不修改用户变量或 Windows 系统代理；不会绕过外部 VPN 隧道。程序运行时不能直接重开。';Reason=$(if(-not $known -or $program.RecordRequiresReview){'先确认程序身份并处理失效路径。'}else{''})})
+    }else{$actions.Add([pscustomobject]@{Id='choose-program';Label='选择出问题的程序，再排查';Enabled=$true;Path='';SavedPath='';Description='进入程序线路页，选中打不开的程序，点击「排查此程序网络」。整机检查不能证明每个程序都使用同一代理。';Reason=''})}
+    $actions.Add([pscustomobject]@{Id='proxy-catalog';Label='检查或更换上游代理入口';Enabled=$true;Path='';SavedPath='';Description='进入代理入口页，核对正在运行的代理并检测。登记或检测不会自动切换当前网络；确认可用后再到程序线路为目标程序选线。';Reason=''})
+    $actions.Add([pscustomobject]@{Id='vpn-guide';Label='了解 VPN 共存与直连的区别';Enabled=$true;Path='';SavedPath='';Description='查看系统代理、进程入口与 VPN 路由的区别，以及怎样选择处理步骤；说明页不修改网络。';Reason=''})
+    if($Report.ObservedProxyScope.State -eq 'Ready' -and $Report.ObservedProxyScope.ForwardingState -eq 'AllTimeout'){
+        $upstream=$actions|Where-Object Id -eq 'proxy-catalog'
+        $upstream.Label='先检查代理/VPN 的转发'
+        $upstream.Description='本轮观察到的代理入口仍监听，但无凭据 HTTPS 代测均超时。先在原代理/VPN 客户端核对连接和节点，再检测同一入口；单靠重开目标程序不能证明链路恢复。此步骤只打开代理入口页，不会关闭程序或修改网络。'
+        if($Report.ObservedProxyScope.CoverageLimited){$upstream.Description='仅针对已核验成员所见入口；程序家族观察不完整，其他成员未知。'+$upstream.Description}
+        return @($upstream)+@($actions|Where-Object Id -ne 'proxy-catalog')
+    }
+    $actions.ToArray()
+}
+function Invoke-NetworkDiagnosisAction($Action) {
+    if(-not $Action -or -not $Action.Enabled){return}
+    switch([string]$Action.Id){
+        'choose-program'{$tabs.SelectedTab=$programPage;Write-Activity '请选择出问题的程序，再点击「排查此程序网络」。';return}
+        'proxy-catalog'{$tabs.SelectedTab=$proxyPage;Write-Activity '先选中当前使用的代理入口并检测；选择或查看列表不会切换网络。';return}
+        'vpn-guide'{Show-FlowGuide $form 'vpn';return}
+    }
+    if($Action.Id -notin @('program-settings','program-record','program-launch','program-reconnect','program-clean') -or -not $Action.Path){Write-Activity '处理步骤无效，请重新检查。';return}
+    # Never reuse a stale global AppTarget or resolve a changed executable by name.
+    $matches=@($liveList.Items|Where-Object {$_.Tag.Path -ieq $Action.Path -and ((-not $Action.SavedPath) -or $_.Tag.SavedPath -ieq $Action.SavedPath)})
+    if($matches.Count -ne 1){Write-Activity '程序列表或路径已变化，请刷新列表并重新排查；本次没有应用旧步骤。';return}
+    $app=$matches[0].Tag
+    if($app.ObservationState -in @('Unknown','Missing') -and $Action.Id -ne 'program-record'){Write-Activity '程序身份尚未核验，请刷新后重新排查。';return}
+    if($app.RequiresRepair -and $Action.Id -notin @('program-record','program-settings')){Write-Activity '程序路径需要先修复，请重新查看诊断方案。';return}
+    $tabs.SelectedTab=$programPage;foreach($item in $liveList.Items){$item.Selected=$false};$matches[0].Selected=$true;$matches[0].EnsureVisible();Set-UiActionAvailability
+    switch([string]$Action.Id){
+        'program-settings'{Show-SelectedMenu}
+        'program-record'{if($app.RequiresRepair -and $app.CanRepair -and $app.SavedPath){$script:PendingAction=[pscustomobject]@{Kind='AppRepairPlan';Key=$app.SavedPath}}else{Write-Activity '路径修复前提已变化，请重新排查。'}}
+        'program-launch'{if($app.CanLaunch -and -not @($app.PIDs|Where-Object {$_}).Count -and -not $app.RequiresRepair){$script:PendingAction=[pscustomobject]@{Kind='AppLaunch';Key=$app.Path}}else{Write-Activity '程序仍在运行或启动前提已变化；请保存工作并完整退出后重新检查。'}}
+        'program-reconnect'{$script:PendingAction=[pscustomobject]@{Kind='AppReconnectPlan';Key=$app.Path}}
+        'program-clean'{$script:PendingAction=[pscustomobject]@{Kind='CleanStartPlan';Key=(@{Path=$app.Path;DirectTest=$false}|ConvertTo-Json -Compress)}}
+    }
+}
+function New-NetworkDiagnosisDialog($Report,[string]$TargetPath='') {
+    $dialog=New-Object Windows.Forms.Form;$dialog.Name='FlowNetworkDiagnosis';$dialog.Text=$(if($TargetPath){'程序网络排查'}else{'网络自检'});$dialog.Font=$form.Font;$dialog.BackColor=$paper;$dialog.ForeColor=$ink
+    $dialog.ClientSize=New-Object Drawing.Size(880,650);$dialog.MinimumSize=New-Object Drawing.Size(620,440);$dialog.StartPosition='CenterParent'
+    $grid=New-Grid $dialog 3 @(0,-1,0);$grid.Padding=New-Object Windows.Forms.Padding(18)
+    $caption=[string]$Report.Conclusion.Title;if(-not $caption){$caption='本次网络检查结果'}
+    $title=New-Label $grid $caption 0 0 820 40 13 $true;$title.Name='DiagnosisTitle';$title.Dock='Fill';$title.AutoSize=$true;$title.Margin=New-Object Windows.Forms.Padding(0,0,0,12);$grid.SetCellPosition($title,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
+    $grid.Add_SizeChanged({$captionLabel=$this.Controls['DiagnosisTitle'];if($captionLabel){$captionLabel.MaximumSize=New-Object Drawing.Size([Math]::Max(1,$this.ClientSize.Width-$this.Padding.Horizontal),0)}})
+    $pages=New-Object Windows.Forms.TabControl;$pages.Name='DiagnosisPages';$pages.Dock='Fill';$grid.Controls.Add($pages,0,1)
+    $summaryPage=New-Object Windows.Forms.TabPage('结论与下一步');$detailsPage=New-Object Windows.Forms.TabPage('检查详情');$actionsPage=New-Object Windows.Forms.TabPage('处理办法');$pages.TabPages.AddRange(@($summaryPage,$detailsPage,$actionsPage))
+    $summary=[string]$Report.Summary;if(-not $summary){$summary=[string]$Report.Message}
+    $details=[string]$Report.Message;if(-not $details -and $Report.SystemDiagnosis){$details=[string]$Report.SystemDiagnosis.Message}
+    $readers=@()
+    foreach($spec in @(@($summaryPage,$summary,'DiagnosisSummary'),@($detailsPage,$details,'DiagnosisDetails'))){
+        $page=$spec[0];$page.BackColor=[FlowSwitch.UI.Palette]::Surface;$page.Padding=New-Object Windows.Forms.Padding(12)
+        $reading=New-Object Windows.Forms.TextBox;$reading.Name=$spec[2];$reading.Multiline=$true;$reading.ReadOnly=$true;$reading.ScrollBars='Vertical';$reading.WordWrap=$true;$reading.Dock='Fill';$reading.BorderStyle='None';$reading.BackColor=[FlowSwitch.UI.Palette]::Surface;$reading.ForeColor=$ink;$reading.Text=$spec[1];$page.Controls.Add($reading);$readers+=@($reading)
+    }
+    $actionsPage.BackColor=[FlowSwitch.UI.Palette]::Surface;$actionsPage.Padding=New-Object Windows.Forms.Padding(12)
+    $stepsGrid=New-Grid $actionsPage 4 @(0,0,-1,0)
+    $stepCaption=New-Label $stepsGrid '选择一个处理步骤，先查看影响与前提。' 0 0 760 28 10 $true;$stepCaption.AutoSize=$true;$stepCaption.Dock='Fill';$stepsGrid.SetCellPosition($stepCaption,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
+    $choices=New-Object Windows.Forms.ComboBox;$choices.DropDownStyle='DropDownList';$choices.Dock='Top';$choices.DisplayMember='Label';$choices.Margin=New-Object Windows.Forms.Padding(0,8,0,12);$stepsGrid.Controls.Add($choices,0,1)
+    $explanation=New-Object Windows.Forms.TextBox;$explanation.Multiline=$true;$explanation.ReadOnly=$true;$explanation.WordWrap=$true;$explanation.ScrollBars='Vertical';$explanation.Dock='Fill';$explanation.BorderStyle='None';$explanation.BackColor=[FlowSwitch.UI.Palette]::Surface;$explanation.ForeColor=$ink;$stepsGrid.Controls.Add($explanation,0,2)
+    $runStep=New-Button $stepsGrid '进入所选步骤' 0 0 176 36 {$owner=$this.FindForm();$selected=$owner.Tag.ActionChoice.SelectedItem;if($selected -and $selected.Enabled){$owner.Tag.RequestedAction=$selected;$owner.DialogResult='OK'}};$runStep.Anchor='Right';$runStep.Margin=New-Object Windows.Forms.Padding(0,12,0,0);$stepsGrid.SetCellPosition($runStep,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,3)))
+    $choices.Add_SelectedIndexChanged({$owner=$this.FindForm();if(-not $owner.Tag){return};$selected=$this.SelectedItem;$owner.Tag.RunStep.Enabled=($selected -and $selected.Enabled);$owner.Tag.ActionExplanation.Text=$(if($selected){$selected.Description+"`r`n`r`n"+$(if($selected.Enabled){'点击仅进入上面说明的步骤；需要改动设置的方案会再展示影响与确认。'}else{'暂不可执行：'+$selected.Reason})}else{''})})
+    $buttons=New-Object Windows.Forms.FlowLayoutPanel;$buttons.Dock='Fill';$buttons.AutoSize=$true;$buttons.WrapContents=$true;$buttons.FlowDirection='RightToLeft';$buttons.Margin=New-Object Windows.Forms.Padding(0,12,0,0);$grid.Controls.Add($buttons,0,2)
+    $close=New-Button $buttons '关闭' 0 0 106 36 {};$close.DialogResult='Cancel'
+    $retry=New-Button $buttons '重新检查' 0 0 132 36 {};$retry.DialogResult='Retry'
+    $plan=$Report;if($Report.SystemDiagnosis){$plan=$Report.SystemDiagnosis}
+    $repair=New-Button $buttons '整机修复预览…' 0 0 188 36 {};$repair.DialogResult='Yes';$repair.Enabled=[bool]$plan.RepairAction
+    if(-not $repair.Enabled){$repair.Text='暂无整机修复项'}
+    $steps=New-Button $buttons '处理办法' 0 0 122 36 {$owner=$this.FindForm();$owner.Tag.Pages.SelectedIndex=2};$steps.Primary=$true
+    $dialog.CancelButton=$close;$dialog.Tag=[pscustomobject]@{Reading=$readers[0];Details=$readers[1];Pages=$pages;Plan=$plan;TargetPath=$TargetPath;Close=$close;Retry=$retry;Repair=$repair;Grid=$grid;Steps=$steps;ActionChoice=$choices;ActionExplanation=$explanation;RunStep=$runStep;RequestedAction=$null}
+    foreach($action in @(Get-NetworkDiagnosisActions $Report $TargetPath)){[void]$choices.Items.Add($action)};if($choices.Items.Count){$choices.SelectedIndex=0}
+    $dialog.Add_Shown({$this.Tag.Reading.Select(0,0);$this.ActiveControl=$this.Tag.Close})
+    return $dialog
+}
+function Show-NetworkDiagnosis($Report,[string]$TargetPath='') {
+    $dialog=New-NetworkDiagnosisDialog $Report $TargetPath;$wasOpen=$script:DialogOpen;$script:DialogOpen=$true;$action=$null;$plan=$null
+    try{$choice=$dialog.ShowDialog($form);$action=$dialog.Tag.RequestedAction;$plan=$dialog.Tag.Plan}
+    finally{$script:DialogOpen=$wasOpen;$dialog.Dispose();$script:Controls=@($script:Controls|Where-Object {-not $_.IsDisposed})}
+    if($choice -eq 'Retry'){$script:PendingAction=[pscustomobject]@{Kind=$(if($TargetPath){'ProgramNetworkDiagnose'}else{'NetworkDiagnose'});Key=$TargetPath}}
+    elseif($choice -eq 'Yes'){Request-NetworkRepair $plan}
+    elseif($choice -eq 'OK'){Invoke-NetworkDiagnosisAction $action}
+}
+function New-StaleProxyDialog($Report) {
+    $dialog=New-Object Windows.Forms.Form;$dialog.Name='FlowStaleProxy';$dialog.Text='程序旧代理残留';$dialog.Font=$form.Font;$dialog.BackColor=$paper;$dialog.ForeColor=$ink
+    $dialog.ClientSize=New-Object Drawing.Size(920,650);$dialog.MinimumSize=New-Object Drawing.Size(660,480);$dialog.StartPosition='CenterParent'
+    $grid=New-Grid $dialog 4 @(0,140,-1,0);$grid.Padding=New-Object Windows.Forms.Padding(18)
+    $caption=New-Label $grid ('发现 '+$Report.StaleCount+' 个程序环境指向已停止入口。当前系统入口：'+$Report.SystemEndpoint+"`r`n"+'这是启动环境快照；不等同于程序实际请求，未知项不会自动处理。') 0 0 850 56 10 $true
+    $caption.Name='ResidueCaption';$caption.Dock='Fill';$caption.AutoSize=$true;$caption.Margin=New-Object Windows.Forms.Padding(0,0,0,12);$grid.SetCellPosition($caption,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,0)))
+    $grid.Add_SizeChanged({$c=$this.Controls['ResidueCaption'];if($c){$c.MaximumSize=New-Object Drawing.Size([Math]::Max(1,$this.ClientSize.Width-$this.Padding.Horizontal),0)}})
+    $list=New-Object Windows.Forms.ListBox;$list.Name='ResiduePrograms';$list.Dock='Fill';$list.DisplayMember='Display';$list.IntegralHeight=$false;$list.BackColor=$paper;$list.ForeColor=$ink;$grid.Controls.Add($list,0,1)
+    foreach($row in @($Report.Rows|Sort-Object @{Expression={if($_.State -eq 'StaleLocal'){0}elseif($_.State -eq 'Unsupported'){2}else{1}}},Name)){
+        [void]$list.Items.Add([pscustomobject]@{Display=($row.Name+' — '+$row.Label);Row=$row})
+    }
+    $reading=New-Object Windows.Forms.TextBox;$reading.Name='ResidueDetails';$reading.Multiline=$true;$reading.ReadOnly=$true;$reading.ScrollBars='Vertical';$reading.Dock='Fill';$reading.WordWrap=$true;$reading.BackColor=$paper;$reading.ForeColor=$ink;$reading.BorderStyle='None';$reading.Margin=New-Object Windows.Forms.Padding(0,12,0,12);$grid.Controls.Add($reading,0,2)
+    $buttons=New-Object Windows.Forms.FlowLayoutPanel;$buttons.Dock='Fill';$buttons.AutoSize=$true;$buttons.WrapContents=$true;$grid.Controls.Add($buttons,0,3)
+    $refresh=New-Button $buttons '重新检查' 0 0 128 36 {};$refresh.DialogResult='Retry'
+    $launch=New-Button $buttons '退出后按当前代理启动…' 0 0 252 36 {$d=$this.FindForm();$item=$d.Tag.List.SelectedItem;if($item -and ($item.Row.CanPrepareLaunch -or $item.Row.HasSavedRoute)){$d.Tag.SelectedPath=$item.Row.Path;$d.Tag.ShowSavedRoute=[bool]$item.Row.HasSavedRoute;$d.DialogResult='OK'}}
+    $close=New-Button $buttons '关闭' 0 0 100 36 {};$close.DialogResult='Cancel';$dialog.CancelButton=$close
+    $dialog.Tag=[pscustomobject]@{Report=$Report;List=$list;Details=$reading;Launch=$launch;Refresh=$refresh;SelectedPath='';ShowSavedRoute=$false;Buttons=$buttons}
+    $list.Add_SelectedIndexChanged({
+        $d=$this.FindForm();$item=$this.SelectedItem;$d.Tag.Launch.Enabled=($null -ne $item -and ($item.Row.CanPrepareLaunch -or $item.Row.HasSavedRoute) -and -not $d.Tag.Report.SettingsChanged)
+        $d.Tag.Launch.Text=$(if($item -and $item.Row.HasSavedRoute){'查看已有程序线路'}else{'退出后按当前代理启动…'})
+        if(-not $item){return};$row=$item.Row;$lines=@(($row.Name+' — '+$row.Label),$row.Path,'',$row.Detail,'')
+        foreach($member in @($row.Members)){
+            $lines+=('PID '+$member.PID+' · '+$member.Name+' · '+$member.Label)
+            foreach($entry in @($member.Entries)){$lines+=('  '+$entry.Variable+' → '+$entry.Endpoint+' · '+$(if($entry.Listening -eq $false){'未监听'}elseif($entry.Listening -eq $true){'监听中'}else{'监听状态未知'})+$(if($entry.ConnectionObserved){' · 观察到该进程的 TCP 连接/尝试'}else{' · 未确认程序实际采用'}))}
+            if($member.State -eq 'Unknown'){$lines+=('  原因：'+$member.ReasonCode)}
+        }
+        $third=$(if($row.HasSavedRoute){'3. 此程序已有专线：点击“查看已有程序线路”，核对原线路后按此线路打开。若原入口已停止，先排查该入口；此处不会覆盖已有专线。'}else{'3. 点击下方启动预览。仍有进程、专线冲突或入口变化时会拒绝启动。'})
+        $lines+=@('',('检查时间：'+$d.Tag.Report.CheckedAt),'处理顺序：','1. 当前能用的程序可继续使用，无需处理。入口不同也可能是有意设置的专线。','2. 出问题时先保存工作，在原程序正常退出，包括托盘和相关后台。',$third,'4. 新启动后测试头像、登录或消息，再回到这里重新检查。','不清除账号、不修改快捷方式、系统代理或其他程序。',$d.Tag.Report.Scope)
+        if($row.CoverageLimited -or $d.Tag.Report.CoverageLimited){$lines+='本轮达到范围或时间限制；未覆盖成员仍为未知。'}
+        $d.Tag.Details.Text=$lines -join "`r`n"
+    })
+    if($list.Items.Count){$list.SelectedIndex=0}else{$reading.Text='当前没有可列出的程序。也可在程序线路页选择目标后单独检查。';$launch.Enabled=$false}
+    return $dialog
+}
+function Show-StaleProxyReport($Report) {
+    $dialog=New-StaleProxyDialog $Report;$old=$script:DialogOpen;$script:DialogOpen=$true
+    try{$answer=$dialog.ShowDialog($form);$selected=[string]$dialog.Tag.SelectedPath;$savedRoute=$dialog.Tag.ShowSavedRoute}finally{$dialog.Dispose();$script:DialogOpen=$old}
+    if($answer -eq 'Retry'){$script:PendingAction=[pscustomobject]@{Kind='StaleProxyScan';Key=[string]$Report.TargetPath}}
+    elseif($answer -eq 'OK' -and $selected){
+        if($savedRoute){$tabs.SelectedIndex=0;Select-ProgramAfterRecordChange $selected;Write-Activity ('请在程序线路核对 '+[IO.Path]::GetFileName($selected)+' 的已有线路；保存工作并完整退出后按此线路打开。')}
+        else{$script:PendingAction=[pscustomobject]@{Kind='StaleProxyLaunchPlan';Key=$selected}}
+    }
+}
+function Show-StaleProxyLaunchPlan($Plan) {
+    if(-not $Plan.CanLaunch){Write-Activity $Plan.Reason;return}
+    $old=$script:DialogOpen;$script:DialogOpen=$true
+    try{
+        $text=[IO.Path]::GetFileName($Plan.Path)+"`r`n`r`n"+$Plan.Message+"`r`n`r`n"+'目标：'+$Plan.Target+'。确认后再次核验程序已退出及当前入口；本预览两分钟有效。'
+        if([Windows.Forms.MessageBox]::Show($form,$text,'按当前代理启动一次','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='StaleProxyLaunch';Key=($Plan|ConvertTo-Json -Depth 8 -Compress)}}
+    }finally{$script:DialogOpen=$old}
+}
 function ConvertTo-WebsiteRuleDomain([string]$Value) {
     $domain=$Value.Trim().TrimEnd('.')
     if(-not $domain -or $domain -match '[:/\\?#@\s*]'){throw '只填写域名，例如 example.com；不要粘贴网址、登录链接、端口或授权信息。'}
@@ -668,7 +850,7 @@ function Show-ProxyCatalog {
     $intro.Text='先运行已有代理软件，再发现或填写 HTTP / SOCKS5 地址。登记、保存和检测不会切换网络。'+"`r`n"+'自动发现：'+$script:DiscoveryStatus+'。流向不提供代理节点。'
     $engineKey=Get-GatewayKey
     if($script:Profiles.Routing.Adapter -eq 'standalone'){$engineLabel.Text='独立分流入口 · 自动接替 '+$(if($script:Profiles.Routing.Failover.Enabled){'已开启'}else{'已关闭'})+' · '+$(if(Test-Path -LiteralPath (Get-IndependentSessionPath)){'托盘停止服务时恢复网络'}else{'服务未启动；统一切换或代理启动入口会检查并启动'});return}
-    $engineLabel.Text=$(if($engineKey){'分流引擎：'+(Get-RouteName $engineKey)+$(if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){' · 固定入口模式：引擎保持运行，出口由你选择。'}else{' · 系统入口模式；可编辑引擎启用固定入口。'})}else{'尚未建立流向固定入口。选择目标并点击「统一切换」会建立入口；普通程序选线也会检查接入。'})
+    $engineLabel.Text=$(if($engineKey){'分流引擎：'+(Get-RouteName $engineKey)+$(if($script:Profiles.Routing.UnifiedMode -eq 'gateway'){' · 固定入口模式：引擎保持运行，出口由你选择。'}else{' · 系统入口模式；可编辑引擎启用固定入口。'})}else{'日常模式 · 使用已有客户端的系统代理；切换只改系统入口与用户代理变量。独立分流是高级可选功能。'})
 }
 function Export-Diagnostics {
     if(-not $script:LastState -or -not $script:LastApps){Write-Activity '请等待读取到状态后再导出。';return}
@@ -743,7 +925,7 @@ function Show-Applications($Apps) {
 function Open-Client([string]$Key) {
     try{$profile=Get-Profile $Key;if(-not $profile.AppPath -or -not (Test-Path -LiteralPath $profile.AppPath)){throw '客户端路径无效，请在「代理入口」选择入口并编辑，关联已安装的代理软件。'}
         Start-Process -FilePath $profile.AppPath -WindowStyle Hidden
-        Write-Activity ('已请求打开 '+$profile.Name+'。连接完成后再点击「统一切换」。');$script:NextPoll=[DateTime]::MinValue
+        Write-Activity ('已请求打开 '+$profile.Name+'。在客户端连接后，先检测此入口，再预览切换。客户端也可能自行改变系统代理，请看最新实读状态。');$script:NextPoll=[DateTime]::MinValue
     }catch{Write-Activity $_.Exception.Message}
 }
 function Show-State($State) {
@@ -765,7 +947,47 @@ function Show-State($State) {
     if($State.NetworkTopology.State -eq 'Evidence'){$statusLabel.Text+=' · 外部 VPN/TUN 运行中';if($State.Key -eq 'Direct'){$entryValue.Text='应用代理已关闭';$systemLabel.Text='系统路由：受外部 VPN/TUN 影响'}}
     if($script:ChoiceDirty){$noticeLabel.Text='下拉框是待应用目标；当前实际入口以上方卡片为准。'}
     if(-not $script:ChoiceDirty){$networkChoice.SelectedIndex=-1;for($i=0;$i -lt $networkChoice.Items.Count;$i++){if($networkChoice.Items[$i].Id -eq $State.NetworkKey){$networkChoice.SelectedIndex=$i;break}}}
+    if($script:Profiles.Routing.Adapter -eq 'none'){
+        $daily=Get-DailyProxyState $State
+        $statusLabel.Text=$daily.Headline
+        $noticeLabel.Text=$daily.NextStep
+        if($State.ApplicationProxyViews -and $State.ApplicationProxyViews.Different){
+            $entryValue.Text='视图不一致';$systemLabel.Text='WinINET / 系统设置需核对'
+            if(-not $script:ChoiceDirty){$networkChoice.SelectedIndex=-1}
+        }
+        if($State.EnvConflict){$noticeLabel.Text+=' 用户代理变量与系统入口存在冲突，请先检查当前网络。'}
+        if($State.NetworkTopology.State -eq 'Evidence'){$noticeLabel.Text+=' 检测到外部 VPN/TUN 路由；系统代理不能代表所有流量。'}
+        if($script:ChoiceDirty){$noticeLabel.Text+=' 下拉框是待选目标，尚未切换。'}
+    }
+    Update-DailyProxyControls
     Show-ProxyCatalog;$checkedLabel.Text='最近读取 '+$State.CheckedAt
+}
+function Update-DailyProxyControls {
+    $dailyMode=$script:Profiles.Routing.Adapter -eq 'none'
+    $unify.Text=$(if($dailyMode){'预览切换…'}else{'统一切换'})
+    $undo.Text=$(if($dailyMode){'撤回上次切换…'}else{'撤回线路更改'})
+    $switchTitle.Text=$(if($dailyMode){'日常线路 · 先预览，再切换'}else{'高级统一切换 · 重新设置默认线路'})
+    $switchScope.Text=$(if($dailyMode){'只切换 Windows 系统代理和新进程使用的代理变量，保留程序专线。已有连接由应用继续使用；流向不会自动启动独立入口或抢回代理。'}else{'更改 Windows 系统代理及命令行代理变量；撤销程序专用选择，保留固定入口和网站例外。已有连接可能继续使用原线路。'})
+    if($dailyMode -and $networkChoice.SelectedItem -and $networkChoice.SelectedItem.Id -ne 'Direct'){
+        $key=$networkChoice.SelectedItem.Id;$seen=$script:LastState.Listeners|Where-Object Key -eq $key|Select-Object -First 1
+        if($seen -and $seen.Ready -eq $false){$switchScope.Text=(Get-RouteName $key)+' 尚未提供可用入口。请在原客户端连接，到「代理入口」检测通过后再切换；当前网络保持不变。'}
+    }
+    if($dailyMode){
+        $daily=Get-DailyProxyState $script:LastState
+        $undo.Enabled=([bool]$daily.CanUndo -and -not ($script:Worker -and $script:Worker.Kind -ne 'Status'))
+        $uiTips.SetToolTip($undo,$daily.UndoReason)
+    }
+}
+function Show-DailyProxyPlan($Plan,[bool]$Undo=$false) {
+    Write-Activity $Plan.Message
+    if(-not $Plan.CanApply -or $Plan.NoChange){return}
+    $script:DialogOpen=$true
+    try{
+        $title=$(if($Undo){'撤回上次日常切换'}else{'切换前确认'})
+        if([Windows.Forms.MessageBox]::Show($form,($Plan.Message+"`r`n`r`n确认后会再次核验配置和入口；检测失败时保留原设置。"),$title,'OKCancel','Information') -eq 'OK'){
+            $script:PendingAction=[pscustomobject]@{Kind=$(if($Undo){'DailyUndoApply'}else{'DailyApply'});Key=($Plan|ConvertTo-Json -Depth 24 -Compress)}
+        }
+    }finally{$script:DialogOpen=$false}
 }
 function Set-DemoCatalog {
     $script:DiscoveryStatus='已识别 2 个入口 · 演示数据'
@@ -790,12 +1012,17 @@ function Format-Diagnostics($Items) {
     foreach($entry in $Items){
         $lines+='【' + $entry.Name + '】'
         if($entry.Error){$lines+=$entry.Error;continue}
+        if($entry.PSObject.Properties['OwnerVerified'] -and $entry.OwnerVerified -eq $false){$lines+='本机入口在监听，但进程归属未知；以下仅是本次显式探测，不授权切换或认领。'}
         foreach($r in $entry.Results){$lines+=($r.Site + '：' + $r.Note + '  (' + $r.Seconds + ' s)')}
     }
     $lines+='只读探测不携带账户凭据。ChatGPT 403 不等同于断网，也不证明登录后可用。'
     return $lines -join "`r`n"
 }
 function Start-Work([string]$Kind,[string]$Key) {
+    if(-not $script:Worker -and $script:Profiles.Routing.Adapter -eq 'none' -and $Kind -in @('ManagedAppRoute','WebsiteRules','ProgramAccessPlan','EnvironmentAccessPlan')){
+        $script:DialogOpen=$true
+        try{if([Windows.Forms.MessageBox]::Show($form,'此操作属于高级程序 / 网站分流，后续可能建立流向独立入口。日常切换已有代理客户端不需要它。请核对后续预览的作用范围；正在运行的程序不会被结束。继续查看高级操作？','高级分流说明','OKCancel','Information') -ne 'OK'){return}}finally{$script:DialogOpen=$false}
+    }
     if($script:Worker){
         if($script:Worker.Kind -eq 'Status' -and $Kind -ne 'Status'){
             $script:PendingAction=[pscustomobject]@{Kind=$Kind;Key=$Key}
@@ -810,7 +1037,7 @@ function Start-Work([string]$Kind,[string]$Key) {
     }
     $ps=[PowerShell]::Create();$progress=New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]';$cancellation=New-Object Threading.CancellationTokenSource
     $scan=($Kind -eq 'Discover')
-    $automatic=($Kind -eq 'Status' -and $autoDiscovery.Checked -and -not $SmokeTest)
+    $automatic=($Kind -eq 'Status' -and $autoDiscovery.Checked -and -not $SmokeTest -and (Test-FlowWindowObservationActive))
     $code={param($Root,$Kind,$Key,$DataDirectory,$Scan,$Automatic,$Cache,$Progress,$Cancellation)
         $ErrorActionPreference='Stop'
         try{. (Join-Path $Root 'ProxyBackend.ps1') -DataDirectory $DataDirectory}
@@ -822,8 +1049,15 @@ function Start-Work([string]$Kind,[string]$Key) {
             elseif($Automatic){try{$discovery=Sync-AutomaticProxyDiscovery $Cache $Cancellation}catch{$discoveryError=$_.Exception.Message}}
             if($Cancellation.IsCancellationRequested){return [pscustomobject]@{OK=$true;Cancelled=$true}}
             switch($Kind){
+                'StaleProxyScan'{. (Join-Path $Root 'StaleProxy.ps1');$result=Get-StaleProxyReport -Path $Key -Cancellation $Cancellation}
+                'StaleProxyLaunchPlan'{. (Join-Path $Root 'StaleProxy.ps1');$result=Get-StaleProxyLaunchPlan $Key}
+                'StaleProxyLaunch'{. (Join-Path $Root 'StaleProxy.ps1');$result=Start-StaleProxyProgram ($Key|ConvertFrom-Json) -Confirmed}
                 'Switch'{$result=Set-UniversalProxy $Key}
                 'Restore'{$result=Restore-ProxyBackup}
+                'DailyPlan'{$result=Get-DailyProxyPlan -Key $Key}
+                'DailyApply'{$result=Set-DailyProxy -Plan ($Key|ConvertFrom-Json) -Confirmed}
+                'DailyUndoPlan'{$result=Get-DailyProxyUndoPlan}
+                'DailyUndoApply'{$result=Restore-DailyProxy -Plan ($Key|ConvertFrom-Json) -Confirmed}
                 'ConfigureGateway'{$result=Enable-LocalGateway}
                 'Independent'{$result=Enable-IndependentGateway $PID}
                 'Discover'{$result=$discovery}
@@ -860,6 +1094,8 @@ function Start-Work([string]$Kind,[string]$Key) {
                 'WebsiteRulesSave'{$change=$Key|ConvertFrom-Json;$result=Set-WebsiteRules -Entries @($change.Entries) -ExpectedRevision $change.Revision}
                 'AppSync'{$result=Sync-ApplicationRoutes}
                 'AppRepairPlan'{$result=Get-ProgramRuleRepairPlan -SavedPath $Key}
+                'ProgramSystemProxyPlan'{$result=Get-ProgramOfflineReleasePlan -SavedPath $Key}
+                'ProgramSystemProxyApply'{$result=Remove-ProgramOfflineRule -Plan ($Key|ConvertFrom-Json) -Confirmed}
                 'AppRepair'{$result=Repair-ProgramRule -Plan ($Key|ConvertFrom-Json)}
                 'AppRemove'{$result=Remove-SavedProgramRule -SavedPath $Key}
                 'AppLaunch'{
@@ -880,7 +1116,8 @@ function Start-Work([string]$Kind,[string]$Key) {
                 'CleanStartStop'{$result=Stop-ProgramCleanSession}
                 'LoginDiagnostic'{$result=Test-LoginChain $Key}
                 'NetworkDiagnose'{$result=Get-NetworkDiagnosis -Probe}
-                'NetworkRepair'{$result=Repair-NetworkDiagnosis $Key}
+                'ProgramNetworkDiagnose'{$result=Get-ProgramNetworkDiagnosis $Key}
+                'NetworkRepair'{if($Key.StartsWith('{')){$plan=$Key|ConvertFrom-Json;$result=Repair-NetworkDiagnosis -Revision $plan.Revision -ExpectedAction $plan.ExpectedAction}else{$result=Repair-NetworkDiagnosis $Key}}
                 'Diagnose'{
                     $result=@()
                     foreach($route in @($Key)){
@@ -905,7 +1142,19 @@ function Start-Work([string]$Kind,[string]$Key) {
     $script:Worker=[pscustomobject]@{PowerShell=$ps;Handle=$ps.BeginInvoke();Kind=$Kind;Progress=$progress;Started=[DateTime]::Now;Cancellation=$cancellation}
 }
 
-# Hide only the window; its message loop, status worker, supervisor and watchdog remain alive.
+# Window observation pauses in the tray; workers, supervisor and watchdog stay alive.
+function Test-FlowWindowObservationActive {
+    [bool]($form.Visible -and [string]$form.WindowState -ne 'Minimized')
+}
+function Invoke-AutomaticUiRefresh {
+    $active=Test-FlowWindowObservationActive
+    if(-not $active){$script:ObservationPaused=$true;$script:ObservationStale=$true;return}
+    if($script:ObservationPaused){$script:ResumeObservation=$true;$script:NextPoll=[DateTime]::MinValue}
+    $script:ObservationPaused=$false
+    if(-not $script:Worker -and -not $script:MenuOpen -and -not $script:DialogOpen -and ($script:ResumeObservation -or ($autoRefresh.Checked -and [DateTime]::Now -ge $script:NextPoll))){
+        $script:ResumeObservation=$false;Start-Work 'Status' ''
+    }
+}
 function Read-WindowPreferences {
     $closeToTray=$true
     try{$value=Get-Content -LiteralPath (Join-Path $script:DataRoot 'ui-settings.json') -Raw -Encoding UTF8|ConvertFrom-Json;if($value.CloseToTray -is [bool]){$closeToTray=$value.CloseToTray}}catch{}
@@ -913,6 +1162,7 @@ function Read-WindowPreferences {
 }
 function Show-FlowWindow {
     $form.ShowInTaskbar=$true;$form.Show();$form.WindowState='Normal';$form.Activate()
+    $script:ResumeObservation=$true;$script:NextPoll=[DateTime]::MinValue
     Write-LifecycleEvent 'window-shown' 'user-request'
 }
 function Request-FlowExit {
@@ -940,15 +1190,15 @@ function Update-LifecycleNotice {
     $life=Get-GatewayLifecycle;$recovery=$null
     try{$recovery=Get-Content -LiteralPath (Join-Path $script:DataRoot 'gateway\recovery-status.json') -Raw -Encoding UTF8|ConvertFrom-Json}catch{}
     $description='状态读取中';$notice='';$key=''
-    if($script:LastState){$description=$(if($script:ObservationStale -or $null -eq $script:LastState.EndpointReady){'入口状态未知'}elseif($script:LastState.Key -eq 'Direct'){'系统直连'}elseif($script:LastState.EndpointReady){'入口可连接'}else{'入口未就绪'})}
+    if($script:LastState){$description=$(if($script:ObservationPaused){'界面观察已暂停'}elseif($script:ObservationStale -or $null -eq $script:LastState.EndpointReady){'入口状态未知'}elseif($script:LastState.Key -eq 'Direct'){'系统直连'}elseif($script:LastState.EndpointReady){'入口可连接'}else{'入口未就绪'})}
     if($script:Profiles.Routing.Adapter -eq 'standalone'){
         if($life.phase -eq 'restarting'){$description='内核恢复中';$notice='内核意外停止，正在限次重启。入口恢复前请暂停登录。';$key='restarting-'+$life.attempt}
         elseif($life.phase -eq 'failed'){$description='内核恢复失败';$notice='内核恢复失败，正在尝试恢复本会话代理设置。已有应用可能保留旧地址；请打开主界面检查，保存工作后重开应用。';$key='failed-'+$life.startedAt}
-        elseif($script:LastApps.EffectiveDefaultRoute -eq 'Blocked'){$description='默认代理已暂停';$notice='默认代理出口已暂停。直连网站例外或其他程序线路可能继续可用；不会把全部请求自动切为直连。';$key='blocked'}
+        elseif(-not $script:ObservationPaused -and -not $script:ObservationStale -and $script:LastApps.EffectiveDefaultRoute -eq 'Blocked'){$description='默认代理已暂停';$notice='默认代理出口已暂停。直连网站例外或其他程序线路可能继续可用；不会把全部请求自动切为直连。';$key='blocked'}
         if($recovery.phase -eq 'restore-failed'){$description='设置恢复失败';$notice='网络设置或内核停止尚未通过校验。请打开主界面处理；会话记录已保留，请勿删除数据目录。';$key='restore-failed-'+$recovery.at}
     }
     if($recovery.phase -eq 'restored' -and $life.phase -eq 'failed'){$description='代理设置已恢复';$notice='内核恢复失败后，本会话代理设置已恢复。已运行应用仍可能缓存旧地址，请保存工作后完整重开应用。';$key='restored-'+$recovery.at}
-    if(-not $notice -and $script:LastState.EndpointReady -eq $false -and $script:Profiles.Routing.Adapter -eq 'standalone'){$description='固定入口未就绪';$notice='固定入口不可用。请点击「统一切换」或使用程序代理启动入口检查并启动服务。恢复设置不会刷新已有应用缓存的代理地址。';$key='entry-unavailable'}
+    if(-not $notice -and -not $script:ObservationPaused -and -not $script:ObservationStale -and $script:LastState.EndpointReady -eq $false -and $script:Profiles.Routing.Adapter -eq 'standalone'){$description='固定入口未就绪';$notice='固定入口不可用。请点击「统一切换」或使用程序代理启动入口检查并启动服务。恢复设置不会刷新已有应用缓存的代理地址。';$key='entry-unavailable'}
     $script:Tray.Text='FlowSwitch '+$script:ProductVersion+' · '+$description
     if($notice -and $key -ne $script:LastLifecycleNotice){
         $script:LastLifecycleNotice=$key;Write-Activity $notice
@@ -1028,12 +1278,17 @@ $timer.Add_Tick({
                         if($reply.Discovery.Added -or $reply.Kind -eq 'Discover'){Write-Activity ('检测到 '+$reply.Discovery.Detected+' 个入口，新增 '+$reply.Discovery.Added+' 个代理。网络设置未更改。')}
                     }
                 }
-                if($reply.Kind -in @('Switch','Restore','AppRoute','ManagedAppRoute','ProgramAccessApply','QtAccessApply')){$script:ChoiceDirty=$false}
+                if($reply.Kind -in @('Switch','Restore','DailyApply','DailyUndoApply','AppRoute','ManagedAppRoute','ProgramAccessApply','QtAccessApply')){$script:ChoiceDirty=$false}
                 if($reply.State -and $reply.Apps){$script:ObservationStale=$false;Show-State $reply.State;Show-Applications $reply.Apps}
                 elseif($reply.RefreshError){Mark-ObservationStale;Write-Activity $reply.RefreshError}
                 $script:CleanSession=$reply.CleanSession
                 if($reply.CleanSession -and $reply.CleanSession.Status){$notice=$reply.CleanSession.Status.Phase+'|'+$reply.CleanSession.Status.Message;if($notice -cne $script:LastCleanStartNotice){$script:LastCleanStartNotice=$notice;Write-Activity $reply.CleanSession.Status.Message}}
-                if($reply.Kind -eq 'CleanStartPlan'){Show-CleanStartDialog $reply.Result}
+                if($reply.Kind -eq 'StaleProxyScan'){Show-StaleProxyReport $reply.Result}
+                elseif($reply.Kind -eq 'StaleProxyLaunchPlan'){Show-StaleProxyLaunchPlan $reply.Result}
+                elseif($reply.Kind -eq 'StaleProxyLaunch'){Write-Activity $reply.Result.Message}
+                elseif($reply.Kind -eq 'DailyPlan'){Show-DailyProxyPlan $reply.Result}
+                elseif($reply.Kind -eq 'DailyUndoPlan'){Show-DailyProxyPlan $reply.Result $true}
+                elseif($reply.Kind -eq 'CleanStartPlan'){Show-CleanStartDialog $reply.Result}
                 elseif($reply.Kind -eq 'QtAccessPlan'){
                     $plan=$reply.Result;$script:DialogOpen=$true
                     try{
@@ -1063,6 +1318,11 @@ $timer.Add_Tick({
                     $plan=$reply.Result;$script:DialogOpen=$true
                     try{if([Windows.Forms.MessageBox]::Show($form,($plan.Message+"`r`n`r`n旧路径："+$plan.SavedPath+"`r`n新路径："+$plan.CurrentPath+"`r`n`r`n"+$plan.Impact),'修复程序记录','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='AppRepair';Key=($plan|ConvertTo-Json -Depth 12 -Compress)}}}finally{$script:DialogOpen=$false}
                 }
+                elseif($reply.Kind -eq 'ProgramSystemProxyPlan'){
+                    $plan=$reply.Result;$script:DialogOpen=$true
+                    try{if([Windows.Forms.MessageBox]::Show($form,($plan.Message+"`r`n`r`n"+$plan.Impact+"`r`n`r`n确认取消此程序已停用的专线记录，保留当前 Windows 系统代理？"),'使用当前系统代理','OKCancel','Information') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='ProgramSystemProxyApply';Key=($plan|ConvertTo-Json -Depth 16 -Compress)}}}finally{$script:DialogOpen=$false}
+                }
+                elseif($reply.Kind -in @('AppRepair','ProgramSystemProxyApply')){Write-Activity $reply.Result.Message;Select-ProgramAfterRecordChange $reply.Result.RepairedPath}
                 elseif($reply.Kind -eq 'AppReconnectPlan'){
                     $plan=$reply.Result;$number=@($plan.connections).Count
                     if(-not $number){Write-Activity '没有发现此 EXE 经过引擎的旧线路连接。未接管的连接和独立子程序不会被强制处理。'}
@@ -1071,7 +1331,8 @@ $timer.Add_Tick({
                         try{if([Windows.Forms.MessageBox]::Show($form,('将关闭「'+[IO.Path]::GetFileName($plan.path)+'」的 '+$number+' 条旧线路连接，让应用有机会重新连接。进行中的对话、下载或登录可能中断；不会退出应用，也不会关闭其他程序的连接。是否继续？'),'确认重连旧连接','OKCancel','Warning') -eq 'OK'){$script:PendingAction=[pscustomobject]@{Kind='AppReconnect';Key=($plan | ConvertTo-Json -Depth 6 -Compress)}}}finally{$script:DialogOpen=$false}
                     }
                 }
-                elseif($reply.Kind -eq 'NetworkDiagnose'){$script:NetworkDiagnosis=$reply.Result;Write-Activity $reply.Result.Message;Show-ToolResults}
+                elseif($reply.Kind -eq 'NetworkDiagnose'){$script:NetworkDiagnosis=$reply.Result;Write-Activity $reply.Result.Message;Show-NetworkDiagnosis $reply.Result}
+                elseif($reply.Kind -eq 'ProgramNetworkDiagnose'){$script:NetworkDiagnosis=$reply.Result.SystemDiagnosis;Write-Activity $reply.Result.Summary;Show-NetworkDiagnosis $reply.Result $reply.Result.Program.Path}
                 elseif($reply.Kind -eq 'NetworkRepair'){$script:NetworkDiagnosis=$reply.Result.Diagnosis;Write-Activity $reply.Result.Message;Show-ToolResults}
                 elseif($reply.Kind -eq 'LoginDiagnostic'){Write-Activity ('本次检测：当前系统代理入口。'+$reply.Result.Message+' 浏览器回调是否到达 IDE、IDE 账号是否登录成功尚未验证。');Show-ToolResults}
                 elseif($reply.Kind -eq 'Diagnose'){Write-Activity (Format-Diagnostics $reply.Result);Show-ToolResults}
@@ -1110,7 +1371,7 @@ $timer.Add_Tick({
         }
     }
     Invoke-PendingUiAction
-    if(-not $script:Worker -and -not $script:MenuOpen -and -not $script:DialogOpen -and $autoRefresh.Checked -and [DateTime]::Now -ge $script:NextPoll){Start-Work 'Status' ''}
+    Invoke-AutomaticUiRefresh
 })
 $form.Add_FormClosing({Invoke-FlowWindowClose $_})
 $form.Add_FormClosed({
@@ -1128,14 +1389,18 @@ foreach($nav in @(@('程序线路',0,300),@('代理入口',1,356),@('检查与�
 function Update-WorkspaceNavigation {
     foreach($n in $navigation){$n.Selected=([int]$n.Tag -eq $tabs.SelectedIndex);$n.Invalidate()}
     $brand.Text=$tabs.SelectedTab.Text
-    $tagline.Text=@('选中程序 → 设置线路 → 应用并检查，或按此线路打开。','先运行代理软件，再登记和检测它的入口。','先检查，再处理问题；每项操作都说明影响范围。','准备代理入口，再决定统一切换还是单独分流。')[$tabs.SelectedIndex]
+    $tagline.Text=@('先看实际连接；程序有问题时选中它进行排查。','先在客户端连接，再检测入口；登记不会切换网络。','先检查，再处理问题；每项操作都说明影响范围。','当前由谁管理、是否可用、下一步怎么做。')[$tabs.SelectedIndex]
 }
 function Set-UiActionAvailability {
     $busy=($script:Worker -and $script:Worker.Kind -ne 'Status')
     $app=$null;if($liveList.SelectedItems.Count){$app=$liveList.SelectedItems[0].Tag}
     $valid=($app -and $app.Path -and -not $app.RequiresRepair)
     $environmentStartItem.Enabled=($valid -and -not $busy)
-    $routeButton.Enabled=($valid -and -not $busy);$programMoreButton.Enabled=([bool]$app -and -not $busy);$detail.Enabled=([bool]$app -and -not $busy)
+    $canRepair=($app -and $app.RequiresRepair -and $app.CanRepair -and $app.SavedPath)
+    $routeButton.Text=$(if($app -and $app.RequiresRepair){'修复路径后改线…'}else{'设置此程序线路 ▾'})
+    $routeButton.Enabled=(($valid -or $canRepair) -and -not $busy);$programMoreButton.Enabled=([bool]$app -and -not $busy);$detail.Enabled=([bool]$app -and -not $busy)
+    $programDiagnoseButton.Enabled=([bool]$app.Path -and -not $busy);$programDiagnoseItem.Enabled=([bool]$app.Path -and -not $busy)
+    $programResidueButton.Enabled=([bool]$app.Path -and -not $busy)
     $running=($app -and (@($app.PIDs|Where-Object {$_}).Count -gt 0 -or [bool]$app.Running))
     $engineAction=($valid -and $app.Mode -eq 'engine' -and [bool]$app.Policy)
     $programLaunchButton.Text=$(if($engineAction){'应用线路并检查'}else{'按此线路打开'})
@@ -1145,7 +1410,7 @@ function Set-UiActionAvailability {
         $programSelectionLabel.Text=$app.Name+'  ·  '+[IO.Path]::GetFileName($app.Path)+'  ·  已保存：'+$(if($app.PolicyName){$app.PolicyName}else{Get-RouteName $app.Policy});$uiTips.SetToolTip($programSelectionLabel,$app.Path)
         $programStateLabel.Text=$(if($script:ObservationStale){'连接与规则观察已过期；请刷新后核验当前生效范围。'}else{'观察到的连接：'+$app.Actual+"`r`n"+'生效范围：'+$app.Status});$uiTips.SetToolTip($programStateLabel,$programStateLabel.Text)
         if($script:ObservationStale){$programHint.Text='上次观察不能确认当前线路。请刷新；执行设置或启动前仍会重新核验入口和程序身份。'}
-        elseif($app.RequiresRepair){$programHint.Text='程序路径已变化：请在「更多设置」修复路径记录，再更改线路。'}
+        elseif($app.RequiresRepair){$programHint.Text=$(if($canRepair){'程序升级后保存路径已变化：点击「修复路径后改线…」核对新路径。旧线路只是保存目标，当前使用看“实际连接”。'}else{'程序路径候选不唯一或无法核验：请在程序详情核对路径后重新添加；不会把旧线路写到未知程序。'})}
         elseif($engineAction -and $app.NeedsEntryConnection){$programHint.Text='系统入口绕过流向：已保存的线路尚未接管。点击「应用线路并检查」预览接入和整组规则，保留其他专线。'}
         elseif($engineAction){$programHint.Text='引擎规则程序：点击「应用线路并检查」核对入口并补齐已验证子进程；原快捷方式仍可使用。旧连接需重试或正常重开。'}
         elseif($running -and $app.CanLaunch){
@@ -1163,6 +1428,7 @@ function Set-UiActionAvailability {
     $networkRepairButton.Enabled=([bool]$script:NetworkDiagnosis.RepairAction -and -not $busy)
     $cleanStopButton.Enabled=([bool]$script:CleanSession -and -not $busy)
     $failoverItem.Enabled=($script:Profiles.Routing.Adapter -eq 'standalone' -and -not $busy)
+    Update-DailyProxyControls
 }
 $proxyList.Add_SelectedIndexChanged({Set-UiActionAvailability});$diagnosticChoice.Add_SelectedIndexChanged({Set-UiActionAvailability})
 $tabs.Add_SelectedIndexChanged({Update-WorkspaceNavigation;Set-UiActionAvailability})

@@ -150,7 +150,7 @@ function Wait-ManagedProgramIngressReady($Ingress,[int]$TimeoutMilliseconds=2000
                 }
             }
             if($healthy){
-                $probeDeadline=[DateTime]::UtcNow.AddSeconds(6);if($probeDeadline -gt $deadline){$probeDeadline=$deadline}
+                $probeDeadline=[DateTime]::UtcNow.AddSeconds(12);if($probeDeadline -gt $deadline){$probeDeadline=$deadline}
                 # Direct is an explicit policy, including local/domestic-only use. A
                 # foreign health site cannot veto that policy. The controller verifies
                 # loaded rules and exact owned ingress; no general Internet claim follows.
@@ -174,6 +174,7 @@ function Wait-ManagedProgramIngressReady($Ingress,[int]$TimeoutMilliseconds=2000
     throw '程序固定入口或出口尚未就绪，健康或转发状态未知；未启动程序。请在“检查与维护”检查服务及线路后重试。保存线路、后台服务和固定端口保持不变。'
 }
 function Set-UniversalProxy([string]$Key) {
+    if($script:Profiles.Routing.Adapter -eq 'none'){return Set-DailyProxy -Plan (Get-DailyProxyPlan -Key $Key) -Confirmed}
     Use-ChangeLock {
         Assert-ManagedRoute $Key
         if($script:Profiles.Routing.Adapter -ne 'standalone'){return Enable-IndependentGateway -OwnerPID $PID -InitialRoute $Key -UnifiedSwitch -AllowMigration}
