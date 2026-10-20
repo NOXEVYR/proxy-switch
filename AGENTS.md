@@ -1,4 +1,11 @@
-﻿# 3.10.1 旧代理残留检查（2026-10-20）
+﻿# 3.10.2 断网排查与恢复
+
+- NetworkDoctor 仅首页明确触发或 CLI -DiagnoseNetwork / -ProbeNetwork；后者才发固定探测。拓扑未知与客户端/内核缺失分开报告，未知不按关闭处理。
+- 客户端启动仅允许经文件身份核验的 Clash 同目录 GUI，120 秒计划绑定系统、环境、配置、启动偏好和进程；锁内复核。客户端已运行、TUN/Guard/自定义启动脚本或未知启动偏好均拒绝，不强制重启。
+- GUI 启动会按客户端自身设置接管，必须预览说明；启动成功不等于网络恢复。无后台循环拉起/争抢，不改客户端配置。系统恢复复用 DailyProxy 的预览/确认/备份。
+- 新模块懒加载，两个打包白名单与 Launcher 必需清单一致；Test-NetworkDoctor 和 Test-NetworkDoctorUI 纳入 Test-All。真实路由、重启、登录仍单独验收。
+
+# 3.10.1 旧代理残留检查（2026-10-20）
 
 - 仅主页或程序页明确点击「检查旧代理残留」，或 CLI `powershell ProxySwitch.ps1 -CheckProxyResidue [-Program <EXE路径>]`，才读取受支持 Chromium/Electron 与显式环境适配目标及已核验后台的代理摘要；不后台持续读取。根与成员均须排除已识别游戏/反作弊目录、Windows 系统目录及已登记代理客户端，未覆盖项保留未知；不得声称已识别所有游戏或代理软件。
 - `ProcessProxyEnvironment` 是显式诊断的只读 VM_READ 例外：仅查询身份、有限 PEB 指针及有界环境块，前后核验 PID、创建时间、路径、同用户/会话，只输出代理白名单摘要，不保存完整环境、凭据或命令行。一般 `ProcessInventory` 的有限查询规则不变，不回退到模块枚举或隐式 VM_READ。

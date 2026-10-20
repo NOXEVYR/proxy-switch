@@ -233,8 +233,9 @@ function Get-DailyProxyState($Status) {
     $next='切节点请到原客户端；需要更换已登记的客户端入口时再预览切换。'
     if($Status.Key -in (Get-ProfileKeys) -and $Status.EndpointReady -ne $true){
         $headline=if($Status.EndpointReady -eq $false){$owner+' 未连接'}else{'当前系统入口归属待确认'}
-        $detail='系统仍指向该入口，但尚未核验可用连接；不会自动启动任何引擎。';$next='请在原客户端连接后刷新，或运行只读诊断。'
+        $detail='系统仍指向该入口，但尚未核验可用连接；不会自动启动任何引擎。';$next='点击首页“开始断网排查”，确认客户端和内核状态，再按提示恢复。'
     }
+    if($Status.Key -eq 'Direct' -and $Status.EnvConflict){$headline='系统代理关闭，程序仍有代理设置';$detail='Windows 显示直连不代表后台程序没有代理。';$next='点击首页“开始断网排查”，先确认原客户端是否停止，不要先清理线路。'}
     if($Status.ApplicationProxyViews -and $Status.ApplicationProxyViews.Different){$headline='Windows 代理视图不一致';$detail=$Status.ApplicationProxyViews.Message;$next='在网络切换选择当前使用的代理并预览核对；也可在原客户端核对系统代理开关，再回目标应用检查。'}
     # UI summary is cheap and passive: CanUndo means the preview can be requested.
     # Fresh TCP, client topology and ownership checks belong to the worker's plan.

@@ -144,6 +144,10 @@ try{
     function Get-TcpObservationSnapshot {throw 'FORBIDDEN UI TCP query'}
     $cheapState=Get-DailyProxyState ([pscustomobject]@{Key='Clash';EndpointReady=$true})
     Check ($cheapState.CanUndo -and $cheapState.UndoReason -match '点击后') 'UI state must only offer read-only undo preview without network queries'
+    $stoppedState=Get-DailyProxyState ([pscustomobject]@{Key='Clash';EndpointReady=$false})
+    Check ($stoppedState.NextStep -match '开始断网排查') 'stopped entry directs user to guided diagnosis'
+    $offState=Get-DailyProxyState ([pscustomobject]@{Key='Direct';EnvConflict=$true})
+    Check ($offState.Headline -match '程序仍有代理设置' -and $offState.NextStep -match '不要先清理') 'disabled system proxy does not hide inherited proxy settings'
     Write-Output ('PASS DailyProxy: '+$script:checks+' checks; Windows and process writes were stubbed; receipt files only in '+$qa)
 }finally{
     # This unique fixture directory is the sole deletion target.

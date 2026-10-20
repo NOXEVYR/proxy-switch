@@ -148,10 +148,10 @@ $networkChoice.Add_SelectionChangeCommitted({$script:ChoiceDirty=$true;$noticeLa
 $unify=New-Button $switchActions '预览切换…' 0 0 146 38 {if($networkChoice.SelectedItem){Start-Work $(if($script:Profiles.Routing.Adapter -eq 'none'){'DailyPlan'}else{'Switch'}) $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}};$unify.Dock='Fill';$unify.Margin=New-Object Windows.Forms.Padding(0,4,12,0);$unify.Primary=$true;$switchActions.SetCellPosition($unify,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
 $undo=New-Button $switchActions '撤回上次切换…' 0 0 170 38 {Start-Work $(if($script:Profiles.Routing.Adapter -eq 'none'){'DailyUndoPlan'}else{'Restore'}) ''};$undo.Dock='Fill';$undo.Margin=New-Object Windows.Forms.Padding(0,4,0,0);$switchActions.SetCellPosition($undo,(New-Object Windows.Forms.TableLayoutPanelCellPosition(1,1)))
 $homeTasks=New-CardGrid $null;$homeGrid.Controls.Add($homeTasks,0,2)
-$null=New-TaskCard $homeTasks 0 0 '备用线路：先连接，再检测' '在代理客户端连接后，到入口列表检测。通过后再预览切换；当前线路可用时，无需重新应用。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
+$networkDoctorHomeButton=New-TaskCard $homeTasks 0 0 '断网了，从这里开始' '先判断客户端、内核和代理设置，再给出对应操作。不会把清理旧线路当成恢复网络。' '开始断网排查' {Start-Work 'DoctorScan' ''}
 $staleProxyHomeButton=New-TaskCard $homeTasks 1 0 '后台还在用旧代理？' '只读检查支持的程序与后台代理变量，区分失效入口、专用入口和未知。处理前先保存工作，不会强制退出程序。' '检查旧代理残留' {Start-Work 'StaleProxyScan' ''}
 $websiteButton=New-TaskCard $homeTasks 0 1 '高级功能：程序和网站分流' '独立入口用于专线和网站规则。普通切换无需启用；首次接入会先说明影响，再由你确认。' '设置网站例外…' {Start-Work 'WebsiteRules' ''}
-$null=New-TaskCard $homeTasks 1 1 '整机或后台经常断网？' '先检查当前入口与 HTTPS 通路，再按结果处理。撤回只针对仍属于流向上次切换的设置。' '检查当前网络' {$tabs.SelectedTab=$toolsPage;$toolsSections.SelectedIndex=0;Start-Work 'NetworkDiagnose' ''}
+$null=New-TaskCard $homeTasks 1 1 '备用线路：先连接，再检测' '备用代理客户端连接后，先检测入口，再回首页预览切换。保留仍可用的当前入口。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
 $programGrid=New-Grid $programPage 3 @(0,-1,0) -ProgramLayout;$programGrid.Padding=New-Object Windows.Forms.Padding(14)
 $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Fill';$toolbar.AutoSize=$true;$toolbar.AutoSizeMode='GrowAndShrink';$toolbar.WrapContents=$true;$toolbar.Margin=New-Object Windows.Forms.Padding(0,0,0,10);$programGrid.Controls.Add($toolbar,0,0)
 $searchLabel=New-Label $toolbar '搜索程序' 0 0 70 26 10;$searchLabel.Margin=New-Object Windows.Forms.Padding(0,6,4,0)
@@ -1049,6 +1049,10 @@ function Start-Work([string]$Kind,[string]$Key) {
             elseif($Automatic){try{$discovery=Sync-AutomaticProxyDiscovery $Cache $Cancellation}catch{$discoveryError=$_.Exception.Message}}
             if($Cancellation.IsCancellationRequested){return [pscustomobject]@{OK=$true;Cancelled=$true}}
             switch($Kind){
+                'DoctorScan'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Get-NetworkDoctorReport}
+                'DoctorProbe'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Get-NetworkDoctorReport -Probe}
+                'DoctorStartPlan'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Get-NetworkDoctorStartPlan $Key}
+                'DoctorStart'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Start-NetworkDoctorClient -Plan ($Key|ConvertFrom-Json) -Confirmed}
                 'StaleProxyScan'{. (Join-Path $Root 'StaleProxy.ps1');$result=Get-StaleProxyReport -Path $Key -Cancellation $Cancellation}
                 'StaleProxyLaunchPlan'{. (Join-Path $Root 'StaleProxy.ps1');$result=Get-StaleProxyLaunchPlan $Key}
                 'StaleProxyLaunch'{. (Join-Path $Root 'StaleProxy.ps1');$result=Start-StaleProxyProgram ($Key|ConvertFrom-Json) -Confirmed}
@@ -1283,7 +1287,10 @@ $timer.Add_Tick({
                 elseif($reply.RefreshError){Mark-ObservationStale;Write-Activity $reply.RefreshError}
                 $script:CleanSession=$reply.CleanSession
                 if($reply.CleanSession -and $reply.CleanSession.Status){$notice=$reply.CleanSession.Status.Phase+'|'+$reply.CleanSession.Status.Message;if($notice -cne $script:LastCleanStartNotice){$script:LastCleanStartNotice=$notice;Write-Activity $reply.CleanSession.Status.Message}}
-                if($reply.Kind -eq 'StaleProxyScan'){Show-StaleProxyReport $reply.Result}
+                if($reply.Kind -in @('DoctorScan','DoctorProbe')){. (Join-Path $PSScriptRoot 'NetworkDoctorUI.ps1');Show-NetworkDoctorReport $reply.Result}
+                elseif($reply.Kind -eq 'DoctorStartPlan'){. (Join-Path $PSScriptRoot 'NetworkDoctorUI.ps1');Show-NetworkDoctorStartPlan $reply.Result}
+                elseif($reply.Kind -eq 'DoctorStart'){Write-Activity $reply.Result.Message;$script:PendingAction=[pscustomobject]@{Kind='DoctorScan';Key=''}}
+                elseif($reply.Kind -eq 'StaleProxyScan'){Show-StaleProxyReport $reply.Result}
                 elseif($reply.Kind -eq 'StaleProxyLaunchPlan'){Show-StaleProxyLaunchPlan $reply.Result}
                 elseif($reply.Kind -eq 'StaleProxyLaunch'){Write-Activity $reply.Result.Message}
                 elseif($reply.Kind -eq 'DailyPlan'){Show-DailyProxyPlan $reply.Result}

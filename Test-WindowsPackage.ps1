@@ -17,7 +17,7 @@ function Check($Value,$Message){if(-not $Value){throw $Message};$script:Pass++}
 $packageManifest=@(Get-Content -LiteralPath (Join-Path $relocated 'manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json)
 Check ($packageManifest.path -notcontains 'manifest.json' -and $packageManifest.path -notcontains 'update-install.json') 'Manifest excludes its own hash and installation registration.'
 foreach($required in @('app/SmartPatrol.ps1','智能体检.cmd','智能体检-使用说明.md')){Check ($packageManifest.path -contains $required -and (Test-Path -LiteralPath (Join-Path $relocated $required))) ('Patrol delivered and registered: '+$required)}
-foreach($required in @('app/ProcessProxyEnvironment.cs','app/ProcessProxyEnvironment.ps1','app/StaleProxy.ps1')){Check ($packageManifest.path -contains $required -and (Test-Path -LiteralPath (Join-Path $relocated $required))) ('Residue diagnostic delivered and registered: '+$required)}
+foreach($required in @('app/NetworkDoctor.ps1','app/NetworkDoctorUI.ps1','app/ProcessProxyEnvironment.cs','app/ProcessProxyEnvironment.ps1','app/StaleProxy.ps1')){Check ($packageManifest.path -contains $required -and (Test-Path -LiteralPath (Join-Path $relocated $required))) ('Residue diagnostic delivered and registered: '+$required)}
 . (Join-Path $relocated 'app/SmartPatrol.ps1') -Library
 $patrolPlan=Get-SmartPatrolLaunchPlan -DataDirectory $dataRoot -ScriptPath (Join-Path $relocated 'app/SmartPatrol.ps1')
 Check ($patrolPlan.Arguments.Contains('"'+$dataRoot+'"') -and $patrolPlan.Arguments -notmatch '-Fix') 'Relocated package patrol uses explicit data directory and defaults read-only.'
@@ -80,7 +80,7 @@ try{
 $dependency=Join-Path $relocated 'app\Storage.ps1';$held=$dependency+'.held'
 [IO.File]::Move($dependency,$held)
 try{$missing=Invoke-Fixture '--verify';Check ($missing.Code -ne 0 -and $missing.Error -match 'Storage.ps1') 'Incomplete package was accepted.'}finally{[IO.File]::Move($held,$dependency)}
-foreach($name in @('ProcessProxyEnvironment.cs','ProcessProxyEnvironment.ps1','StaleProxy.ps1')){
+foreach($name in @('NetworkDoctor.ps1','NetworkDoctorUI.ps1','ProcessProxyEnvironment.cs','ProcessProxyEnvironment.ps1','StaleProxy.ps1')){
     $dependency=Join-Path $relocated ('app/'+$name);$held=$dependency+'.held'
     [IO.File]::Move($dependency,$held)
     try{$missing=Invoke-Fixture '--verify';Check ($missing.Code -ne 0 -and $missing.Error.Contains($name)) ('Missing residue module accepted: '+$name)}finally{[IO.File]::Move($held,$dependency)}

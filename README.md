@@ -1,4 +1,25 @@
-﻿# 流向 FlowSwitch：Windows 3.10.1 可选预览
+# 流向 FlowSwitch：Windows 3.10.2 可选预览
+
+**3.10.2 发布候选：新增首页「开始断网排查」，稳定更新通道保持 3.9.6。** 先区分客户端未启动、内核停止、入口异常、设置不一致与请求失败，再按结果提供启动或恢复设置的预览。保留 3.10.1 的旧代理残留检查和日常切换；打开或刷新不会重新接管网络。
+
+**新手从这里开始：[三套日常与断网操作方案](BEGINNER_GUIDE.md)**。包括沿用当前可用代理、切换已核验备用入口、按症状排查，以及目标程序排查和五分钟只读练习。
+
+[3.10.2 发布入口](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.2-preview.1) · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/FlowSwitch-v3.10.2-Windows-x64.zip) · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/FlowSwitch-v3.10.2-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/SHA256SUMS.txt) · [源码与包对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/BUILD.txt)
+
+发布前此处为候选链接；发布是否完成、冻结提交和包摘要以实际 Release 与 BUILD.txt 为准。Windows 包完整解压后使用 FlowSwitch.exe，保留 app 文件夹；不会自动替换正在使用的旧安装。
+
+- 多个软件断网：网络切换 → 开始断网排查 → 阅读结论 → 按可用按钮预览启动/恢复 → 重新排查和检测 HTTPS → 回实际软件验证。
+- 只有一个软件出错：程序线路 → 选中准确程序 → 排查此程序网络；怀疑旧环境再点检查旧代理残留。正在运行的程序不会被强制结束。
+- 当前入口正常：按本轮检测与目标软件的实际结果保持现状，无需反复应用，也无需启动独立入口。
+- 需要备用代理：先在原客户端连接，再检测可核验的本地 HTTP 入口，通过后才预览日常切换。原客户端连接或切换可能影响已有连接；真实 VPN 隧道与账号请求需分别验证。
+
+受控启动只支持经精确文件摘要核验的稳定 Clash Verge 2.5.8 GUI，且需满足已停止、启动配置可读、未启用 TUN/守卫/自定义脚本等条件。其他构建仍可诊断，但需在原客户端手动处理。固定探测、端口监听与真实账号/模型消息是不同验收层；**真实重启和长期在线尚待验收**。
+
+云端候选补齐了两个新诊断 CLI 的初始化失败分支：遇到配置/组件加载失败，返回非零错误并写脱敏本地报告，不再等待 GUI 弹窗。此修正不主动重启或替换本机旧进程。产品验证与历史记录见 [TEST_REPORT.md](TEST_REPORT.md)；完整功能见 [USER_GUIDE.md](USER_GUIDE.md)。
+
+## 保留的 3.10.1 发布记录
+
+# 流向 FlowSwitch：Windows 3.10.1 可选预览
 
 **3.10.1 已发布为 `v3.10.1-preview.1` 可选预览，稳定更新通道保留 3.9.6。** 3.10.1 加入旧代理残留检查，并保留 3.10.0 日常代理管理。日常模式显示当前管理方和 Windows 代理视图分歧，通过预览切换已登记的本机 HTTP 入口；保留程序规则，不自动启动独立网关。已登记的代理客户端提供可核验本地 HTTP 入口后，可按需预览选择。它管理你已有的代理，不提供 VPN 服务、订阅或节点。
 

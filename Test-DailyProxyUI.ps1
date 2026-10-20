@@ -47,6 +47,9 @@ $checks=@'
         Check-DailyUI ($switchScope.Text -match '保留程序专线') 'daily scope retains per-program routes'
         foreach($control in @($networkChoice,$unify,$undo,$switchScope)){Check-DailyVisible $control}
         $homePage.AutoScrollPosition=New-Object Drawing.Point(0,0);Save-DailyUI 'daily-clash-home'
+        $state.EndpointReady=$false;Show-State $state;Check-DailyUI ($noticeLabel.Text -match '开始断网排查') 'stopped entry has direct recovery guidance'
+        $state.EndpointReady=$true;$state.Key='Direct';$state.EnvConflict=$true;Show-State $state;Check-DailyUI ($statusLabel.Text -match '程序仍有代理设置') 'system-off plus environment conflict is visible at home'
+        $state.Key='dailyClash';$state.EnvConflict=$false;Show-State $state
         $networkChoice.SelectedIndex=@($networkChoice.Items|ForEach-Object Id).IndexOf('dailyAlternate');$script:ChoiceDirty=$true;Update-DailyProxyControls
         Check-DailyUI ($switchScope.Text -match 'VPN.*尚未提供可用入口' -and $switchScope.Text -match '当前网络保持不变') 'offline alternate proxy explains prerequisites'
         Check-DailyUI ($statusLabel.Text -eq '当前系统代理由 Clash 管理') 'pending target never becomes current manager'
@@ -61,7 +64,7 @@ $checks=@'
         Check-DailyVisible $undo;$undo.PerformClick();Check-DailyUI ($script:DailyRequest.Kind -eq 'DailyUndoPlan') 'undo button previews daily receipt'
         $homePage.AutoScrollPosition=New-Object Drawing.Point(0,0);Save-DailyUI 'daily-alternate-pending'
         $state.EndpointReady=$null;Show-State $state
-        Check-DailyUI ($statusLabel.Text -match '待确认' -and $noticeLabel.Text -match '只读诊断') 'unknown entry is not declared disconnected'
+        Check-DailyUI ($statusLabel.Text -match '待确认' -and $noticeLabel.Text -match '开始断网排查') 'unknown entry is not declared disconnected'
         $state.EndpointReady=$false;Show-State $state
         Check-DailyUI ($statusLabel.Text -match '未连接' -and $noticeLabel.Text -notmatch '重新应用|独立入口') 'dead current entry gives actionable client guidance'
         $state.Key='Direct';$state.NetworkKey='Direct';$state.NetworkName='直连';$state.EndpointReady=$true
