@@ -40,6 +40,15 @@ $manifest=Get-Content -LiteralPath (Join-Path $relocated 'manifest.json') -Raw -
 $valid=$true
 foreach($item in $manifest){$file=Join-Path $relocated $item.path;if((Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant() -ne $item.sha256 -or (Get-Item -LiteralPath $file).Length -ne $item.bytes){$valid=$false}}
 Check $valid 'Program package manifest mismatch.'
+# Published content must be independent of the builder's private home and settings.
+$publicFiles=@(Get-ChildItem -LiteralPath $relocated -Recurse -File|Where-Object {$_.Extension -in @('.ps1','.cjs','.cs','.json','.md','.txt','.cmd')})
+$hasPrivateHome=$false
+foreach($publicFile in $publicFiles){
+    if([IO.File]::ReadAllText($publicFile.FullName) -match '(?i)[a-z]:[\\/]Users[\\/](?!<|Public[\\/]|Default[\\/])[^\\/<>*\r\n]+[\\/]'){$hasPrivateHome=$true;break}
+}
+Check (-not $hasPrivateHome) 'Published text must not contain an absolute private Windows user directory.'
+$defaults=[IO.File]::ReadAllText((Join-Path $relocated 'app\config.defaults.json'))|ConvertFrom-Json
+Check (@($defaults.Profiles).Count -eq 0 -and $defaults.Routing.Adapter -ceq 'none' -and [string]::IsNullOrEmpty($defaults.Routing.ProfileId)) 'Published defaults must not contain a builder proxy profile or preselected routing owner.'
 Check ((Get-ChildItem -LiteralPath $relocated -Recurse -File).Count -eq ($manifest.Count+2)) 'Unexpected file in program package.'
 $productVersion=[regex]::Match([IO.File]::ReadAllText((Join-Path $relocated 'app\Preferences.ps1')),"ProductVersion='([0-9.]+)'").Groups[1].Value
 $registration=Get-Content -LiteralPath (Join-Path $relocated 'update-install.json') -Raw -Encoding UTF8|ConvertFrom-Json

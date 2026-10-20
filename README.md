@@ -1,10 +1,10 @@
 # 流向 FlowSwitch：Windows 3.10.2 可选预览
 
-**3.10.2 已发布为 `v3.10.2-preview.1` 可选预览：新增首页「开始断网排查」，稳定更新通道保持 3.9.6。** 先区分客户端未启动、内核停止、入口异常、设置不一致与请求失败，再按结果提供启动或恢复设置的预览。保留 3.10.1 的旧代理残留检查和日常切换；打开或刷新不会重新接管网络。
+**3.10.2 的 `v3.10.2-preview.2` 为通用文案修订，应用版本保持 3.10.2，稳定更新通道保持 3.9.6。** 新手说明按当前检测结果选择方案，统一界面与历史文档的操作及验收边界；网络行为、身份核验和默认配置保持原有约定。首页「开始断网排查」区分客户端、内核、入口、设置与请求问题，再按结果提供预览。
 
 **新手从这里开始：[三套日常与断网操作方案](BEGINNER_GUIDE.md)**。包括沿用当前可用代理、切换已核验备用入口、按症状排查，以及目标程序排查和五分钟只读练习。
 
-[3.10.2 发布入口](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.2-preview.1) · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/FlowSwitch-v3.10.2-Windows-x64.zip) · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/FlowSwitch-v3.10.2-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/SHA256SUMS.txt) · [源码与包对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/BUILD.txt)
+[3.10.2 发布入口](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.2-preview.2) · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.2/FlowSwitch-v3.10.2-Windows-x64.zip) · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.2/FlowSwitch-v3.10.2-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.2/SHA256SUMS.txt) · [源码与包对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.2/BUILD.txt)
 
 本修订的发布状态、固定源码提交和附件摘要以发布页及 BUILD.txt 为准；历史附件的校验结果不替代本次重建检查。Windows 包完整解压后使用 FlowSwitch.exe，并保留 app 文件夹。
 
@@ -54,7 +54,7 @@
 
 适配只覆盖遵守这些设置的 Qt 网页组件流量；不能保证原生网络、UDP/QUIC、独立后台服务或 VPN 隧道都走同一出口。旧进程不会被自动结束。出现 Windows 740 时提示用户自行决定是否以管理员权限重开流向，不自动提权。
 
-已完成完整静态/隔离回归、真实隔离内核直连/B/A切换、Windows 包19项成品检查。**真实 Qt 游戏登录、OAuth 登录回传、目标程序请求发送与长期在线仍需目标电脑验收。** 第三方 hosts、绕过表及补丁不属于本版适配或验收依据。发布说明见 [3.9.7 预览记录](.github/release-notes-3.9.7-preview.1.md)，最新验收补充见 [验证记录](TEST_REPORT.md)。
+已完成完整静态/隔离回归、真实隔离内核直连/B/A切换、Windows 包19项成品检查。**真实 Qt 游戏登录、OAuth 登录回传与目标程序请求发送与长期在线仍需目标电脑验收。** 第三方 hosts、绕过表及补丁不属于本版适配或验收依据。发布说明见 [3.9.7 预览记录](.github/release-notes-3.9.7-preview.1.md)，最新验收补充见 [验证记录](TEST_REPORT.md)。
 
 下方保留稳定版的功能、使用方法和下载入口。冻结源码ZIP内 README/TEST_REPORT 保留打包时的早期记录；发布后的版本状态与后续验收以本页、固定提交及 BUILD.txt 为准，程序代码内容与测试完成的冻结版本保持一致；部分未修改代码文件保留GitHub原换行格式，详见BUILD.txt。
 
@@ -70,7 +70,7 @@
 
 3.9.4 同时补齐多代理环境冲突、失效用户变量修复、停止前等价入口引用保护及托管冷启动检查。选中程序后用「按此线路打开」核验自己的入口与出口；上游失效时保留服务和配置并提示换线，不把窗口打开当作网络恢复。多轮独立检查和验收范围见 [验证记录](TEST_REPORT.md)。
 
-> 3.9.3 整体维护：统一恢复判断、保留自动代理模式、区分线路提交与观察失败，并改善入口就绪等待。Gemini 真实对话发送与跨电脑长期使用仍需实测，详见验收记录。
+> 3.9.3 整体维护：统一恢复判断、保留自动代理模式、区分线路提交与观察失败，并改善入口就绪等待。目标程序实际请求与跨电脑长期使用仍需实测，详见验收记录。
 
 > 已包含 3.9.1 启动入口改进：程序选线不再自动绑定桌面入口。在「程序线路」选中程序，打开「更多设置 ▾ → 启动与桌面入口 → 启动方式与桌面绑定…」：可以只在流向内按此线路打开、另建独立代理图标，或明确绑定原桌面入口；解除绑定保留线路和正在运行的程序。自动发现按当前配置排除自有网关及程序入口，保留已有忽略设置。3.9.3 同时包含列表滚动、选择与焦点保持修复。
 
