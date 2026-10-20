@@ -1,12 +1,12 @@
 # 流向 FlowSwitch：Windows 3.10.2 可选预览
 
-**3.10.2 发布候选：新增首页「开始断网排查」，稳定更新通道保持 3.9.6。** 先区分客户端未启动、内核停止、入口异常、设置不一致与请求失败，再按结果提供启动或恢复设置的预览。保留 3.10.1 的旧代理残留检查和日常切换；打开或刷新不会重新接管网络。
+**3.10.2 已发布为 `v3.10.2-preview.1` 可选预览：新增首页「开始断网排查」，稳定更新通道保持 3.9.6。** 先区分客户端未启动、内核停止、入口异常、设置不一致与请求失败，再按结果提供启动或恢复设置的预览。保留 3.10.1 的旧代理残留检查和日常切换；打开或刷新不会重新接管网络。
 
 **新手从这里开始：[三套日常与断网操作方案](BEGINNER_GUIDE.md)**。包括沿用当前可用代理、切换已核验备用入口、按症状排查，以及目标程序排查和五分钟只读练习。
 
 [3.10.2 发布入口](https://github.com/NOXEVYR/proxy-switch/releases/tag/v3.10.2-preview.1) · [Windows x64 程序包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/FlowSwitch-v3.10.2-Windows-x64.zip) · [源码包](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/FlowSwitch-v3.10.2-Windows-Source.zip) · [SHA-256](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/SHA256SUMS.txt) · [源码与包对应](https://github.com/NOXEVYR/proxy-switch/releases/download/v3.10.2-preview.1/BUILD.txt)
 
-发布前此处为候选链接；发布是否完成、冻结提交和包摘要以实际 Release 与 BUILD.txt 为准。Windows 包完整解压后使用 FlowSwitch.exe，保留 app 文件夹；不会自动替换正在使用的旧安装。
+本修订的发布状态、固定源码提交和附件摘要以发布页及 BUILD.txt 为准；历史附件的校验结果不替代本次重建检查。Windows 包完整解压后使用 FlowSwitch.exe，并保留 app 文件夹。
 
 - 多个软件断网：网络切换 → 开始断网排查 → 阅读结论 → 按可用按钮预览启动/恢复 → 重新排查和检测 HTTPS → 回实际软件验证。
 - 只有一个软件出错：程序线路 → 选中准确程序 → 排查此程序网络；怀疑旧环境再点检查旧代理残留。正在运行的程序不会被强制结束。
