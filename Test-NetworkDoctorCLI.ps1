@@ -8,7 +8,7 @@ $utf8=New-Object Text.UTF8Encoding($true)
 [IO.File]::WriteAllText((Join-Path $fixture 'ProxyBackend.ps1'),"throw 'PRIVATE-initialization-fixture'",$utf8)
 $shell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $checks=0
-foreach($mode in @('DiagnoseNetwork','ProbeNetwork')){
+foreach($mode in @('DiagnoseNetwork','ProbeNetwork','RecoveryDiagnostic','RecoveryProbe','ResetProxy')){
     $data=Join-Path $fixture $mode
     [void][IO.Directory]::CreateDirectory($data)
     $config=Join-Path $data 'config.json'

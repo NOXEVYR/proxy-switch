@@ -1,4 +1,4 @@
-﻿param([string]$DataDirectory='')
+﻿param([string]$DataDirectory='',[switch]$RecoveryMode)
 $ErrorActionPreference = 'Stop'
 $script:Root = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'Preferences.ps1') -DataDirectory $DataDirectory
@@ -11,7 +11,13 @@ $script:Root = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'IndependentGateway.ps1')
 . (Join-Path $PSScriptRoot 'NetworkDiagnostics.ps1')
 . (Join-Path $PSScriptRoot 'ExternalMihomoObservation.ps1')
-$script:Profiles = Read-ProfileSettings
+$script:RecoveryConfigurationUnavailable=$false
+try{$script:Profiles = Read-ProfileSettings}catch{
+    if(-not $RecoveryMode){throw}
+    # Explicit recovery can inspect/reset Windows without replacing broken local registration.
+    $script:RecoveryConfigurationUnavailable=$true
+    $script:Profiles=[pscustomobject]@{Version=3;Profiles=@();Routing=[pscustomobject]@{Adapter='none';ProfileId='';UnifiedMode='system'};DiscoveryIgnored=@()}
+}
 $script:StatePath = Join-Path $script:DataRoot 'selection.json'
 $script:BackupDir = Join-Path $script:DataRoot 'backups'
 $script:ProxyNames = @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY')
@@ -26,6 +32,7 @@ namespace LocalProxySwitch {
         public int Flags;
         public string Server;
         public string Bypass;
+        public string AutoConfigUrl;
     }
     public static class Native {
         [DllImport("kernel32.dll", SetLastError=true)]
@@ -64,14 +71,14 @@ namespace LocalProxySwitch {
         private static extern IntPtr GlobalFree(IntPtr memory);
         public static Snapshot Read() {
             int step = Marshal.SizeOf(typeof(Option));
-            IntPtr memory = Marshal.AllocHGlobal(step * 3);
+            IntPtr memory = Marshal.AllocHGlobal(step * 4);
             try {
-                for (int i=0; i<3; i++) {
+                for (int i=0; i<4; i++) {
                     Option item = new Option(); item.Id = i+1;
                     Marshal.StructureToPtr(item, IntPtr.Add(memory, i*step), false);
                 }
                 OptionList list = new OptionList();
-                list.Size = Marshal.SizeOf(typeof(OptionList)); list.Count=3; list.Options=memory;
+                list.Size = Marshal.SizeOf(typeof(OptionList)); list.Count=4; list.Options=memory;
                 int size=list.Size;
                 if (!Query(IntPtr.Zero,75,ref list,ref size)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 Option flags=(Option)Marshal.PtrToStructure(memory,typeof(Option));
@@ -80,9 +87,11 @@ namespace LocalProxySwitch {
                 Snapshot result=new Snapshot(); result.Flags=flags.Data.Number;
                 result.Server=Marshal.PtrToStringUni(server.Data.Text) ?? "";
                 result.Bypass=Marshal.PtrToStringUni(bypass.Data.Text) ?? "";
+                Option pac=(Option)Marshal.PtrToStructure(IntPtr.Add(memory,step*3),typeof(Option));
+                result.AutoConfigUrl=Marshal.PtrToStringUni(pac.Data.Text) ?? "";
                 return result;
             } finally {
-                for(int i=1;i<3;i++) {
+                for(int i=1;i<4;i++) {
                     Option item=(Option)Marshal.PtrToStructure(IntPtr.Add(memory,i*step),typeof(Option));
                     if(item.Data.Text!=IntPtr.Zero) GlobalFree(item.Data.Text);
                 }
@@ -90,9 +99,16 @@ namespace LocalProxySwitch {
             }
         }
         public static void Write(int flags,string server,string bypass) {
+            WriteOptions(flags,server,bypass,null,false);
+        }
+        public static void WriteFull(int flags,string server,string bypass,string pac) {
+            WriteOptions(flags,server,bypass,pac,true);
+        }
+        private static void WriteOptions(int flags,string server,string bypass,string pac,bool includePac) {
+            int count=includePac ? 4 : 3;
             int step=Marshal.SizeOf(typeof(Option));
-            IntPtr memory=Marshal.AllocHGlobal(step*3);
-            IntPtr serverText=IntPtr.Zero; IntPtr bypassText=IntPtr.Zero;
+            IntPtr memory=Marshal.AllocHGlobal(step*count);
+            IntPtr serverText=IntPtr.Zero; IntPtr bypassText=IntPtr.Zero; IntPtr pacText=IntPtr.Zero;
             try {
                 serverText=Marshal.StringToHGlobalUni(server ?? "");
                 bypassText=Marshal.StringToHGlobalUni(bypass ?? "");
@@ -102,14 +118,20 @@ namespace LocalProxySwitch {
                 Marshal.StructureToPtr(a,memory,false);
                 Marshal.StructureToPtr(b,IntPtr.Add(memory,step),false);
                 Marshal.StructureToPtr(c,IntPtr.Add(memory,step*2),false);
+                if(includePac) {
+                    pacText=Marshal.StringToHGlobalUni(pac ?? "");
+                    Option d=new Option(); d.Id=4; d.Data.Text=pacText;
+                    Marshal.StructureToPtr(d,IntPtr.Add(memory,step*3),false);
+                }
                 OptionList list=new OptionList(); list.Size=Marshal.SizeOf(typeof(OptionList));
-                list.Count=3; list.Options=memory;
+                list.Count=count; list.Options=memory;
                 if(!Set(IntPtr.Zero,75,ref list,list.Size)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 if(!Notify(IntPtr.Zero,95,IntPtr.Zero,0)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 if(!Notify(IntPtr.Zero,37,IntPtr.Zero,0)) throw new Win32Exception(Marshal.GetLastWin32Error());
             } finally {
                 if(serverText!=IntPtr.Zero) Marshal.FreeHGlobal(serverText);
                 if(bypassText!=IntPtr.Zero) Marshal.FreeHGlobal(bypassText);
+                if(pacText!=IntPtr.Zero) Marshal.FreeHGlobal(pacText);
                 Marshal.FreeHGlobal(memory);
             }
         }
@@ -131,7 +153,10 @@ function Get-Profile([string]$Key) {
 }
 
 function Get-SystemSnapshot { [LocalProxySwitch.Native]::Read() }
-function Set-SystemSnapshot($Snapshot) { [LocalProxySwitch.Native]::Write([int]$Snapshot.Flags,[string]$Snapshot.Server,[string]$Snapshot.Bypass) }
+function Set-SystemSnapshot($Snapshot) {
+    if($Snapshot.PSObject.Properties['AutoConfigUrl']){[LocalProxySwitch.Native]::WriteFull([int]$Snapshot.Flags,[string]$Snapshot.Server,[string]$Snapshot.Bypass,[string]$Snapshot.AutoConfigUrl)}
+    else{[LocalProxySwitch.Native]::Write([int]$Snapshot.Flags,[string]$Snapshot.Server,[string]$Snapshot.Bypass)}
+}
 function Get-UserProxyEnv {
     $result = [ordered]@{}
     foreach ($name in $script:ProxyNames) { $result[$name] = [Environment]::GetEnvironmentVariable($name,'User') }
@@ -465,7 +490,11 @@ function Test-ProxyRoute([string]$Key,[switch]$Fast) {
 function Write-OperationProgress([string]$Message) {
     if($script:OperationProgress){$script:OperationProgress.Enqueue($Message)}
 }
-function Test-SameSnapshot($A,$B) { ($A.Flags -eq $B.Flags -and $A.Server -eq $B.Server -and $A.Bypass -eq $B.Bypass) }
+function Test-SameSnapshot($A,$B) {
+    if(-not $A -or -not $B){return $false}
+    $pacSame=if($A.PSObject.Properties['AutoConfigUrl'] -and $B.PSObject.Properties['AutoConfigUrl']){[string]$A.AutoConfigUrl -ceq [string]$B.AutoConfigUrl}else{$true}
+    ($A.Flags -eq $B.Flags -and $A.Server -eq $B.Server -and $A.Bypass -eq $B.Bypass -and $pacSame)
+}
 function Test-SameEnv($A,$B) {
     foreach ($name in $script:ProxyNames) { if ([string]$A.$name -cne [string]$B.$name) { return $false } }
     return $true

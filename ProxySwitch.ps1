@@ -3,6 +3,10 @@ param(
     [switch]$Status,
     [switch]$NetworkDiagnostic,
     [switch]$CheckProxyResidue,
+    [switch]$RecoveryDiagnostic,
+    [switch]$RecoveryProbe,
+    [switch]$ResetProxy,
+    [switch]$ConfirmReset,
     [switch]$DiagnoseNetwork,
     [switch]$ProbeNetwork,
     [switch]$LoginDiagnostic,
@@ -29,7 +33,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 try {
-    . (Join-Path $PSScriptRoot 'ProxyBackend.ps1') -DataDirectory $DataDirectory
+    . (Join-Path $PSScriptRoot 'ProxyBackend.ps1') -DataDirectory $DataDirectory -RecoveryMode:($RecoveryDiagnostic -or $RecoveryProbe -or $ResetProxy)
 } catch {
     # Initialization can fail before storage and logging helpers are available.
     # Never include raw JSON, command arguments or exception text in this record.
@@ -45,7 +49,7 @@ try {
             $notice+="`r`n本地报告："+$failurePath
         }
     }catch{}
-    if(-not $NoUI -and -not ($Status -or $NetworkDiagnostic -or $CheckProxyResidue -or $DiagnoseNetwork -or $ProbeNetwork -or $Check -or $Switch -or $AppStatus -or $ExportReport -or $SmokeTest -or $Independent -or $RecoverNetwork -or $ConfigureGateway -or $Discover -or $AppRoute -or $LoginDiagnostic -or $Restore)){
+    if(-not $NoUI -and -not ($Status -or $RecoveryDiagnostic -or $RecoveryProbe -or $ResetProxy -or $NetworkDiagnostic -or $CheckProxyResidue -or $DiagnoseNetwork -or $ProbeNetwork -or $Check -or $Switch -or $AppStatus -or $ExportReport -or $SmokeTest -or $Independent -or $RecoverNetwork -or $ConfigureGateway -or $Discover -or $AppRoute -or $LoginDiagnostic -or $Restore)){
         try{Add-Type -AssemblyName System.Windows.Forms;[void][Windows.Forms.MessageBox]::Show($notice,'流向启动失败','OK','Error')}catch{}
     }
     Write-Error $notice -ErrorAction Continue
@@ -69,6 +73,12 @@ if($LaunchProgram){
         if($NoUI){Write-Error $launchNotice -ErrorAction Continue;exit 1}
         Add-Type -AssemblyName System.Windows.Forms;[void][Windows.Forms.MessageBox]::Show($launchNotice,'程序代理启动','OK','Warning')
     }
+    return
+}
+if($RecoveryDiagnostic -or $RecoveryProbe -or $ResetProxy){
+    . (Join-Path $PSScriptRoot 'NetworkRecoveryAdmin.ps1');. (Join-Path $PSScriptRoot 'NetworkRecovery.ps1')
+    if($ResetProxy){$plan=Get-NetworkRecoveryPlan -Goal Direct;if($ConfirmReset){Invoke-NetworkRecoveryPlan -Plan $plan -Confirmed|ConvertTo-Json -Depth 12}else{$plan|Select-Object Kind,Goal,CanApply,NoChange,Message,Steps,Code|ConvertTo-Json -Depth 8}}
+    else{Get-NetworkRecoveryReport -Probe:$RecoveryProbe|ConvertTo-Json -Depth 12}
     return
 }
 if($DiagnoseNetwork -or $ProbeNetwork){. (Join-Path $PSScriptRoot 'NetworkDoctor.ps1');Get-NetworkDoctorReport -Probe:$ProbeNetwork | ConvertTo-Json -Depth 10;return}

@@ -148,10 +148,13 @@ $networkChoice.Add_SelectionChangeCommitted({$script:ChoiceDirty=$true;$noticeLa
 $unify=New-Button $switchActions '预览切换…' 0 0 146 38 {if($networkChoice.SelectedItem){Start-Work $(if($script:Profiles.Routing.Adapter -eq 'none'){'DailyPlan'}else{'Switch'}) $networkChoice.SelectedItem.Id}else{Write-Activity '请先选择目标线路。'}};$unify.Dock='Fill';$unify.Margin=New-Object Windows.Forms.Padding(0,4,12,0);$unify.Primary=$true;$switchActions.SetCellPosition($unify,(New-Object Windows.Forms.TableLayoutPanelCellPosition(0,1)))
 $undo=New-Button $switchActions '撤回上次切换…' 0 0 170 38 {Start-Work $(if($script:Profiles.Routing.Adapter -eq 'none'){'DailyUndoPlan'}else{'Restore'}) ''};$undo.Dock='Fill';$undo.Margin=New-Object Windows.Forms.Padding(0,4,0,0);$switchActions.SetCellPosition($undo,(New-Object Windows.Forms.TableLayoutPanelCellPosition(1,1)))
 $homeTasks=New-CardGrid $null;$homeGrid.Controls.Add($homeTasks,0,2)
-$networkDoctorHomeButton=New-TaskCard $homeTasks 0 0 '断网了，从这里开始' '先判断客户端、内核和代理设置，再给出对应操作。不会把清理旧线路当成恢复网络。' '开始断网排查' {Start-Work 'DoctorScan' ''}
-$staleProxyHomeButton=New-TaskCard $homeTasks 1 0 '后台还在用旧代理？' '只读检查支持的程序与后台代理变量，区分失效入口、专用入口和未知。处理前先保存工作，不会强制退出程序。' '检查旧代理残留' {Start-Work 'StaleProxyScan' ''}
-$websiteButton=New-TaskCard $homeTasks 0 1 '高级功能：程序和网站分流' '独立入口用于专线和网站规则。普通切换无需启用；首次接入会先说明影响，再由你确认。' '设置网站例外…' {Start-Work 'WebsiteRules' ''}
-$null=New-TaskCard $homeTasks 1 1 '备用线路：先连接，再检测' '备用代理客户端连接后，先检测入口，再回首页预览切换。保留仍可用的当前入口。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
+$homeTasks.RowCount=3;[void]$homeTasks.RowStyles.Add((New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Absolute,210)))
+$networkDoctorHomeButton=New-TaskCard $homeTasks 0 0 '断网了，从这里开始' '统一检查系统代理、变量、代理通路与隧道证据；分步骤恢复，并显示每一步的结果。' '开始断网排查' {Start-Work 'RecoveryScan' ''}
+$resetProxyHomeButton=New-TaskCard $homeTasks 1 0 '重置代理／恢复普通上网' '代理卸载、卡死或强制退出后，先预览要重置的设置。离线可用，先备份，需要管理员权限时会提示。' '重置代理…' {Start-Work 'RecoveryDirectPlan' ''}
+$staleProxyHomeButton=New-TaskCard $homeTasks 0 1 '后台还在用旧代理？' '只读检查支持的程序与后台代理变量，区分失效入口、专用入口和未知。处理前先保存工作，不会强制退出程序。' '检查旧代理残留' {Start-Work 'StaleProxyScan' ''}
+$websiteButton=New-TaskCard $homeTasks 0 2 '高级功能：程序和网站分流' '独立入口用于专线和网站规则。普通切换无需启用；首次接入会先说明影响，再由你确认。' '设置网站例外…' {Start-Work 'WebsiteRules' ''}
+$null=New-TaskCard $homeTasks 1 2 '备用线路：先连接，再检测' '备用代理客户端连接后，先检测入口，再回首页预览切换。保留仍可用的当前入口。' '查看代理入口' {$tabs.SelectedTab=$proxyPage}
+$null=New-TaskCard $homeTasks 1 1 '恢复记录与撤回' '查看最近一次用户代理恢复的归属。原入口已卸载或停止时拒绝撤回到坏线路；机器级备份独立保留。' '查看撤回方案…' {Start-Work 'RecoveryUndoPlan' ''}
 $programGrid=New-Grid $programPage 3 @(0,-1,0) -ProgramLayout;$programGrid.Padding=New-Object Windows.Forms.Padding(14)
 $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Fill';$toolbar.AutoSize=$true;$toolbar.AutoSizeMode='GrowAndShrink';$toolbar.WrapContents=$true;$toolbar.Margin=New-Object Windows.Forms.Padding(0,0,0,10);$programGrid.Controls.Add($toolbar,0,0)
 $searchLabel=New-Label $toolbar '搜索程序' 0 0 70 26 10;$searchLabel.Margin=New-Object Windows.Forms.Padding(0,6,4,0)
@@ -1040,7 +1043,7 @@ function Start-Work([string]$Kind,[string]$Key) {
     $automatic=($Kind -eq 'Status' -and $autoDiscovery.Checked -and -not $SmokeTest -and (Test-FlowWindowObservationActive))
     $code={param($Root,$Kind,$Key,$DataDirectory,$Scan,$Automatic,$Cache,$Progress,$Cancellation)
         $ErrorActionPreference='Stop'
-        try{. (Join-Path $Root 'ProxyBackend.ps1') -DataDirectory $DataDirectory}
+        try{. (Join-Path $Root 'ProxyBackend.ps1') -DataDirectory $DataDirectory -RecoveryMode:($Kind -like 'Recovery*')}
         catch{return [pscustomobject]@{OK=$false;Kind=$Kind;Stage='initialization';Error='流向无法读取当前配置或运行组件，未执行操作。请检查配置与程序包完整性；原设置未被重置。'}}
         $script:OperationProgress=$Progress
         $result=$null;$discovery=$null;$discoveryError=''
@@ -1048,7 +1051,17 @@ function Start-Work([string]$Kind,[string]$Key) {
             if($Scan){try{$discovery=Sync-LocalProxyDiscovery}catch{$discoveryError=$_.Exception.Message}}
             elseif($Automatic){try{$discovery=Sync-AutomaticProxyDiscovery $Cache $Cancellation}catch{$discoveryError=$_.Exception.Message}}
             if($Cancellation.IsCancellationRequested){return [pscustomobject]@{OK=$true;Cancelled=$true}}
+            if($Kind -like 'Recovery*'){. (Join-Path $Root 'NetworkRecoveryAdmin.ps1');. (Join-Path $Root 'NetworkRecovery.ps1')}
             switch($Kind){
+                'RecoveryScan'{$result=Get-NetworkRecoveryReport}
+                'RecoveryProbe'{$result=Get-NetworkRecoveryReport -Probe}
+                'RecoveryDirectPlan'{$result=Get-NetworkRecoveryPlan -Goal Direct}
+                'RecoveryProxyPlan'{$result=Get-NetworkRecoveryPlan -Goal Proxy -Key $Key}
+                'RecoveryApply'{$result=Invoke-NetworkRecoveryPlan -Plan ($Key|ConvertFrom-Json) -Confirmed}
+                'RecoveryUndoPlan'{$result=Get-NetworkRecoveryUndoPlan}
+                'RecoveryUndoApply'{$result=Restore-NetworkRecovery -Plan ($Key|ConvertFrom-Json) -Confirmed}
+                'RecoveryAdminPlan'{$result=Get-NetworkRecoveryAdminPlan}
+                'RecoveryAdminApply'{$result=Invoke-NetworkRecoveryAdminPlan -Plan ($Key|ConvertFrom-Json) -Confirmed}
                 'DoctorScan'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Get-NetworkDoctorReport}
                 'DoctorProbe'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Get-NetworkDoctorReport -Probe}
                 'DoctorStartPlan'{. (Join-Path $Root 'NetworkDoctor.ps1');$result=Get-NetworkDoctorStartPlan $Key}
@@ -1287,7 +1300,13 @@ $timer.Add_Tick({
                 elseif($reply.RefreshError){Mark-ObservationStale;Write-Activity $reply.RefreshError}
                 $script:CleanSession=$reply.CleanSession
                 if($reply.CleanSession -and $reply.CleanSession.Status){$notice=$reply.CleanSession.Status.Phase+'|'+$reply.CleanSession.Status.Message;if($notice -cne $script:LastCleanStartNotice){$script:LastCleanStartNotice=$notice;Write-Activity $reply.CleanSession.Status.Message}}
-                if($reply.Kind -in @('DoctorScan','DoctorProbe')){. (Join-Path $PSScriptRoot 'NetworkDoctorUI.ps1');Show-NetworkDoctorReport $reply.Result}
+                if($reply.Kind -like 'Recovery*'){. (Join-Path $PSScriptRoot 'NetworkRecoveryUI.ps1')}
+                if($reply.Kind -in @('RecoveryScan','RecoveryProbe')){Show-NetworkRecoveryReport $reply.Result}
+                elseif($reply.Kind -in @('RecoveryDirectPlan','RecoveryProxyPlan')){Show-NetworkRecoveryPlan $reply.Result}
+                elseif($reply.Kind -eq 'RecoveryUndoPlan'){Show-NetworkRecoveryPlan $reply.Result 'RecoveryUndoApply'}
+                elseif($reply.Kind -eq 'RecoveryAdminPlan'){Show-NetworkRecoveryPlan $reply.Result 'RecoveryAdminApply'}
+                elseif($reply.Kind -in @('RecoveryApply','RecoveryUndoApply','RecoveryAdminApply')){Complete-NetworkRecoveryUI $reply.Result}
+                elseif($reply.Kind -in @('DoctorScan','DoctorProbe')){. (Join-Path $PSScriptRoot 'NetworkDoctorUI.ps1');Show-NetworkDoctorReport $reply.Result}
                 elseif($reply.Kind -eq 'DoctorStartPlan'){. (Join-Path $PSScriptRoot 'NetworkDoctorUI.ps1');Show-NetworkDoctorStartPlan $reply.Result}
                 elseif($reply.Kind -eq 'DoctorStart'){Write-Activity $reply.Result.Message;$script:PendingAction=[pscustomobject]@{Kind='DoctorScan';Key=''}}
                 elseif($reply.Kind -eq 'StaleProxyScan'){Show-StaleProxyReport $reply.Result}

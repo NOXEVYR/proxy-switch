@@ -25,7 +25,7 @@ $checks=@'
         function Start-Work([string]$Kind,[string]$Key){$script:DoctorRequest=[pscustomobject]@{Kind=$Kind;Key=$Key}}
         $factor=[double]::Parse($env:FLOW_DOCTOR_UI_SCALE,[Globalization.CultureInfo]::InvariantCulture)
         $tabs.SelectedTab=$homePage;$networkDoctorHomeButton.PerformClick()
-        Check-Doctor ($script:DoctorRequest.Kind -eq 'DoctorScan' -and $script:DoctorRequest.Key -eq '') 'home dispatches local read-only diagnosis'
+        Check-Doctor ($script:DoctorRequest.Kind -eq 'RecoveryScan' -and $script:DoctorRequest.Key -eq '') 'home dispatches local read-only diagnosis'
         $fixture=[pscustomobject]@{Kind='NetworkDoctor';CheckedAt='12:30';State='ClientStopped';Headline='代理客户端未运行';Message='当前设置仍指向 Clash，但主程序和代理内核已停止；仅有服务进程不足以联网。';Steps=@('预览启动 Clash，保留其他程序。','客户端就绪后重新排查，再检测 HTTPS 通路。');Checks=@([pscustomobject]@{Name='WindowsProxy';State='Clash';Detail='系统与代理变量仍指向这个入口。'},[pscustomobject]@{Name='ClashCore';State='Stopped';Detail='没有可核验的监听入口。'});TargetKey='fixture-clash';CanStartClient=$true;CanApplyProxy=$false;CanProbe=$false;ClientPath='C:\Fixture\Clash\clash-verge.exe';Probe=$null}
         $dialog=New-NetworkDoctorDialog $fixture
         try{

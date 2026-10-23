@@ -74,8 +74,8 @@ $checks=@'
         }
         function Assert-TaskScrollAccess($Root,[string]$Context){
             foreach($grid in @(Get-UiTree $Root|Where-Object {$_.Visible -and $_.GetType().FullName -eq 'FlowSwitch.UI.TaskGrid'})){
-                $expectedRows=if($grid -eq $maintenanceCards){3}else{2}
-                $expectedCards=if($grid -eq $maintenanceCards){5}else{4}
+                $expectedRows=if($grid -eq $maintenanceCards -or $grid -eq $homeTasks){3}else{2}
+                $expectedCards=if($grid -eq $homeTasks){6}elseif($grid -eq $maintenanceCards){5}else{4}
                 Assert-Usability ($grid.AutoScroll -and $grid.ColumnCount -eq 2 -and $grid.RowCount -eq $expectedRows -and $grid.Controls.Count -eq $expectedCards) ($Context+' task grid provides two-column scroll access for every registered task')
                 $rowHeight=0;foreach($style in $grid.RowStyles){$rowHeight+=$style.Height}
                 Assert-Usability ($grid.AutoScrollMinSize.Height -ge $rowHeight+$grid.Padding.Vertical -or $rowHeight -le $grid.ClientSize.Height) ($Context+' scroll range includes every task row')
